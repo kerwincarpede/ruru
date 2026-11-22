@@ -33,6 +33,14 @@ Ruru connects to Frigate's unauthenticated port, usually 5000. Logging in to Fri
 
 Download the installer for your platform from the [latest release](https://github.com/kerwincarpede/ruru/releases/latest): `.msi` or `-setup.exe` for Windows, the universal `.dmg` for macOS, and `.AppImage`, `.deb` or `.rpm` for Linux. Ruru checks for a newer Stable release when it starts and asks before installing it.
 
+On Linux you can install the latest Stable release with one command. It uses the `.deb` on Debian and Ubuntu, the `.rpm` on Fedora and openSUSE, and the `.AppImage` anywhere else:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/kerwincarpede/ruru/main/install.sh | sh
+```
+
+Set `RURU_FORMAT` to `deb`, `rpm` or `appimage` to choose the installer, or `RURU_VERSION` (for example `0.1.2`) to install a specific release. The package installs ask for your password through `sudo`. The AppImage goes in `~/.local/bin` and needs no password.
+
 Each merge to `main` is also published as an **Edge** pre-release on the [releases page](https://github.com/kerwincarpede/ruru/releases). Edge builds are installed by hand.
 
 The installers are not signed with a paid certificate, so Windows SmartScreen and macOS Gatekeeper warn on first launch. On macOS, choose **Done**, then **Open Anyway** in **System Settings → Privacy & Security**.

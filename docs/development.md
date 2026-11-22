@@ -129,6 +129,8 @@ Release builds run the Build jobs in the `release` environment, which holds the 
 
 ## Releases
 
+`install.sh` at the repository root is the Linux one-line installer from the README. It reads the latest Stable release from the GitHub API (or the tag in `RURU_VERSION`) and picks the installer by matching the asset names above, so renaming the Linux installers means updating its patterns. Check it with `sh -n install.sh` and by running it in an Ubuntu container.
+
 Each non-docs push to `main`, such as a merged code pull request, is released as an Edge build: a [GitHub release](https://github.com/kerwincarpede/ruru/releases) of that commit, marked as a pre-release and never as the latest release, with the installers attached (`.msi` and `-setup.exe` for Windows, a universal `.dmg` for macOS, and `.AppImage`, `.deb` and `.rpm` for Linux). Edge builds are installed by hand. Installed copies update only to Stable releases, which are Edge releases promoted later with the same installers (see [Promoting to Stable](#promoting-to-stable)).
 
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) has three jobs:
