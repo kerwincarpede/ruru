@@ -4,7 +4,7 @@ import { emit } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { Camera } from "./app/frigate";
-import type { SavedLayout, Settings } from "./app/api";
+import { DEFAULT_WALL_OPTIONS, type SavedLayout, type Settings } from "./app/api";
 import { findUpdate } from "./app/updates";
 import { mockCommands, type CommandHandlers } from "./test/mockCommands";
 
@@ -13,7 +13,7 @@ vi.mock("./app/updates", () => ({ findUpdate: vi.fn() }));
 const findUpdateMock = vi.mocked(findUpdate);
 
 const URL_SAVED = "http://frigate:5000";
-const empty: Settings = { frigateUrl: null, fullScreen: false, layouts: {} };
+const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, layouts: {} };
 const connected: Settings = { ...empty, frigateUrl: URL_SAVED };
 const camera = (name: string): Camera => ({ name, enabled: true, mainStream: name, subStream: `${name}_sub` });
 const cameras = [camera("maingate"), camera("garage")];
@@ -31,6 +31,7 @@ function wall(handlers: CommandHandlers = {}) {
     get_settings: () => connected,
     frigate_cameras: () => cameras,
     save_layout: () => null,
+    save_wall_options: () => null,
     set_full_screen: () => null,
     ...handlers,
   });

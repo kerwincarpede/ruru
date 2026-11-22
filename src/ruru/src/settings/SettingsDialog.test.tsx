@@ -1,10 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import SettingsDialog from "./SettingsDialog";
-import type { Settings } from "../app/api";
+import { DEFAULT_WALL_OPTIONS, type Settings } from "../app/api";
 import { mockCommands } from "../test/mockCommands";
 
-const empty: Settings = { frigateUrl: null, fullScreen: false, layouts: {} };
+const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, layouts: {} };
 
 function open(settings = empty) {
   const onSaved = vi.fn();

@@ -4,7 +4,7 @@ import { appInfo, type AppInfo } from "./app/api";
 import { cameraLabel, type Camera } from "./app/frigate";
 import { isMac, shortcutFor } from "./app/keys";
 import Logo from "./app/Logo";
-import { frigateCameras, getSettings, onFullScreenChanged, onOpenSettings, saveLayout, setFullScreen, type SavedLayout, type Settings } from "./app/api";
+import { DEFAULT_WALL_OPTIONS, frigateCameras, getSettings, onFullScreenChanged, onOpenSettings, saveLayout, saveWallOptions, setFullScreen, type SavedLayout, type Settings } from "./app/api";
 import UpdatePrompt from "./app/UpdatePrompt";
 import { findUpdate, type AvailableUpdate } from "./app/updates";
 import SettingsDialog from "./settings/SettingsDialog";
@@ -15,7 +15,7 @@ import WallMenu, { type MenuItem } from "./wall/WallMenu";
 /** How long the toolbar stays after the pointer stops moving. */
 export const TOOLBAR_HIDE_MS = 2500;
 
-const NO_SETTINGS: Settings = { frigateUrl: null, fullScreen: false, layouts: {} };
+const NO_SETTINGS: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, layouts: {} };
 
 function GearIcon() {
   return (
@@ -35,7 +35,6 @@ function App() {
   const [refresh, setRefresh] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [lockRatio, setLockRatio] = useState(true);
   const [menu, setMenu] = useState<{ x: number; y: number; camera?: string } | null>(null);
   const [live, setLive] = useState(() => document.visibilityState !== "hidden");
   const [toolbar, setToolbar] = useState(true);
@@ -161,6 +160,15 @@ function App() {
     setSettings((current) => (current ? { ...current, layouts: { ...current.layouts, [url]: next } } : current));
     void saveLayout(url, next).catch(() => {});
   };
+
+  // Lock to 16:9 is saved as soon as it changes.
+  const wallOptions = settings?.wall ?? DEFAULT_WALL_OPTIONS;
+  const setLockRatio = (lockRatio: boolean) => {
+    const next = { ...wallOptions, lockRatio };
+    setSettings((current) => ({ ...(current ?? NO_SETTINGS), wall: next }));
+    void saveWallOptions(next).catch(() => {});
+  };
+  const lockRatio = wallOptions.lockRatio;
 
   const closeMenu = useCallback(() => setMenu(null), []);
   const fullScreen = settings?.fullScreen ?? false;
