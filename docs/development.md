@@ -1,6 +1,6 @@
 # Developing Ruru
 
-Ruru is built with Rust and [Tauri 2](https://tauri.app/), with a React + TypeScript frontend. This page covers building it from source and running the checks.
+Ruru is built with Rust and [Tauri 2](https://tauri.app/), with a React + TypeScript frontend. This page covers building it from source, running the checks, and how releases are made.
 
 ## Layout
 
@@ -11,6 +11,8 @@ Ruru is built with Rust and [Tauri 2](https://tauri.app/), with a React + TypeSc
 | `src/ruru/src/` | Frontend: React + TypeScript + Vite |
 | `src/ruru/src-tauri/` | Backend: Rust |
 | `src/ruru/src-tauri/icons/` | App icons, generated from `icons/source/app-icon.svg` (see the README there) |
+| `.github/workflows/release.yml` | Edge releases for code pushes to `main` |
+| `.github/workflows/promote.yml` | Makes a chosen Edge release Stable |
 | `AGENTS.md` | The rules every change follows, and which standard to read for which task |
 | `docs/standards/` | The Rust, frontend, writing and PR standards |
 
@@ -38,6 +40,14 @@ npm run tauri dev
 ```
 
 This starts Vite on port 1420 and opens the Ruru window. Frontend changes reload at once; Rust changes rebuild and restart the app.
+
+To see the update prompt without a newer release, set `RURU_FAKE_UPDATE` in a debug build. `1` offers version 99.0.0; any other value is the version offered:
+
+```sh
+RURU_FAKE_UPDATE=1 npm run tauri dev
+```
+
+Choosing **Install and restart** on a fake update only closes the prompt. Release builds ignore the variable.
 
 To build an installer for your platform:
 
@@ -102,3 +112,74 @@ gh workflow run ci.yml --ref my-branch -f package=true
 Linux dependencies are downloaded by [`.github/scripts/install_linux_deps.py`](../.github/scripts/install_linux_deps.py) from the Ubuntu archive (ports on arm64), with a 120-second limit for index updates and 180 seconds for package downloads per attempt. A failure tries a second mirror (the runner's original ports source on arm64). Downloads finish before installation, so a timeout never interrupts dpkg.
 
 Release builds run the Build jobs in the `release` environment, which holds the updater signing key and the macOS signing certificate. They stamp the release version into `tauri.conf.json`, sign the macOS app with the "Ruru Self-Signed Code Signing" certificate and check that its signature is tied to that certificate, and upload the installers to the draft release. Other builds get none of those secrets.
+
+## Releases
+
+Each non-docs push to `main`, such as a merged code pull request, is released as an Edge build: a [GitHub release](https://github.com/kerwincarpede/ruru/releases) of that commit, marked as a pre-release and never as the latest release, with the installers attached (`.msi` and `-setup.exe` for Windows, a universal `.dmg` for macOS, and `.AppImage`, `.deb` and `.rpm` for Linux). Edge builds are installed by hand. Installed copies update only to Stable releases, which are Edge releases promoted later with the same installers (see [Promoting to Stable](#promoting-to-stable)).
+
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) has three jobs:
+
+| Job | What it does |
+| --- | --- |
+| Version | Reserves the next version and opens a draft release for it |
+| CI | Runs `ci.yml` with that `version` and `release_id`: every check, and installers for all four platforms uploaded into the draft |
+| Publish release | Writes `latest.json`, attaches it, and publishes the draft as an Edge pre-release, which creates its tag |
+
+Only the short Version job runs one at a time (`queue: max`); two installer pipelines can run together. Every code merge keeps its release, even if a later one finishes first.
+
+To force a bump the commits would not give, or to retry a failed release, open **Actions → Release → Run workflow**, or from a terminal:
+
+```sh
+gh workflow run release.yml -f bump=minor  # force patch, minor or major
+gh run watch                               # follow it
+```
+
+A release runs only from `main`, and refuses a commit that is already released.
+
+### Versions
+
+Versions come from published `v*` tags and from drafts that reserve versions for builds still running. [`.github/scripts/release_version.py`](../.github/scripts/release_version.py) walks main's first-parent history from the nearest reservation, skipping docs-only commits, so each code merge takes its own version in commit order. The default `auto` bump takes the highest [Conventional Commits](https://www.conventionalcommits.org/) bump from the commit message and any commits it merges, including the subjects GitHub lists in a squash message:
+
+| Conventional Commit marker | Bump |
+| --- | --- |
+| `!` after the type, or a `BREAKING CHANGE:` footer | major |
+| `feat:` | minor |
+| anything else | patch |
+
+The first release takes the version in `src/ruru/src-tauri/tauri.conf.json`. CI stamps the reserved version into `tauri.conf.json` before building, so no version field is bumped by hand.
+
+A failed run leaves a hidden draft that keeps its version. Retrying that commit with `auto` replaces the draft and keeps the version; other commits never take it. Each release is named by its version, for example `0.2.1` for the tag `v0.2.1`, and its notes open with a one-line **Edge build** paragraph.
+
+Before publishing, the workflow cleans up GitHub's generated **What's Changed** list: it removes Conventional Commits prefixes and skips `ci`, `docs`, `chore`, `build`, `refactor`, `style` and `test` entries. Releases are immutable once published, so every asset, `latest.json` included, is attached first.
+
+### Promoting to Stable
+
+[`.github/workflows/promote.yml`](../.github/workflows/promote.yml) makes an Edge release the latest release, which installed copies update to. Nothing is rebuilt. Run it from `main` with **Actions → Promote to Stable → Run workflow**, or:
+
+```sh
+gh workflow run promote.yml                  # the newest Edge release
+gh workflow run promote.yml -f version=0.2.1 # a chosen one
+```
+
+It runs in the `stable` environment, which only `main` may deploy to and which waits for the owner's approval. [`.github/scripts/promote.py`](../.github/scripts/promote.py) picks the newest `v*` pre-release when no version is given, and refuses a draft or any version not newer than the current Stable release. [`.github/scripts/check_manifest.py`](../.github/scripts/check_manifest.py) checks that the release's `latest.json` has the right version and a signed HTTPS package for every platform. The workflow then drops the **Edge build** line from the notes and marks the release as the latest and no longer a pre-release.
+
+### Updates
+
+Installed copies update themselves with Tauri's [updater plugin](https://v2.tauri.app/plugin/updater/). At startup the page (`src/ruru/src/app/updates.ts`) reads `latest.json` from the latest release, `https://github.com/kerwincarpede/ruru/releases/latest/download/latest.json` (`plugins.updater.endpoints` in `tauri.conf.json`). When it names a newer version, Ruru shows **Ruru \<version\> is ready. Install and restart?** with **Install and restart** and **Not now**. Install and restart downloads and installs the package for the platform and installer type, then restarts through the process plugin. Not now closes the prompt until the next launch. A failed check, including the 404 before the first Stable release, shows nothing.
+
+A release builds the update packages because CI turns on `bundle.createUpdaterArtifacts` when it stamps the version: the `.app.tar.gz` on macOS, and the installers themselves elsewhere, each with a `.sig`. The publish job writes `latest.json` from those signatures ([`.github/scripts/updater_manifest.py`](../.github/scripts/updater_manifest.py)) and refuses to publish a release that is missing macOS, Linux or Windows.
+
+### Signing
+
+Releases run in the `release` environment, which only `main` may deploy to. Its secrets:
+
+| Secret | What it is |
+| --- | --- |
+| `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | The updater key. The updater accepts only packages signed with it; its public half is `plugins.updater.pubkey` in `tauri.conf.json` |
+| `MACOS_CERTIFICATE`, `MACOS_CERTIFICATE_PASSWORD` | The "Ruru Self-Signed Code Signing" certificate, a base64 `.p12`, and its password |
+
+Pull request builds get neither, so they make no update packages and sign the macOS app ad-hoc.
+
+macOS remembers permissions and keychain access by an app's signature. An ad-hoc signature is tied to one exact build, so every update would look like a new app; the certificate gives every release the same identity. Tauri's own `APPLE_CERTIFICATE` import accepts only Apple-issued certificates, so CI imports this one into a temporary keychain itself, hands its name to Tauri as `APPLE_SIGNING_IDENTITY`, and fails the build if the signature is not tied to it. An `APPLE_SIGNING_IDENTITY` secret (a paid certificate) would take precedence. The certificate was made once with [`.github/scripts/make_macos_signing_cert.sh`](../.github/scripts/make_macos_signing_cert.sh), valid for 20 years.
+
+**Never regenerate either one.** A new updater key strands every installed copy, which then has to be updated by hand; a new certificate makes macOS treat Ruru as a new app. The owner keeps the backups in `~/.ruru-signing/`: `updater.key`, `updater.key.pub` and `updater.password` for the updater key, and `ruru-signing.p12`, `ruru-signing.password` and `cert.pem` for the certificate.

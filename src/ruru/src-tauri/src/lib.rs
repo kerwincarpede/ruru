@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+mod update;
+
 /// The app's name and version, for the window footer.
 ///
 /// Mirrored by `AppInfo` in `src/app/api.ts`.
@@ -25,7 +27,9 @@ fn app_info() -> AppInfo {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![app_info])
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .invoke_handler(tauri::generate_handler![app_info, update::fake_update])
         .run(tauri::generate_context!())
         .expect("error while running Ruru");
 }

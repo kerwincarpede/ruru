@@ -30,6 +30,10 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 `.github/workflows/ci.yml` runs Checks on Linux, the Rust tests on Windows and macOS, and builds the app on four runners. Ordinary PRs link the app without installers; PRs that change packaging inputs (`src-tauri/` outside `src/` and `tests/`, `.github/scripts/`, the workflows, package files) build and upload installers. Force packaging with `gh workflow run ci.yml --ref <branch> -f package=true`. See [docs/development.md](docs/development.md#ci).
 
+## Releases
+
+Every non-docs merge to `main` runs `.github/workflows/release.yml`, which publishes a signed Edge pre-release with `latest.json`. `.github/workflows/promote.yml` makes a chosen Edge release Stable after the owner approves it. Installed copies check only Stable at startup. The signing secrets live in the `release` environment, with backups in `~/.ruru-signing/`. See [docs/development.md](docs/development.md#releases).
+
 ## Read before you start
 
 Load only what the task touches.
@@ -40,4 +44,5 @@ Load only what the task touches.
 | Changing the frontend in `src/ruru/src/` | [docs/standards/frontend.md](docs/standards/frontend.md) |
 | Writing UI text, docs or a PR title | [docs/standards/writing.md](docs/standards/writing.md) |
 | Branching, committing or opening a PR | [docs/standards/pull-requests.md](docs/standards/pull-requests.md) |
+| Changing releases, promotion, signing or updates | [docs/development.md](docs/development.md#releases) |
 | Setting up or running the app | [docs/development.md](docs/development.md) |

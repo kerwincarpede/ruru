@@ -237,8 +237,8 @@ jobs:
       # macOS keeps privacy permissions and keychain access by the app's code
       # signature. An ad-hoc signature changes with every build, so every
       # update would lose them; the self-signed certificate in the
-      # MACOS_CERTIFICATE secret ("Ruru Self-Signed Code Signing") keeps the
-      # same identity across releases. Tauri's own APPLE_CERTIFICATE import
+      # MACOS_CERTIFICATE secret ("Ruru Self-Signed Code Signing", made by
+      # make_macos_signing_cert.sh) keeps the same identity across releases. Tauri's own APPLE_CERTIFICATE import
       # accepts only Apple-issued certificates, so it is imported here and
       # handed to Tauri by name.
       - name: Import the macOS signing certificate

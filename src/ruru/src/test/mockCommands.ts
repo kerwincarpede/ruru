@@ -2,9 +2,10 @@ import type { InvokeArgs } from "@tauri-apps/api/core";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import type { AppInfo } from "../app/api";
 
-/** The Rust commands the page can call, by name, typed by hand from src-tauri/src/lib.rs. */
+/** The Rust commands the page can call, by name, typed by hand from src-tauri/src/. */
 type Commands = {
   app_info: () => AppInfo;
+  fake_update: () => string | null;
 };
 
 /** A Rust command the page can call. */

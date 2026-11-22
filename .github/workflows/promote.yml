@@ -1,0 +1,85 @@
+name: Promote to Stable
+
+# Makes an Edge pre-release, as release.yml published it, the latest
+# release, which Stable copies of Ruru update to. Nothing is rebuilt: the
+# Edge build's installers are the Stable ones. Run it from main:
+#   Actions → Promote to Stable → Run workflow, or
+#   gh workflow run promote.yml                  # the newest Edge release
+#   gh workflow run promote.yml -f version=0.9.3
+# The job waits in the stable environment until the owner approves it.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Edge version to promote, such as 0.9.3. Empty promotes the newest Edge release.
+        type: string
+        default: ''
+
+# One promotion at a time; a second waits rather than cancelling the first.
+concurrency:
+  group: promote
+  queue: max
+
+permissions:
+  contents: read
+
+env:
+  # actions/checkout runs `git init`; naming the initial branch keeps git from
+  # printing its hint about the default branch name.
+  GIT_CONFIG_COUNT: 1
+  GIT_CONFIG_KEY_0: init.defaultBranch
+  GIT_CONFIG_VALUE_0: main
+
+jobs:
+  # One job, so the stable environment asks for approval once. Only main may
+  # deploy to it.
+  promote:
+    name: Promote
+    runs-on: ubuntu-24.04
+    environment: stable
+    permissions:
+      contents: write
+    steps:
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Promotions run from main, not $GITHUB_REF."
+          exit 1
+
+      - uses: actions/checkout@v7
+
+      # Refuses a draft, and any version that is not newer than Stable.
+      - name: Choose the Edge release
+        id: chosen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[]' | jq -s . > releases.json
+          python3 .github/scripts/promote.py \
+            --releases releases.json --version "$VERSION" --body body.md \
+            > chosen.txt
+          cat chosen.txt
+          cat chosen.txt >> "$GITHUB_OUTPUT"
+
+      # Published releases are immutable. Validate and reuse the manifest
+      # uploaded before publication rather than trying to replace its asset.
+      - name: Check the published updater manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.chosen.outputs.tag }}
+          VERSION: ${{ steps.chosen.outputs.version }}
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p latest.json
+          python3 .github/scripts/check_manifest.py latest.json "$VERSION"
+
+      # Stable copies read releases/latest, so from here they offer it.
+      - name: Publish as the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.chosen.outputs.id }}
+        run: |
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F prerelease=false -f make_latest=true -F body=@body.md \
+            --jq '"Promoted \(.tag_name) to Stable: \(.html_url)"'

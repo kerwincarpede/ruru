@@ -36,5 +36,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZBRTZERTdDOUEzNEE4QkUKUldTK3FEU2FmTjdtK3E0ajUvSnVxS0d5UHBFR3hqQjdWK0xhR3JhamJIam1NS2o0a3BqY2ZmenkK",
+      "endpoints": [
+        "https://github.com/kerwincarpede/ruru/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
