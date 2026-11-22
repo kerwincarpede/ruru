@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import SettingsDialog from "./SettingsDialog";
-import type { Settings } from "../app/settings";
+import type { Settings } from "../app/api";
 import { mockCommands } from "../test/mockCommands";
 
 const empty: Settings = { frigateUrl: null, fullScreen: false, layouts: {} };

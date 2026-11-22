@@ -1,8 +1,8 @@
 import "./settings.css";
 import { useState, type FormEvent } from "react";
 import Dialog from "../app/Dialog";
-import { testFrigate, type FrigateStatus } from "../app/frigate";
-import { saveFrigateUrl, type Settings } from "../app/settings";
+import type { FrigateStatus } from "../app/frigate";
+import { saveFrigateUrl, testFrigate, type Settings } from "../app/api";
 
 interface SettingsDialogProps {
   settings: Settings;
@@ -62,10 +62,15 @@ export default function SettingsDialog({ settings, onSaved, onClose }: SettingsD
       <form className="settings-body" onSubmit={save}>
         <h3 className="settings-title">Frigate</h3>
         <div className="settings-content">
-          <label className="field">
-            <span className="field-label">Frigate URL</span>
+          <div className="field">
+            <label className="field-label" htmlFor="frigate-url">
+              Frigate URL
+            </label>
             <input
-              type="url"
+              id="frigate-url"
+              aria-describedby="frigate-url-hint"
+              type="text"
+              inputMode="url"
               value={url}
               placeholder="http://frigate.local:5000"
               autoComplete="off"
@@ -77,10 +82,10 @@ export default function SettingsDialog({ settings, onSaved, onClose }: SettingsD
                 setSaveError(null);
               }}
             />
-            <span className="field-hint">
+            <span id="frigate-url-hint" className="field-hint">
               The address you open Frigate at, on its unauthenticated port (usually 5000).
             </span>
-          </label>
+          </div>
           <div className="settings-test" aria-live="polite">
             <button type="button" onClick={runTest} disabled={!url.trim() || test.kind === "testing"}>
               {test.kind === "testing" ? "Testing…" : "Test connection"}

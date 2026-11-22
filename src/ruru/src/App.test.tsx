@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach } from "vitest";
 import { emit } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { Camera } from "./app/frigate";
-import type { SavedLayout, Settings } from "./app/settings";
+import type { SavedLayout, Settings } from "./app/api";
 import { findUpdate } from "./app/updates";
 import { mockCommands, type CommandHandlers } from "./test/mockCommands";
 
@@ -222,7 +223,9 @@ describe("App", () => {
   it("hides a tile, shows it again and resets the layout in Edit layout mode", async () => {
     const saved: SavedLayout[] = [];
     wall({
-      save_layout: ({ layout }) => {
+      save_layout: ({ server, layout }) => {
+        // Layouts are kept per server.
+        expect(server).toBe(URL_SAVED);
         saved.push(layout);
         return null;
       },
@@ -257,5 +260,119 @@ describe("App", () => {
     render(<App />);
     expect(await screen.findByRole("figure", { name: "Garage" })).toBeInTheDocument();
     expect(screen.queryByRole("figure", { name: "Maingate" })).not.toBeInTheDocument();
+  });
+
+  it("ignores a discovery for the old server that settles after Save", async () => {
+    let finishOld: (cameras: Camera[]) => void = () => {};
+    const other = "http://other:5000";
+    backendCalls = wall({
+      frigate_cameras: ({ url }) =>
+        url === URL_SAVED ? new Promise<Camera[]>((resolve) => (finishOld = resolve)) : [camera("porch")],
+      save_frigate_url: () => ({ ...connected, frigateUrl: other }),
+    });
+    render(<App />);
+    await waitFor(() => expect(backendCalls.some((call) => call.cmd === "frigate_cameras")).toBe(true));
+    fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+    fireEvent.change(screen.getByLabelText("Frigate URL"), { target: { value: other } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("figure", { name: "Porch" })).toBeInTheDocument();
+    await act(async () => finishOld(cameras));
+    expect(screen.queryByRole("figure", { name: "Garage" })).not.toBeInTheDocument();
+    expect(screen.getByRole("figure", { name: "Porch" })).toBeInTheDocument();
+  });
+
+  it("keeps the webview's own menu for right-clicks inside a dialog", async () => {
+    wall();
+    render(<App />);
+    await screen.findByRole("figure", { name: "Garage" });
+    fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+    const field = screen.getByLabelText("Frigate URL");
+    expect(fireEvent.contextMenu(field)).toBe(true);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("follows full screen when it changes outside Ruru's toggle", async () => {
+    const calls = wall();
+    render(<App />);
+    await screen.findByRole("figure", { name: "Garage" });
+    await act(() => emit("full-screen-changed", true));
+    fireEvent.contextMenu(screen.getByRole("main"));
+    expect(screen.getByRole("menuitem", { name: "Exit full screen" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Exit full screen" }));
+    await waitFor(() =>
+      expect(calls.filter((call) => call.cmd === "set_full_screen").map((call) => call.payload)).toEqual([
+        { fullScreen: false },
+      ]),
+    );
+  });
+});
+
+/** A WebSocket stand-in that records the stream each tile asks go2rtc for. */
+class FakeSocket {
+  static all: FakeSocket[] = [];
+  readyState = 0;
+  closed = false;
+  onopen: (() => void) | null = null;
+  onmessage: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  constructor(public url: string) {
+    FakeSocket.all.push(this);
+  }
+  send() {}
+  close() {
+    this.closed = true;
+  }
+  static open(): string[] {
+    return FakeSocket.all.filter((socket) => !socket.closed).map((socket) => new URL(socket.url).searchParams.get("src") ?? "");
+  }
+}
+
+class FakePeer {
+  connectionState = "new";
+  addTransceiver() {}
+  close() {}
+}
+
+let backendCalls: ReturnType<typeof mockCommands> = [];
+
+describe("App streams", () => {
+  beforeEach(() => {
+    findUpdateMock.mockReset().mockResolvedValue(null);
+    FakeSocket.all = [];
+    vi.stubGlobal("WebSocket", FakeSocket);
+    vi.stubGlobal("RTCPeerConnection", FakePeer);
+    vi.stubGlobal("MediaStream", class {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+  });
+
+  const setVisibility = (state: "hidden" | "visible") => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+  };
+
+  it("plays each tile's sub stream, and stops them while the window is hidden", async () => {
+    wall();
+    render(<App />);
+    await screen.findByRole("figure", { name: "Garage" });
+    expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate_sub"]);
+    setVisibility("hidden");
+    expect(FakeSocket.open()).toEqual([]);
+    setVisibility("visible");
+    expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate_sub"]);
+  });
+
+  it("plays the main stream when maximised, with the wall's streams stopped", async () => {
+    wall();
+    render(<App />);
+    fireEvent.doubleClick(await screen.findByRole("figure", { name: "Garage" }));
+    expect(FakeSocket.open()).toEqual(["garage"]);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate_sub"]);
   });
 });

@@ -133,7 +133,15 @@ describe("Go2rtcPlayer", () => {
     FakeMediaSource.last = null;
     states = [];
     vi.stubGlobal("WebSocket", FakeSocket);
-    vi.stubGlobal("MediaStream", class {});
+    vi.stubGlobal(
+      "MediaStream",
+      class {
+        tracks: unknown[] = [];
+        addTrack(track: unknown) {
+          this.tracks.push(track);
+        }
+      },
+    );
     vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:source", revokeObjectURL: vi.fn() }));
   });
 
@@ -177,9 +185,14 @@ describe("Go2rtcPlayer", () => {
       { type: "webrtc/candidate", value: "" },
     ]);
 
-    const media = {};
-    peer.ontrack?.({ streams: [media], track: {} });
+    const videoTrack = { kind: "video" };
+    const audioTrack = { kind: "audio" };
+    peer.ontrack?.({ streams: [], track: videoTrack });
+    const media = element.srcObject as unknown as { tracks: unknown[] };
+    peer.ontrack?.({ streams: [], track: audioTrack });
+    // The audio track joins the video's stream instead of replacing it.
     expect(element.srcObject).toBe(media);
+    expect(media.tracks).toEqual([videoTrack, audioTrack]);
     peer.state("connected");
     expect(states).toEqual(["connecting", "playing"]);
 

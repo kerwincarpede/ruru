@@ -1,5 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
-
 /** Mirrors `FrigateStatus` in src-tauri/src/frigate.rs. */
 export interface FrigateStatus {
   version: string;
@@ -12,16 +10,6 @@ export interface Camera {
   enabled: boolean;
   mainStream: string;
   subStream: string;
-}
-
-/** Asks the Frigate server at `url` for its version and camera count. */
-export function testFrigate(url: string): Promise<FrigateStatus> {
-  return invoke<FrigateStatus>("test_frigate", { url });
-}
-
-/** The cameras on the Frigate server at `url`, in Frigate's order. */
-export function frigateCameras(url: string): Promise<Camera[]> {
-  return invoke<Camera[]>("frigate_cameras", { url });
 }
 
 /** The camera's latest snapshot, which shows until its video arrives. */

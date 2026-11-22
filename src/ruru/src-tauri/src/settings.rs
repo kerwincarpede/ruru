@@ -13,7 +13,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, State, WebviewWindow};
+use tauri::{Emitter, Manager, State, WebviewWindow};
 
 /// The settings file's name inside the app config folder.
 pub const SETTINGS_FILE: &str = "settings.json";
@@ -29,7 +29,7 @@ const MAX_CAMERA_NAME: usize = 200;
 
 /// One tile's place on the wall, in grid units.
 ///
-/// Mirrored by `TilePlacement` in `src/app/settings.ts`.
+/// Mirrored by `TilePlacement` in `src/app/api.ts`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TilePlacement {
@@ -43,7 +43,7 @@ pub struct TilePlacement {
 /// The wall layout saved for one Frigate server: where each tile sits and
 /// which cameras the user hid.
 ///
-/// Mirrored by `SavedLayout` in `src/app/settings.ts`.
+/// Mirrored by `SavedLayout` in `src/app/api.ts`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SavedLayout {
@@ -53,7 +53,7 @@ pub struct SavedLayout {
 
 /// Everything Ruru remembers between launches.
 ///
-/// Mirrored by `Settings` in `src/app/settings.ts`.
+/// Mirrored by `Settings` in `src/app/api.ts`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -228,6 +228,17 @@ impl SettingsStore {
         self.update(|settings| settings.full_screen = full_screen)
     }
 
+    /// Records the window's real full-screen state, which also changes
+    /// outside Ruru's own toggle (the macOS green button, View > Enter Full
+    /// Screen). Returns whether it differed from what was saved.
+    pub fn follow_full_screen(&mut self, full_screen: bool) -> Result<bool, SettingsError> {
+        if self.current.full_screen == full_screen {
+            return Ok(false);
+        }
+        self.set_full_screen(full_screen)?;
+        Ok(true)
+    }
+
     /// Saves the layout for the Frigate server at `server`.
     pub fn set_layout(
         &mut self,
@@ -257,6 +268,29 @@ pub fn manage(app: &tauri::App) -> bool {
     let full_screen = store.current().full_screen;
     app.manage(Mutex::new(store));
     full_screen
+}
+
+/// The event the page hears, with the new state, when the window enters or
+/// leaves full screen.
+pub const FULL_SCREEN_EVENT: &str = "full-screen-changed";
+
+/// Keeps the saved full-screen setting, and the page, in step with the
+/// window however full screen changes. The window resizes on every change.
+pub fn track_full_screen(window: &WebviewWindow) {
+    let tracked = window.clone();
+    window.on_window_event(move |event| {
+        if !matches!(event, tauri::WindowEvent::Resized(_)) {
+            return;
+        }
+        let Ok(full_screen) = tracked.is_fullscreen() else {
+            return;
+        };
+        let state = tracked.state::<SharedSettings>();
+        let changed = lock(&state).follow_full_screen(full_screen);
+        if let Ok(true) = changed {
+            let _ = tracked.emit(FULL_SCREEN_EVENT, full_screen);
+        }
+    });
 }
 
 fn lock(state: &SharedSettings) -> std::sync::MutexGuard<'_, SettingsStore> {
@@ -322,10 +356,12 @@ mod tests {
 
     impl TempDir {
         fn new(name: &str) -> Self {
+            // Only path-safe characters: Windows refuses ':' and braces.
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let dir = std::env::temp_dir().join(format!(
-                "ruru-settings-{name}-{}-{:?}",
+                "ruru-settings-{name}-{}-{}",
                 std::process::id(),
-                std::time::SystemTime::now()
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             ));
             fs::create_dir_all(&dir).unwrap();
             Self(dir)
@@ -350,6 +386,17 @@ mod tests {
             w,
             h,
         }
+    }
+
+    #[test]
+    fn following_full_screen_saves_only_a_change() {
+        let mut store = SettingsStore::open(None);
+        assert!(!store.follow_full_screen(false).unwrap());
+        assert!(store.follow_full_screen(true).unwrap());
+        assert!(store.current().full_screen);
+        assert!(!store.follow_full_screen(true).unwrap());
+        assert!(store.follow_full_screen(false).unwrap());
+        assert!(!store.current().full_screen);
     }
 
     #[test]

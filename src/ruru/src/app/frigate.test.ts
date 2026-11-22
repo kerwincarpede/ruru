@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { cameraLabel, frigateCameras, snapshotUrl, streamSocketUrl, testFrigate } from "./frigate";
+import { cameraLabel, snapshotUrl, streamSocketUrl } from "./frigate";
+import { frigateCameras, testFrigate } from "./api";
 import { mockCommands } from "../test/mockCommands";
 
 describe("Frigate commands", () => {

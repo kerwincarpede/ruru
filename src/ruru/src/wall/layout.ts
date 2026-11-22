@@ -1,4 +1,4 @@
-import type { SavedLayout, TilePlacement } from "../app/settings";
+import type { SavedLayout, TilePlacement } from "../app/api";
 
 /** The wall's grid is this many columns wide. */
 export const COLUMNS = 24;

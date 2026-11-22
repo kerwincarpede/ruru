@@ -2,7 +2,7 @@ import type { InvokeArgs } from "@tauri-apps/api/core";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import type { AppInfo } from "../app/api";
 import type { Camera, FrigateStatus } from "../app/frigate";
-import type { SavedLayout, Settings } from "../app/settings";
+import type { SavedLayout, Settings } from "../app/api";
 
 /** The Rust commands the page can call, by name, typed by hand from src-tauri/src/. */
 type Commands = {

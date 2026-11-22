@@ -1,10 +1,10 @@
 import "./App.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { appInfo, type AppInfo } from "./app/api";
-import { cameraLabel, frigateCameras, type Camera } from "./app/frigate";
+import { cameraLabel, type Camera } from "./app/frigate";
 import { isMac, shortcutFor } from "./app/keys";
 import Logo from "./app/Logo";
-import { getSettings, onOpenSettings, saveLayout, setFullScreen, type SavedLayout, type Settings } from "./app/settings";
+import { frigateCameras, getSettings, onFullScreenChanged, onOpenSettings, saveLayout, setFullScreen, type SavedLayout, type Settings } from "./app/api";
 import UpdatePrompt from "./app/UpdatePrompt";
 import { findUpdate, type AvailableUpdate } from "./app/updates";
 import SettingsDialog from "./settings/SettingsDialog";
@@ -67,21 +67,27 @@ function App() {
   }, []);
 
   // Cameras come from Frigate at startup, after Save, and whenever the window regains focus.
+  // A discovery still running for a server that is no longer saved is ignored.
+  const currentUrl = useRef<string | null>(null);
   const discover = useCallback(
     (server: string) =>
       frigateCameras(server)
         .then(
           (found) => {
+            if (currentUrl.current !== server) return;
             setCameras(found);
             setDiscoveryError(null);
           },
-          (error: unknown) => setDiscoveryError(String(error)),
+          (error: unknown) => {
+            if (currentUrl.current === server) setDiscoveryError(String(error));
+          },
         )
         .then(() => setRefresh((count) => count + 1)),
     [],
   );
 
   useEffect(() => {
+    currentUrl.current = url;
     if (!url) return;
     void discover(url);
     const onFocus = () => void discover(url);
@@ -116,16 +122,22 @@ function App() {
       else toggleFullScreen();
     };
     window.addEventListener("keydown", onKey);
-    let stop: (() => void) | null = null;
     let current = true;
-    void onOpenSettings(() => setSettingsOpen(true)).then((unlisten) => {
-      if (current) stop = unlisten;
+    const stops: (() => void)[] = [];
+    const keep = (unlisten: () => void) => {
+      if (current) stops.push(unlisten);
       else unlisten();
-    });
+    };
+    void onOpenSettings(() => setSettingsOpen(true)).then(keep);
+    // Full screen also changes outside Ruru's toggle, such as the macOS green button.
+    void onFullScreenChanged((fullScreen) => {
+      fullScreenRef.current = fullScreen;
+      setSettings((now) => ({ ...(now ?? NO_SETTINGS), fullScreen }));
+    }).then(keep);
     return () => {
       current = false;
       window.removeEventListener("keydown", onKey);
-      stop?.();
+      stops.forEach((stop) => stop());
     };
   }, [toggleFullScreen]);
 
@@ -167,6 +179,8 @@ function App() {
       className={`window${url ? " has-wall" : " placeholder"}`}
       onPointerMove={wake}
       onContextMenu={(event) => {
+        // Dialogs keep the webview's own menu, such as Paste in the URL field.
+        if ((event.target as Element).closest('[role="dialog"]')) return;
         event.preventDefault();
         setMenu({ x: event.clientX, y: event.clientY });
       }}
@@ -240,8 +254,10 @@ function App() {
           settings={settings}
           onSaved={(saved) => {
             setSettings(saved);
-            if (saved.frigateUrl !== url) setCameras(null);
-            else if (url) void discover(url);
+            if (saved.frigateUrl !== url) {
+              setCameras(null);
+              setDiscoveryError(null);
+            } else if (url) void discover(url);
           }}
           onClose={() => setSettingsOpen(false)}
         />

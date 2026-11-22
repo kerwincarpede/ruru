@@ -145,9 +145,12 @@ export class Go2rtcPlayer {
       if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type, value }));
     };
 
+    // One stream for the connection's video and audio tracks, which arrive
+    // in separate track events and may not share a stream of their own.
+    const media = new MediaStream();
     peer.ontrack = (event) => {
       if (!this.current(generation)) return;
-      const media = event.streams[0] ?? new MediaStream([event.track]);
+      media.addTrack(event.track);
       if (video.srcObject !== media) video.srcObject = media;
       play(video);
     };

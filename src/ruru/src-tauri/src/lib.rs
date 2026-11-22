@@ -39,6 +39,7 @@ pub fn run() {
             menu::install(app)?;
             if let Some(window) = app.get_webview_window("main") {
                 webview::enable_webrtc(&window)?;
+                settings::track_full_screen(&window);
                 if full_screen {
                     window.set_fullscreen(true)?;
                 }

@@ -4,7 +4,7 @@ import "./wall.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import GridLayout from "react-grid-layout";
 import type { Camera } from "../app/frigate";
-import type { SavedLayout } from "../app/settings";
+import type { SavedLayout } from "../app/api";
 import { COLUMNS, GAP, fromGridItems, hideCamera, rowHeight, toGridItems, wallPlacements, type GridItem } from "./layout";
 import Tile from "./Tile";
 
