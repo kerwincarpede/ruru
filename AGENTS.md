@@ -24,11 +24,11 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-`npm run test:coverage` fails below 90% of lines or 83% of branches. CI runs the Rust tests under `cargo llvm-cov`, which needs the `llvm-tools-preview` rustup component, instead of `cargo test`, and fails below the line floor in `.github/workflows/ci.yml`.
+`npm run test:coverage` fails below 90% of lines or 83% of branches. CI runs the Rust tests under `cargo llvm-cov`, which needs the `llvm-tools-preview` rustup component, instead of `cargo test`, and fails below 61% of lines.
 
 ## CI
 
-`.github/workflows/ci.yml` runs Checks on Linux, the Rust tests on Windows and macOS, and builds the app on four runners. Ordinary PRs link the app without installers; PRs that change packaging inputs (`src-tauri/` outside `src/` and `tests/`, `.github/`, package files) build and upload installers. Force packaging with `gh workflow run ci.yml --ref <branch> -f package=true`. See [docs/development.md](docs/development.md#ci).
+`.github/workflows/ci.yml` runs Checks on Linux, the Rust tests on Windows and macOS, and builds the app on four runners. Ordinary PRs link the app without installers; PRs that change packaging inputs (`src-tauri/` outside `src/` and `tests/`, `.github/scripts/`, the workflows, package files) build and upload installers. Force packaging with `gh workflow run ci.yml --ref <branch> -f package=true`. See [docs/development.md](docs/development.md#ci).
 
 ## Read before you start
 

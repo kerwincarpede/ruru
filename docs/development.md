@@ -79,7 +79,7 @@ python3 -m unittest discover .github/scripts
 | build-route | Ubuntu 24.04 | Decides whether the Build jobs package installers |
 | Build | Ubuntu 24.04 (x86_64 and arm64), Windows, macOS (universal) | Builds the app on each platform |
 
-Checks measures coverage while it runs the tests. `npm run test:coverage` fails below 90% of lines or 83% of branches. `cargo llvm-cov` (pinned in `ci.yml`, and needing the `llvm-tools-preview` rustup component) prints a line summary in the job log and fails below the line floor set in `ci.yml`. The HTML and lcov reports for both are uploaded as one `coverage` artifact, even when a test or a floor fails.
+Checks measures coverage while it runs the tests. `npm run test:coverage` fails below 90% of lines or 83% of branches. `cargo llvm-cov` (pinned in `ci.yml`, and needing the `llvm-tools-preview` rustup component) prints a line summary in the job log and fails below 61% of lines (1 point below the coverage measured when the floor was set; raise it as Rust code gains tests). The HTML and lcov reports for both are uploaded as one `coverage` artifact, even when a test or a floor fails.
 
 On Windows, Tauri embeds the Common Controls 6 manifest only in the app, so the test executables would fail to start. `build.rs` turns that off and has the linker embed `windows-app-manifest.xml`, the same manifest, in every binary instead.
 
