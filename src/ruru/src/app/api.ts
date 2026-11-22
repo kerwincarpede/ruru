@@ -39,11 +39,15 @@ export interface WallOptions {
 /** The wall options before any are saved, as Rust defaults them. */
 export const DEFAULT_WALL_OPTIONS: WallOptions = { lockRatio: true, fitToWindow: true, streamInfo: false };
 
+/** Mirrors `UpdateChannel` in src-tauri/src/settings.rs: which releases Ruru updates to. */
+export type UpdateChannel = "stable" | "edge";
+
 /** Mirrors `Settings` in src-tauri/src/settings.rs. */
 export interface Settings {
   frigateUrl: string | null;
   fullScreen: boolean;
   wall: WallOptions;
+  updateChannel: UpdateChannel;
   layouts: Record<string, SavedLayout>;
 }
 
@@ -55,6 +59,11 @@ export function getSettings(): Promise<Settings> {
 /** Saves the Frigate URL, cleaned up by the backend, and returns the new settings. */
 export function saveFrigateUrl(url: string): Promise<Settings> {
   return invoke<Settings>("save_frigate_url", { url });
+}
+
+/** Saves the update channel and returns the new settings. */
+export function setUpdateChannel(channel: UpdateChannel): Promise<Settings> {
+  return invoke<Settings>("set_update_channel", { channel });
 }
 
 /** Turns full screen on or off and remembers it for the next launch. */

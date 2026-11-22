@@ -8,12 +8,13 @@ import { DEFAULT_WALL_OPTIONS, type SavedLayout, type Settings } from "./app/api
 import { findUpdate } from "./app/updates";
 import { mockCommands, type CommandHandlers } from "./test/mockCommands";
 
-vi.mock("./app/updates", () => ({ findUpdate: vi.fn() }));
+// Only the startup check is faked; Settings › Updates checks through the mocked commands.
+vi.mock("./app/updates", async (importOriginal) => ({ ...(await importOriginal<typeof import("./app/updates")>()), findUpdate: vi.fn() }));
 
 const findUpdateMock = vi.mocked(findUpdate);
 
 const URL_SAVED = "http://frigate:5000";
-const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, layouts: {} };
+const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", layouts: {} };
 const connected: Settings = { ...empty, frigateUrl: URL_SAVED };
 const camera = (name: string): Camera => ({ name, enabled: true, mainStream: name, subStream: `${name}_sub` });
 const cameras = [camera("maingate"), camera("garage")];
@@ -56,6 +57,41 @@ describe("App", () => {
     const footer = screen.getByRole("contentinfo", { name: "About Ruru" });
     await waitFor(() => expect(footer).toHaveTextContent("Ruru 1.2.3"));
     expect(calls.map((call) => call.cmd)).toContain("app_info");
+  });
+
+  it("says Edge by the version in the footer on the Edge channel", async () => {
+    backend({ app_info: () => ({ name: "Ruru", version: "1.2.3" }), get_settings: () => ({ ...empty, updateChannel: "edge" }) });
+    render(<App />);
+    const footer = screen.getByRole("contentinfo", { name: "About Ruru" });
+    await waitFor(() => expect(footer).toHaveTextContent("Ruru 1.2.3 · Edge"));
+  });
+
+  it("shows the version and channel in Edit layout", async () => {
+    wall({ app_info: () => ({ name: "Ruru", version: "1.2.3" }), get_settings: () => ({ ...connected, updateChannel: "edge" }) });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit layout" }));
+    expect(within(screen.getByRole("toolbar", { name: "Wall" })).getByText("Ruru 1.2.3 · Edge")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.queryByText("Ruru 1.2.3 · Edge")).not.toBeInTheDocument();
+  });
+
+  it("switching channel in Settings forgets the update the old channel offered", async () => {
+    const calls = backend({
+      set_update_channel: ({ channel }) => ({ ...empty, updateChannel: channel }),
+      fake_update: () => null,
+      check_update: () => null,
+    });
+    findUpdateMock.mockResolvedValue({ version: "0.2.0", install: vi.fn() });
+    render(<App />);
+    expect(await screen.findByRole("dialog", { name: "Ruru 0.2.0 is ready. Install and restart?" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Connect to Frigate" }));
+    fireEvent.click(screen.getByRole("button", { name: "Updates" }));
+    fireEvent.change(screen.getByLabelText("Update channel"), { target: { value: "edge" } });
+    expect(await screen.findByText("Ruru is up to date.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("contentinfo", { name: "About Ruru" })).toHaveTextContent("Ruru 0.1.0 · Edge");
+    expect(calls).toContainEqual({ cmd: "set_update_channel", payload: { channel: "edge" } });
   });
 
   it("leaves the footer empty when app_info fails", async () => {

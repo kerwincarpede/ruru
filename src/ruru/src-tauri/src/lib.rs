@@ -33,7 +33,7 @@ fn app_info() -> AppInfo {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
+        .manage(update::PendingUpdate::default())
         .setup(|app| {
             let full_screen = settings::manage(app);
             menu::install(app)?;
@@ -49,11 +49,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             update::fake_update,
+            update::check_update,
+            update::install_update,
             settings::get_settings,
             settings::save_frigate_url,
             settings::set_full_screen,
             settings::save_layout,
             settings::save_wall_options,
+            settings::set_update_channel,
             frigate::test_frigate,
             frigate::frigate_cameras,
         ])

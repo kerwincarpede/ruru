@@ -1,9 +1,8 @@
 name: Release
 
 # Every push to main is released as an Edge pre-release, with the version
-# read from the commits. Edge builds are installed by hand: installed copies
-# follow the Stable channel, and promote.yml makes a chosen Edge build the
-# Stable release. This run is also
+# read from the commits. Copies on the Edge update channel offer it at once;
+# Stable copies offer it once promote.yml makes it the Stable release. This run is also
 # main's CI: ci.yml runs only for pull requests, so each
 # merge is checked and built once, and those builds are the release. To force
 # a bump instead: Actions → Release → Run workflow, or
@@ -94,7 +93,7 @@ jobs:
           # promote.py drops the "Edge build" paragraph when this release
           # becomes Stable, so keep it on one line.
           body=$(cat <<'BODY'
-          **Edge build.** Install it by hand from **Assets** below. Installed copies of Ruru update only to Stable releases, so they offer this build if it is promoted to Stable.
+          **Edge build.** Copies of Ruru on the Edge update channel offer it now, and Stable copies once it is promoted to Stable. You can also install it from **Assets** below.
 
           ## Install
 
@@ -174,8 +173,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Installed copies of Ruru read latest.json from the latest (Stable)
-      # release to find, and verify, the update package for their platform;
+      # Installed copies of Ruru read latest.json, from the newest release on
+      # Edge or the latest (Stable) one, to find and verify the update
+      # package for their platform;
       # promote.yml reuses this file when it makes the release Stable. Written
       # here rather than by each build, so the four builds cannot race to
       # rewrite it.

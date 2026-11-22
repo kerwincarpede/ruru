@@ -4,13 +4,26 @@ import SettingsDialog from "./SettingsDialog";
 import { DEFAULT_WALL_OPTIONS, type Settings } from "../app/api";
 import { mockCommands } from "../test/mockCommands";
 
-const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, layouts: {} };
+const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", layouts: {} };
+
+const info = { name: "Ruru", version: "0.3.0" };
 
 function open(settings = empty) {
   const onSaved = vi.fn();
+  const onChannelSaved = vi.fn();
+  const onUpdate = vi.fn();
   const onClose = vi.fn();
-  render(<SettingsDialog settings={settings} onSaved={onSaved} onClose={onClose} />);
-  return { onSaved, onClose, field: screen.getByLabelText("Frigate URL") };
+  const props = { info, onSaved, onChannelSaved, onUpdate, onClose };
+  const { rerender } = render(<SettingsDialog settings={settings} {...props} />);
+  // The window passes the saved settings back in, as App does.
+  onChannelSaved.mockImplementation((saved: Settings) => rerender(<SettingsDialog settings={saved} {...props} />));
+  return { onSaved, onChannelSaved, onUpdate, onClose, field: screen.getByLabelText("Frigate URL") };
+}
+
+function openUpdates(settings = empty) {
+  const opened = open(settings);
+  fireEvent.click(screen.getByRole("button", { name: "Updates" }));
+  return { ...opened, channel: screen.getByLabelText("Update channel") };
 }
 
 describe("SettingsDialog", () => {
@@ -88,5 +101,118 @@ describe("SettingsDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("SettingsDialog Updates page", () => {
+  it("shows the version and the saved channel", () => {
+    const { channel } = openUpdates();
+    expect(screen.getByRole("heading", { name: "Updates" })).toBeInTheDocument();
+    expect(screen.getByText("Ruru 0.3.0")).toBeInTheDocument();
+    expect(channel).toHaveValue("stable");
+    expect(channel).toHaveAccessibleDescription("Get updates after they’ve been tried on Edge.");
+  });
+
+  it("says Edge by the version on the Edge channel", () => {
+    const { channel } = openUpdates({ ...empty, updateChannel: "edge" });
+    expect(screen.getByText("Ruru 0.3.0 · Edge")).toBeInTheDocument();
+    expect(channel).toHaveValue("edge");
+  });
+
+  it("keeps a typed URL when moving between pages", () => {
+    const { field } = open();
+    fireEvent.change(field, { target: { value: "http://typed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Updates" }));
+    expect(screen.getByRole("button", { name: "Updates" })).toHaveAttribute("aria-current", "page");
+    fireEvent.click(screen.getByRole("button", { name: "Frigate" }));
+    expect(screen.getByLabelText("Frigate URL")).toHaveValue("http://typed");
+  });
+
+  it("switching to Edge saves it and checks Edge straight away", async () => {
+    const calls = mockCommands({
+      set_update_channel: ({ channel }) => ({ ...empty, updateChannel: channel }),
+      fake_update: () => null,
+      check_update: () => "0.4.0",
+    });
+    const { channel, onChannelSaved, onUpdate } = openUpdates();
+    fireEvent.change(channel, { target: { value: "edge" } });
+    expect(await screen.findByText("Ruru 0.4.0 is ready.")).toBeInTheDocument();
+    expect(onChannelSaved).toHaveBeenCalledWith({ ...empty, updateChannel: "edge" });
+    expect(onUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ version: "0.4.0" }));
+    expect(calls.map((call) => call.cmd)).toEqual(["set_update_channel", "fake_update", "check_update"]);
+    expect(calls[0].payload).toEqual({ channel: "edge" });
+    expect(screen.getByText("Ruru 0.3.0 · Edge")).toBeInTheDocument();
+    expect(screen.getByLabelText("Update channel")).toHaveAccessibleDescription(
+      "Get every change as soon as it’s built. You may run into bugs.",
+    );
+  });
+
+  it("installs the update it found when asked", async () => {
+    const calls = mockCommands({ fake_update: () => null, check_update: () => "0.4.0", install_update: () => null });
+    openUpdates();
+    fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Install and restart" }));
+    await waitFor(() => expect(calls.map((call) => call.cmd)).toContain("install_update"));
+  });
+
+  it("says why an install failed and lets the user try again", async () => {
+    mockCommands({
+      fake_update: () => null,
+      check_update: () => "0.4.0",
+      install_update: () => {
+        throw "The update could not be installed: bad signature";
+      },
+    });
+    openUpdates();
+    fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Install and restart" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("bad signature");
+    expect(screen.getByRole("button", { name: "Install and restart" })).toBeEnabled();
+  });
+
+  it("moving back to Stable says the version is kept until Stable passes it", async () => {
+    mockCommands({
+      set_update_channel: ({ channel }) => ({ ...empty, updateChannel: channel }),
+      fake_update: () => null,
+      check_update: () => null,
+    });
+    const { channel, onUpdate } = openUpdates({ ...empty, updateChannel: "edge" });
+    fireEvent.change(channel, { target: { value: "stable" } });
+    expect(await screen.findByText("Ruru is up to date.")).toBeInTheDocument();
+    expect(onUpdate).toHaveBeenLastCalledWith(null);
+    expect(screen.getByLabelText("Update channel")).toHaveAccessibleDescription(/keep your version until a newer Stable release is out/);
+  });
+
+  it("shows why a check failed", async () => {
+    mockCommands({
+      fake_update: () => null,
+      check_update: () => {
+        throw "Could not find Edge releases: timed out";
+      },
+    });
+    const { onUpdate } = openUpdates({ ...empty, updateChannel: "edge" });
+    fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not find Edge releases: timed out");
+    expect(onUpdate).toHaveBeenLastCalledWith(null);
+  });
+
+  it("keeps the channel when saving it fails", async () => {
+    const calls = mockCommands({
+      set_update_channel: () => {
+        throw "The settings could not be saved: disk full";
+      },
+    });
+    const { channel, onChannelSaved } = openUpdates();
+    fireEvent.change(channel, { target: { value: "edge" } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("disk full");
+    expect(onChannelSaved).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Update channel")).toHaveValue("stable");
+    expect(calls.map((call) => call.cmd)).toEqual(["set_update_channel"]);
+  });
+
+  it("closes on Close", () => {
+    const { onClose } = openUpdates();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });
