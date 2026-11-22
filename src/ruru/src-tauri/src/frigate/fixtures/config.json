@@ -1,0 +1,155 @@
+{
+  "version": "0.18-0",
+  "go2rtc": {
+    "streams": {}
+  },
+  "cameras": {
+    "maingate": {
+      "name": "maingate",
+      "enabled": true,
+      "ffmpeg": {
+        "inputs": [
+          {
+            "path": "rtsp://127.0.0.1:8554/maingate",
+            "roles": [
+              "record"
+            ]
+          },
+          {
+            "path": "rtsp://127.0.0.1:8554/maingate_sub",
+            "roles": [
+              "detect"
+            ]
+          }
+        ]
+      },
+      "live": {
+        "streams": {
+          "maingate": "maingate"
+        },
+        "height": 1080,
+        "quality": 1
+      },
+      "ui": {
+        "order": 1,
+        "dashboard": true,
+        "review": true
+      }
+    },
+    "driveway": {
+      "name": "driveway",
+      "enabled": true,
+      "ffmpeg": {
+        "inputs": [
+          {
+            "path": "rtsp://127.0.0.1:8554/driveway",
+            "roles": [
+              "record"
+            ]
+          },
+          {
+            "path": "rtsp://127.0.0.1:8554/driveway_sub",
+            "roles": [
+              "detect"
+            ]
+          }
+        ]
+      },
+      "live": {
+        "streams": {
+          "driveway": "driveway"
+        },
+        "height": 1080,
+        "quality": 1
+      },
+      "ui": {
+        "order": 3,
+        "dashboard": true,
+        "review": true
+      }
+    },
+    "braai": {
+      "name": "braai",
+      "enabled": true,
+      "ffmpeg": {
+        "inputs": [
+          {
+            "path": "rtsp://127.0.0.1:8554/braai",
+            "roles": [
+              "record"
+            ]
+          },
+          {
+            "path": "rtsp://127.0.0.1:8554/braai_sub",
+            "roles": [
+              "detect"
+            ]
+          }
+        ]
+      },
+      "live": {
+        "streams": {
+          "braai": "braai"
+        },
+        "height": 1080,
+        "quality": 1
+      },
+      "ui": {
+        "order": 3,
+        "dashboard": true,
+        "review": true
+      }
+    },
+    "porch": {
+      "name": "porch",
+      "enabled": false,
+      "ffmpeg": {
+        "inputs": [
+          {
+            "path": "rtsp://127.0.0.1:8554/porch_main",
+            "roles": [
+              "record",
+              "detect"
+            ]
+          }
+        ]
+      },
+      "live": {
+        "streams": {
+          "Main stream": "porch_main",
+          "Low stream": "porch_low"
+        }
+      },
+      "ui": {
+        "order": 1,
+        "dashboard": false,
+        "review": true
+      }
+    },
+    "shed": {
+      "name": "shed",
+      "enabled": true,
+      "ffmpeg": {
+        "inputs": [
+          {
+            "path": "rtsp://10.0.0.9:554/stream1",
+            "roles": [
+              "record",
+              "detect"
+            ]
+          }
+        ]
+      },
+      "live": {
+        "streams": {
+          "shed": "shed"
+        }
+      },
+      "ui": {
+        "order": 0,
+        "dashboard": true,
+        "review": true
+      }
+    }
+  }
+}

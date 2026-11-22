@@ -1,0 +1,172 @@
+{
+  "maingate": {
+    "producers": [
+      {
+        "format_name": "rtsp",
+        "protocol": "rtsp+tcp",
+        "medias": [
+          "video, recvonly, H264",
+          "audio, recvonly, PCMU/8000"
+        ],
+        "receivers": [
+          {
+            "codec": {
+              "codec_name": "h264",
+              "codec_type": "video",
+              "level": 41,
+              "profile": "High"
+            }
+          },
+          {
+            "codec": {
+              "codec_name": "pcm_mulaw",
+              "codec_type": "audio",
+              "sample_rate": 8000
+            }
+          }
+        ]
+      }
+    ],
+    "consumers": []
+  },
+  "maingate_sub": {
+    "producers": [
+      {
+        "format_name": "rtsp",
+        "protocol": "rtsp+tcp",
+        "medias": [
+          "video, recvonly, H264",
+          "audio, recvonly, PCMU/8000"
+        ],
+        "receivers": [
+          {
+            "codec": {
+              "codec_name": "h264",
+              "codec_type": "video",
+              "level": 31,
+              "profile": "High"
+            }
+          },
+          {
+            "codec": {
+              "codec_name": "pcm_mulaw",
+              "codec_type": "audio",
+              "sample_rate": 8000
+            }
+          }
+        ]
+      }
+    ],
+    "consumers": []
+  },
+  "driveway": {
+    "producers": [
+      {
+        "format_name": "rtsp",
+        "protocol": "rtsp+tcp",
+        "medias": [
+          "video, recvonly, H264"
+        ],
+        "receivers": [
+          {
+            "codec": {
+              "codec_name": "h264",
+              "codec_type": "video"
+            }
+          }
+        ]
+      }
+    ],
+    "consumers": []
+  },
+  "driveway_sub": {
+    "producers": [
+      {
+        "format_name": "rtsp",
+        "protocol": "rtsp+tcp",
+        "medias": [
+          "video, recvonly, H264"
+        ],
+        "receivers": [
+          {
+            "codec": {
+              "codec_name": "h264",
+              "codec_type": "video",
+              "level": 30,
+              "profile": "Main"
+            }
+          }
+        ]
+      }
+    ],
+    "consumers": []
+  },
+  "braai": {
+    "producers": [
+      {
+        "format_name": "rtsp",
+        "protocol": "rtsp+tcp",
+        "medias": [
+          "video, recvonly, H264",
+          "audio, recvonly, PCMU/8000"
+        ],
+        "receivers": [
+          {
+            "codec": {
+              "codec_name": "h264",
+              "codec_type": "video",
+              "level": 41,
+              "profile": "High"
+            }
+          },
+          {
+            "codec": {
+              "codec_name": "pcm_mulaw",
+              "codec_type": "audio",
+              "sample_rate": 8000
+            }
+          }
+        ]
+      }
+    ],
+    "consumers": []
+  },
+  "braai_sub": {
+    "producers": [
+      {
+        "format_name": "rtsp",
+        "protocol": "rtsp+tcp",
+        "medias": [
+          "video, recvonly, H264",
+          "audio, recvonly, PCMU/8000"
+        ],
+        "receivers": [
+          {
+            "codec": {
+              "codec_name": "h264",
+              "codec_type": "video",
+              "level": 31,
+              "profile": "High"
+            }
+          },
+          {
+            "codec": {
+              "codec_name": "pcm_mulaw",
+              "codec_type": "audio",
+              "sample_rate": 8000
+            }
+          }
+        ]
+      }
+    ],
+    "consumers": []
+  },
+  "porch_main": {
+    "producers": [],
+    "consumers": []
+  },
+  "porch_low": {
+    "producers": [],
+    "consumers": []
+  }
+}

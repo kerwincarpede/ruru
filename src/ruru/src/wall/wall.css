@@ -1,0 +1,115 @@
+.wall {
+  position: relative;
+  flex: 1;
+  min-height: 100%;
+  background: var(--wall);
+}
+
+.wall-cell {
+  overflow: hidden;
+  border-radius: 6px;
+}
+
+.tile {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--wall);
+  user-select: none;
+}
+
+.tile-snapshot,
+.tile-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* The snapshot shows until the video plays over it. */
+.tile-video {
+  opacity: 0;
+}
+
+.tile.is-playing .tile-video {
+  opacity: 1;
+}
+
+.tile-name {
+  position: absolute;
+  bottom: 0.4rem;
+  left: 0.4rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: var(--chrome);
+  color: var(--on-wall);
+  font-size: 0.8rem;
+  pointer-events: none;
+}
+
+.tile-status {
+  color: var(--accent);
+}
+
+.tile-hide {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  padding: 0.2rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.wall.is-editing .wall-cell {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+  cursor: move;
+}
+
+.wall.is-editing .react-grid-item.react-grid-placeholder {
+  background: var(--accent);
+}
+
+.wall-maximised {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--wall);
+}
+
+.wall-menu {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.wall-menu button {
+  padding: 0.45rem 0.75rem;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wall-menu button:hover,
+.wall-menu button:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}

@@ -6,6 +6,12 @@
   --accent: #b5762c;
   --accent-soft: #f1dfc4;
   --border: #e3ded4;
+  --danger: #b3261e;
+  --scrim: rgb(20 18 15 / 45%);
+  --shadow: 0 18px 48px rgb(20 18 15 / 22%);
+  --wall: #0d0e11;
+  --on-wall: #f4f2ee;
+  --chrome: rgb(30 33 40 / 78%);
 
   color-scheme: light dark;
   font-family: "Instrument Sans Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -25,6 +31,12 @@
     --accent: #e0a458;
     --accent-soft: #3a2f22;
     --border: #2c3039;
+    --danger: #f2b8b5;
+    --scrim: rgb(0 0 0 / 60%);
+    --shadow: 0 18px 48px rgb(0 0 0 / 55%);
+    --wall: #08090b;
+    --on-wall: #ece9e3;
+    --chrome: rgb(30 33 40 / 82%);
   }
 }
 
@@ -44,9 +56,173 @@ body {
 }
 
 .window {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 100%;
+}
+
+.window.has-wall {
+  height: 100%;
+  overflow: auto;
+  background: var(--wall);
+}
+
+button {
+  font: inherit;
+}
+
+.connect,
+.toolbar button,
+.dialog-foot button,
+.settings-test button {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.connect,
+.toolbar button.primary,
+.dialog-foot button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.connect {
+  margin-top: 1.25rem;
+  padding: 0.55rem 1.2rem;
+  font-size: 1rem;
+}
+
+.connect:focus-visible,
+.toolbar button:focus-visible,
+.dialog-foot button:focus-visible,
+.settings-test button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* The toolbar fades in while the pointer moves and away when it rests. */
+.toolbar {
+  position: fixed;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 50;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  max-width: calc(100% - 1.5rem);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+
+.toolbar.is-shown,
+.toolbar:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.toolbar .icon-button {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+}
+
+.toolbar-note {
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  background: var(--chrome);
+  color: var(--on-wall);
+  font-size: 0.85rem;
+}
+
+.wall-error,
+.wall-empty {
+  margin: 3.5rem auto 0;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.wall-error {
+  color: var(--danger);
+}
+
+/* A dialog over the window: Settings. */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--scrim);
+}
+
+.dialog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--bg);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  outline: none;
+}
+
+.dialog-title {
+  margin: 0;
+  padding: 20px 24px 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.dialog-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px 12px 24px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toolbar {
+    transition: none;
+  }
 }
 
 .hero {

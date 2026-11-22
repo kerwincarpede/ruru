@@ -1,6 +1,11 @@
 use serde::Serialize;
+use tauri::Manager;
 
+mod frigate;
+mod menu;
+mod settings;
 mod update;
+mod webview;
 
 /// The app's name and version, for the window footer.
 ///
@@ -29,7 +34,27 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![app_info, update::fake_update])
+        .setup(|app| {
+            let full_screen = settings::manage(app);
+            menu::install(app)?;
+            if let Some(window) = app.get_webview_window("main") {
+                webview::enable_webrtc(&window)?;
+                if full_screen {
+                    window.set_fullscreen(true)?;
+                }
+            }
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            app_info,
+            update::fake_update,
+            settings::get_settings,
+            settings::save_frigate_url,
+            settings::set_full_screen,
+            settings::save_layout,
+            frigate::test_frigate,
+            frigate::frigate_cameras,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Ruru");
 }
