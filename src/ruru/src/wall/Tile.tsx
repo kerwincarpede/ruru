@@ -38,7 +38,7 @@ export default function Tile({ base, camera, stream, live, refresh = 0, editing 
     };
   }, [base, stream, live]);
 
-  const playing = live && state === "playing";
+  const playing = live && (state === "playing" || state === "stalled");
   return (
     <figure
       className={`tile${playing ? " is-playing" : ""}`}

@@ -1,9 +1,9 @@
 import { useEffect, useState, type RefObject } from "react";
-import { frameRate, sampleFrames, type FrameSample } from "./diagnostics";
+import { frameRate, type FrameSample } from "./diagnostics";
 import type { Go2rtcPlayer, PlayerState } from "./player";
 
 interface Props {
-  player: RefObject<Pick<Go2rtcPlayer, "connection"> | null>;
+  player: RefObject<Pick<Go2rtcPlayer, "connection" | "frames"> | null>;
   video: RefObject<HTMLVideoElement | null>;
   stream: string;
   state: PlayerState;
@@ -15,11 +15,15 @@ export default function TileDiagnostics({ player, video, stream, state }: Props)
   useEffect(() => {
     let previous: FrameSample | undefined;
     let generation: number | undefined;
-    const update = () => {
+    let active = true;
+    const update = async () => {
       const element = video.current;
-      const link = player.current?.connection();
-      if (!element || !link) return;
-      const frames = sampleFrames(element);
+      const source = player.current;
+      if (!element || !source) return;
+      const counts = await source.frames();
+      if (!active) return;
+      const link = source.connection();
+      const frames = counts && { ...counts, at: performance.now() };
       const rate = link.transport && generation === link.generation ? frameRate(previous, frames) : undefined;
       previous = frames;
       generation = link.generation;
@@ -32,12 +36,16 @@ export default function TileDiagnostics({ player, video, stream, state }: Props)
       });
     };
     // Defer the first read until the parent has attached the player.
-    const first = setTimeout(update, 0);
-    const timer = setInterval(update, 1000);
-    return () => { clearTimeout(first); clearInterval(timer); };
+    const first = setTimeout(() => void update(), 0);
+    const timer = setInterval(() => void update(), 1000);
+    return () => {
+      active = false;
+      clearTimeout(first);
+      clearInterval(timer);
+    };
   }, [player, video]);
   return (
-    <aside className="tile-debug" aria-label="Playback diagnostics">
+    <aside className="tile-debug" aria-label="Stream info">
       <strong>{sample?.rate ? sample.rate.fps.toFixed(1) : "—"} fps</strong> · {state}
       <div>{sample?.transport ?? "Connecting…"}</div>
       <div className="debug-stream" title={stream}>{stream}{sample?.resolution && ` · ${sample.resolution}`}</div>
