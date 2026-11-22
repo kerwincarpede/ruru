@@ -94,3 +94,27 @@ export function showCamera(layout: SavedLayout, camera: string): SavedLayout {
 export function rowHeight(width: number, columns = COLUMNS): number {
   return Math.max(4, ((width - GAP * (columns + 1)) / columns) * ROW_RATIO);
 }
+
+/** How many grid rows `items` use. */
+export function gridRows(items: { y: number; h: number }[]): number {
+  return items.reduce((rows, item) => Math.max(rows, item.y + item.h), 0);
+}
+
+/** The height of a grid `width` pixels wide holding `rows` rows, padding included. */
+export function gridHeight(width: number, rows: number, columns = COLUMNS): number {
+  if (rows <= 0) return 0;
+  return rows * rowHeight(width, columns) + (rows - 1) * GAP * ROW_RATIO + 2 * GAP;
+}
+
+/**
+ * The width to draw the grid at so `rows` rows fit in `height` as well as
+ * `width`. Tiles keep their shape, so a wall too tall for the window is
+ * drawn narrower instead of scrolling.
+ */
+export function fitWidth(width: number, height: number, rows: number, columns = COLUMNS): number {
+  if (rows <= 0 || height <= 0 || gridHeight(width, rows, columns) <= height) return width;
+  const row = (height - 2 * GAP - (rows - 1) * GAP * ROW_RATIO) / rows;
+  const fitted = (row / ROW_RATIO) * columns + GAP * (columns + 1);
+  // A window too short for any picture still gets a usable grid.
+  return Math.max(Math.min(width, fitted), Math.min(width, GAP * (columns + 1) + columns * 4));
+}

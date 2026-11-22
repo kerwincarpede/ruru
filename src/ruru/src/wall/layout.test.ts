@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   COLUMNS,
   defaultPlacements,
+  fitWidth,
   fromGridItems,
+  gridHeight,
+  gridRows,
   hideCamera,
   rowHeight,
   showCamera,
@@ -77,5 +80,30 @@ describe("rowHeight", () => {
     const width = 4 + 24 * 44;
     expect(rowHeight(width)).toBeCloseTo((40 * 9) / 16);
     expect(rowHeight(0)).toBe(4);
+  });
+});
+
+describe("fitWidth", () => {
+  it("counts the rows the tiles use", () => {
+    expect(gridRows([])).toBe(0);
+    expect(gridRows([{ y: 0, h: 12 }, { y: 12, h: 6 }, { y: 0, h: 4 }])).toBe(18);
+  });
+
+  it("keeps the full width when the wall already fits the window's height", () => {
+    expect(fitWidth(1600, 2000, 12)).toBe(1600);
+    expect(gridHeight(1600, 12)).toBeLessThan(2000);
+  });
+
+  it("narrows a wall too tall for the window until its height fits exactly", () => {
+    // Two rows of 16:9 tiles on a wide but short window.
+    const width = fitWidth(1600, 600, 24);
+    expect(width).toBeLessThan(1600);
+    expect(gridHeight(width, 24)).toBeCloseTo(600, 6);
+  });
+
+  it("leaves a usable grid however short the window and ignores an empty wall", () => {
+    expect(fitWidth(1600, 10, 48)).toBeGreaterThan(0);
+    expect(fitWidth(1600, 600, 0)).toBe(1600);
+    expect(fitWidth(1600, 0, 12)).toBe(1600);
   });
 });
