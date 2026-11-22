@@ -10,6 +10,7 @@ type GridProps = {
   layout: GridItem[];
   isDraggable: boolean;
   isResizable: boolean;
+  onResize: (layout: GridItem[], old: GridItem, tile: GridItem, placeholder: GridItem) => void;
   onDragStop: (layout: GridItem[]) => void;
   onResizeStop: (layout: GridItem[]) => void;
 };
@@ -27,7 +28,7 @@ vi.mock("react-grid-layout", () => ({
 
 const camera = (name: string): Camera => ({ name, enabled: true, mainStream: name, subStream: `${name}_sub` });
 
-function renderWall(editing: boolean) {
+function renderWall(editing: boolean, lockRatio = true) {
   const onLayout = vi.fn();
   render(
     <Wall
@@ -36,6 +37,7 @@ function renderWall(editing: boolean) {
       layout={{ tiles: [], hidden: ["c"] }}
       live={false}
       editing={editing}
+      lockRatio={lockRatio}
       refresh={0}
       onLayout={onLayout}
     />,
@@ -49,6 +51,15 @@ describe("Wall", () => {
     expect(grid.props?.isDraggable).toBe(false);
     expect(grid.props?.isResizable).toBe(false);
     expect(screen.getAllByRole("figure")).toHaveLength(2);
+  });
+
+  it.each([true, false])("constrains the tile and preview only with the lock on (%s)", (locked) => {
+    renderWall(true, locked);
+    const tile = { i: "a", x: 0, y: 0, w: 8, h: 3 };
+    const preview = { ...tile };
+    grid.props?.onResize([tile], tile, tile, preview);
+    expect(tile.h).toBe(locked ? 8 : 3);
+    expect(preview.h).toBe(tile.h);
   });
 
   it("saves the layout after a drag or a resize, keeping hidden cameras", () => {

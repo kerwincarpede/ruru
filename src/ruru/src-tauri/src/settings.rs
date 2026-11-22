@@ -1,6 +1,6 @@
 //! Ruru's settings, stored as `settings.json` in the app config folder: the
-//! Frigate URL, whether the window is full screen, and one wall layout per
-//! Frigate server.
+//! Frigate URL, whether the window is full screen, how the wall is drawn,
+//! and one wall layout per Frigate server.
 //!
 //! Missing keys fall back to their defaults and unknown keys are ignored, so
 //! settings files from other versions still load.
@@ -27,6 +27,14 @@ pub const MAX_TILE_OFFSET: u32 = 10_000;
 /// The longest camera name a layout may name.
 const MAX_CAMERA_NAME: usize = 200;
 
+/// A feed selected explicitly instead of the wall and maximised defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StreamChoice {
+    Main,
+    Sub,
+}
+
 /// One tile's place on the wall, in grid units.
 ///
 /// Mirrored by `TilePlacement` in `src/app/api.ts`.
@@ -38,6 +46,8 @@ pub struct TilePlacement {
     pub y: u32,
     pub w: u32,
     pub h: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream: Option<StreamChoice>,
 }
 
 /// The wall layout saved for one Frigate server: where each tile sits and
@@ -51,6 +61,31 @@ pub struct SavedLayout {
     pub hidden: Vec<String>,
 }
 
+/// How the wall is drawn, chosen in Edit layout and the right-click menu.
+/// The same for every Frigate server.
+///
+/// Mirrored by `WallOptions` in `src/app/api.ts`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct WallOptions {
+    /// Resizing a tile keeps it 16:9.
+    pub lock_ratio: bool,
+    /// The wall shrinks to fit the window's height as well as its width.
+    pub fit_to_window: bool,
+    /// Each tile shows its stream info overlay.
+    pub stream_info: bool,
+}
+
+impl Default for WallOptions {
+    fn default() -> Self {
+        Self {
+            lock_ratio: true,
+            fit_to_window: true,
+            stream_info: false,
+        }
+    }
+}
+
 /// Everything Ruru remembers between launches.
 ///
 /// Mirrored by `Settings` in `src/app/api.ts`.
@@ -62,6 +97,8 @@ pub struct Settings {
     pub frigate_url: Option<String>,
     /// The window was full screen when Ruru last changed it.
     pub full_screen: bool,
+    /// How the wall is drawn.
+    pub wall: WallOptions,
     /// Layouts by normalised Frigate URL.
     pub layouts: BTreeMap<String, SavedLayout>,
 }
@@ -239,6 +276,11 @@ impl SettingsStore {
         Ok(true)
     }
 
+    /// Saves how the wall is drawn.
+    pub fn set_wall_options(&mut self, wall: WallOptions) -> Result<&Settings, SettingsError> {
+        self.update(|settings| settings.wall = wall)
+    }
+
     /// Saves the layout for the Frigate server at `server`.
     pub fn set_layout(
         &mut self,
@@ -347,6 +389,18 @@ pub async fn save_layout(
         .map_err(|err| err.to_string())
 }
 
+/// Saves how the wall is drawn: Lock to 16:9, Fit to window and stream info.
+#[tauri::command]
+pub async fn save_wall_options(
+    state: State<'_, SharedSettings>,
+    options: WallOptions,
+) -> Result<(), String> {
+    lock(&state)
+        .set_wall_options(options)
+        .map(|_| ())
+        .map_err(|err| err.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -385,6 +439,7 @@ mod tests {
             y,
             w,
             h,
+            stream: None,
         }
     }
 
@@ -451,8 +506,40 @@ mod tests {
         let settings = load(&dir.file()).unwrap();
         assert_eq!(settings.frigate_url.as_deref(), Some("http://a"));
         assert!(!settings.full_screen);
+        assert_eq!(settings.wall, WallOptions::default());
         assert_eq!(settings.layouts["http://a"].hidden, vec!["x".to_string()]);
         assert!(settings.layouts["http://a"].tiles.is_empty());
+    }
+
+    #[test]
+    fn wall_options_default_to_locked_and_fitted_without_stream_info() {
+        let defaults = WallOptions::default();
+        assert!(defaults.lock_ratio && defaults.fit_to_window && !defaults.stream_info);
+        assert_eq!(Settings::default().wall, defaults);
+        // A file from before the options, or with only some of them, keeps the rest.
+        let partial: Settings =
+            serde_json::from_str(r#"{"wall": {"streamInfo": true, "lockRatio": false}}"#).unwrap();
+        assert_eq!(
+            partial.wall,
+            WallOptions {
+                lock_ratio: false,
+                fit_to_window: true,
+                stream_info: true,
+            }
+        );
+    }
+
+    #[test]
+    fn wall_options_are_saved_and_load_again() {
+        let dir = TempDir::new("wall-options");
+        let mut store = SettingsStore::open(Some(dir.file()));
+        let wall = WallOptions {
+            lock_ratio: false,
+            fit_to_window: false,
+            stream_info: true,
+        };
+        assert_eq!(store.set_wall_options(wall).unwrap().wall, wall);
+        assert_eq!(SettingsStore::open(Some(dir.file())).current().wall, wall);
     }
 
     #[test]
@@ -499,6 +586,7 @@ mod tests {
         let mut settings = Settings {
             frigate_url: Some("http://a".into()),
             full_screen: true,
+            wall: WallOptions::default(),
             layouts: BTreeMap::new(),
         };
         settings.layouts.insert(
@@ -513,6 +601,7 @@ mod tests {
             serde_json::json!({
                 "frigateUrl": "http://a",
                 "fullScreen": true,
+                "wall": {"lockRatio": true, "fitToWindow": true, "streamInfo": false},
                 "layouts": {"http://a": {"tiles": [{"camera": "cam", "x": 1, "y": 2, "w": 3, "h": 4}], "hidden": []}}
             })
         );

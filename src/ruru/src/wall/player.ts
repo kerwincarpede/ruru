@@ -1,4 +1,6 @@
 import { streamSocketUrl } from "../app/frigate";
+import { inboundVideoFrames, videoFrames, type FrameCounts } from "./diagnostics";
+import { ExpiringSet } from "./memory";
 
 /**
  * A live player for one go2rtc stream, modelled on go2rtc's MIT-licensed
@@ -7,8 +9,12 @@ import { streamSocketUrl } from "../app/frigate";
  * and reconnects with a growing delay when the stream drops.
  */
 
-/** What a player is doing, for the tile to show. */
-export type PlayerState = "connecting" | "playing" | "retrying";
+/**
+ * What a player is doing, for the tile to show. `stalled` means the picture
+ * stopped moving but the connection is still up; `failed` means the webview
+ * cannot decode the stream, so the player gave up on it.
+ */
+export type PlayerState = "connecting" | "playing" | "stalled" | "retrying" | "failed";
 
 export interface PlayerOptions {
   /** The Frigate URL, such as `http://frigate.local:5000`. */
@@ -27,13 +33,43 @@ export const RETRY_MAX_MS = 30000;
 /** MSE keeps this many seconds of video, and skips ahead when it falls further behind. */
 export const KEEP_S = 5;
 /** MSE playback speeds up or slows down within these rates to stay near the live edge. */
-const MIN_RATE = 0.1;
-const MAX_RATE = 2;
+const MIN_RATE = 0.95;
+const MAX_RATE = 1.08;
 
 /** A stream whose picture has not moved for this long is reconnected. */
 export const STALL_MS = 10000;
+/** A playing stream whose picture has not moved for this long shows as stalled. */
+export const STALE_MS = 4000;
 /** How often the picture is checked for movement. */
 export const STALL_CHECK_MS = 2000;
+/** This many decode errors in a row, with no frame shown between them, mean the stream cannot play here. */
+export const DECODE_FAILURES = 2;
+/**
+ * How long a failure is remembered: a server whose WebRTC did not connect
+ * goes straight to MSE, and a stream that could not be decoded is skipped.
+ * Afterwards both are tried again, in case the server was fixed.
+ */
+export const FAILURE_MEMORY_MS = 10 * 60 * 1000;
+
+/** MediaError.MEDIA_ERR_DECODE. */
+const MEDIA_ERR_DECODE = 3;
+
+/** Frigate servers, by base URL, whose WebRTC recently failed to connect. */
+const webrtcFailures = new ExpiringSet(FAILURE_MEMORY_MS);
+/** Streams, by base URL and name, the webview recently failed to decode. */
+const undecodable = new ExpiringSet(FAILURE_MEMORY_MS);
+const streamKey = (base: string, stream: string) => `${base}\n${stream}`;
+
+/** Whether `stream` recently failed to decode here, so a tile should play another one. */
+export function isUndecodable(base: string, stream: string): boolean {
+  return undecodable.has(streamKey(base, stream));
+}
+
+/** Forgets every remembered failure. For tests. */
+export function forgetFailures(): void {
+  webrtcFailures.clear();
+  undecodable.clear();
+}
 
 /**
  * The video codecs go2rtc can send over MSE, from video-rtc.js. Tiles are
@@ -61,10 +97,17 @@ export class Go2rtcPlayer {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private watchdog: ReturnType<typeof setInterval> | null = null;
   private onPlaying: (() => void) | null = null;
+  private onError: (() => void) | null = null;
   private attempt = 0;
   private stopped = true;
-  /** WebRTC failed to connect once, so this player sticks to MSE. */
+  private state: PlayerState | null = null;
+  private mode: Mode | null = null;
+  /** WebRTC gave this stream no picture, so this player sticks to MSE. */
   private webrtcFailed = false;
+  /** Decode errors since a frame was last shown. */
+  private decodeErrors = 0;
+  /** When the picture last moved, for the tile to say how old a frozen frame is. */
+  private movedAt: number | undefined;
   /** Bumped on every connection, so late events from an old one are ignored. */
   private generation = 0;
 
@@ -72,11 +115,40 @@ export class Go2rtcPlayer {
     this.options = options;
   }
 
+  /** Local transport details; no extra connection or network request. */
+  connection() {
+    return {
+      generation: this.generation,
+      transport: this.peer ? "WebRTC" : this.socket ? "MSE" : undefined,
+      status: this.peer?.connectionState ?? (this.socket ? (this.socket.readyState === WebSocket.OPEN ? "connected" : "connecting") : undefined),
+      fallback: this.mode === "mse" && typeof RTCPeerConnection !== "undefined",
+    };
+  }
+
+  /**
+   * The stream's frame counters. WebRTC reads them from the connection's
+   * stats, because WebKit counts no frames on a MediaStream video element.
+   */
+  async frames(): Promise<FrameCounts | undefined> {
+    const { peer } = this;
+    if (peer && typeof peer.getStats === "function") {
+      const counts = await peer.getStats().then(inboundVideoFrames, () => undefined);
+      if (counts) return counts;
+    }
+    return videoFrames(this.options.video);
+  }
+
+  /** When the picture last moved (as `Date.now()`), or undefined before the first frame. */
+  lastFrameAt(): number | undefined {
+    return this.movedAt;
+  }
+
   /** Starts playing. Calling it while playing does nothing. */
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;
     this.attempt = 0;
+    this.decodeErrors = 0;
     this.connect();
   }
 
@@ -90,6 +162,7 @@ export class Go2rtcPlayer {
     this.teardown();
     this.setState("connecting");
     const mode: Mode = this.webrtcAvailable() ? "webrtc" : "mse";
+    this.mode = mode;
     const generation = ++this.generation;
     this.watch(generation, mode);
     if (mode === "webrtc") this.startWebRtc(generation);
@@ -108,33 +181,60 @@ export class Go2rtcPlayer {
     const show = () => {
       if (shown || !this.current(generation)) return;
       shown = true;
+      this.decodeErrors = 0;
+      this.movedAt = Date.now();
       this.playing();
     };
     this.onPlaying = () => {
       if (!this.current(generation)) return;
       if (typeof video.requestVideoFrameCallback === "function") video.requestVideoFrameCallback(show);
-      else if (decoded(video)) show();
+      // WebKit counts no frames on a MediaStream, so WebRTC asks for a picture instead.
+      else if (mode === "webrtc" ? video.readyState >= HAVE_CURRENT_DATA : decoded(video)) show();
     };
     video.addEventListener("playing", this.onPlaying);
-    let last = progress(video);
+    this.onError = () => this.retry(generation);
+    video.addEventListener("error", this.onError);
+
+    let last = mode === "webrtc" ? video.currentTime : progress(video);
     let lastMoved = Date.now();
-    this.watchdog = setInterval(() => {
-      const now = progress(video);
+    let checking = false;
+    const check = (now: number) => {
+      if (!this.current(generation)) return;
       if (moved(video, last, now)) {
         lastMoved = Date.now();
         // A frame can decode after the element's `playing` event.
-        if (!video.paused && decoded(video)) show();
+        if (!video.paused && (mode === "webrtc" ? now > 0 : decoded(video))) show();
+        if (shown) this.movedAt = lastMoved;
+        if (this.state === "stalled") this.setState("playing");
       } else if (Date.now() - lastMoved >= STALL_MS) {
         // WebRTC that connects but never shows a frame gives way to MSE.
-        if (mode === "webrtc" && !shown) this.fallBack(generation);
+        if (mode === "webrtc" && !shown) this.fallBack(generation, false);
         else this.retry(generation);
+      } else if (shown && this.state === "playing" && Date.now() - lastMoved >= STALE_MS) {
+        this.setState("stalled");
       }
       last = now;
+    };
+    this.watchdog = setInterval(() => {
+      if (checking) return;
+      // WebKit counts no frames on a MediaStream, so WebRTC counts the
+      // frames its connection decoded, or failing that the play position.
+      const peer = mode === "webrtc" ? this.peer : null;
+      if (peer && typeof peer.getStats === "function") {
+        checking = true;
+        void peer
+          .getStats()
+          .then(inboundVideoFrames, () => undefined)
+          .then((counts) => {
+            checking = false;
+            check(counts ? counts.shown : video.currentTime);
+          });
+      } else check(mode === "webrtc" ? video.currentTime : progress(video));
     }, STALL_CHECK_MS);
   }
 
   private webrtcAvailable(): boolean {
-    return !this.webrtcFailed && typeof RTCPeerConnection !== "undefined";
+    return !this.webrtcFailed && !webrtcFailures.has(this.options.base) && typeof RTCPeerConnection !== "undefined";
   }
 
   private current(generation: number): boolean {
@@ -142,6 +242,7 @@ export class Go2rtcPlayer {
   }
 
   private setState(state: PlayerState): void {
+    this.state = state;
     this.options.onState?.(state);
   }
 
@@ -150,11 +251,19 @@ export class Go2rtcPlayer {
     this.setState("playing");
   }
 
-  /** The connection dropped: try again after the backoff delay. */
+  /**
+   * The connection dropped: try again after the backoff delay. A stream the
+   * webview keeps failing to decode is given up on instead. The state is set
+   * before the video is cleared, so the tile can keep its last frame.
+   */
   private retry(generation: number): void {
     if (!this.current(generation)) return;
-    this.teardown();
+    if (this.options.video.error?.code === MEDIA_ERR_DECODE && ++this.decodeErrors >= DECODE_FAILURES) {
+      this.fail();
+      return;
+    }
     this.setState("retrying");
+    this.teardown();
     const delay = retryDelay(this.attempt++);
     this.timer = setTimeout(() => {
       this.timer = null;
@@ -162,10 +271,24 @@ export class Go2rtcPlayer {
     }, delay);
   }
 
-  /** WebRTC did not connect: use MSE from now on, straight away. */
-  private fallBack(generation: number): void {
+  /** The webview cannot decode this stream: stop, and remember it so tiles play another. */
+  private fail(): void {
+    const { base, stream } = this.options;
+    undecodable.add(streamKey(base, stream));
+    this.stopped = true;
+    this.setState("failed");
+    this.teardown();
+  }
+
+  /**
+   * WebRTC did not work: use MSE straight away. When it did not connect at
+   * all, every player for this server skips WebRTC for a while; when only
+   * this stream failed, only this player does.
+   */
+  private fallBack(generation: number, serverWide = true): void {
     if (!this.current(generation)) return;
-    this.webrtcFailed = true;
+    if (serverWide) webrtcFailures.add(this.options.base);
+    else this.webrtcFailed = true;
     this.connect();
   }
 
@@ -233,8 +356,9 @@ export class Go2rtcPlayer {
       } else if (message.type === "webrtc/candidate") {
         if (message.value) void peer.addIceCandidate({ candidate: message.value, sdpMid: "0" }).catch(() => {});
       } else if (message.type === "error") {
+        // go2rtc refused this stream over WebRTC, such as for its codec.
         if (connected) this.retry(generation);
-        else this.fallBack(generation);
+        else this.fallBack(generation, false);
       }
     };
     socket.onclose = () => {
@@ -264,6 +388,7 @@ export class Go2rtcPlayer {
       try {
         buffer.appendBuffer(queue.shift() as ArrayBuffer);
       } catch {
+        // The element's error, if any, says whether it was a decode error.
         this.retry(generation);
       }
     };
@@ -277,7 +402,7 @@ export class Go2rtcPlayer {
       const end = video.buffered.end(video.buffered.length - 1);
       const keepFrom = end - KEEP_S;
       const first = video.buffered.start(0);
-      if (keepFrom > first) {
+      if (keepFrom - first >= 2) {
         try {
           buffer.remove(first, keepFrom);
         } catch {
@@ -285,7 +410,10 @@ export class Go2rtcPlayer {
         }
       }
       if (video.currentTime < keepFrom) video.currentTime = keepFrom;
-      video.playbackRate = Math.max(MIN_RATE, Math.min(end - video.currentTime, MAX_RATE));
+      // Playback that paused or ended at the live edge carries on.
+      if (video.paused) play(video);
+      const lead = end - video.currentTime;
+      video.playbackRate = lead > 1.5 ? MAX_RATE : lead < 0.35 ? MIN_RATE : 1;
     };
 
     socket.onopen = () => {
@@ -297,10 +425,20 @@ export class Go2rtcPlayer {
         const message = parseMessage(event.data);
         if (message?.type === "mse" && !buffer) {
           const create = () => {
+            if (!this.current(generation)) return;
             try {
               buffer = source.addSourceBuffer(message.value);
               buffer.mode = "segments";
+              // A live stream has no end. go2rtc's fMP4 leaves the duration
+              // at the buffered end, so WebKit pauses and ends playback
+              // each time it catches up with the live edge.
+              try {
+                source.duration = Infinity;
+              } catch {
+                // The webview keeps its own duration; keepUp resumes playback.
+              }
               buffer.addEventListener("updateend", () => {
+                if (!this.current(generation)) return;
                 keepUp();
                 flush();
               });
@@ -335,6 +473,8 @@ export class Go2rtcPlayer {
     this.watchdog = null;
     if (this.onPlaying) this.options.video.removeEventListener("playing", this.onPlaying);
     this.onPlaying = null;
+    if (this.onError) this.options.video.removeEventListener("error", this.onError);
+    this.onError = null;
     const { socket, peer } = this;
     this.socket = null;
     this.peer = null;
@@ -349,6 +489,7 @@ export class Go2rtcPlayer {
       video.removeAttribute("src");
     }
     video.srcObject = null;
+    video.playbackRate = 1;
   }
 }
 
@@ -361,15 +502,13 @@ const HAVE_CURRENT_DATA = 2;
  * the play position only where that API is missing.
  */
 function progress(video: HTMLVideoElement): number {
-  return typeof video.getVideoPlaybackQuality === "function"
-    ? video.getVideoPlaybackQuality().totalVideoFrames
-    : video.currentTime;
+  return videoFrames(video)?.shown ?? video.currentTime;
 }
 
 /** Whether a frame has been decoded. */
 function decoded(video: HTMLVideoElement): boolean {
-  if (typeof video.getVideoPlaybackQuality === "function") return video.getVideoPlaybackQuality().totalVideoFrames > 0;
-  return video.readyState >= HAVE_CURRENT_DATA;
+  const frames = videoFrames(video);
+  return frames ? frames.shown > 0 : video.readyState >= HAVE_CURRENT_DATA;
 }
 
 /**

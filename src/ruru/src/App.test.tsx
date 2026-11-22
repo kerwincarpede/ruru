@@ -4,7 +4,7 @@ import { emit } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { Camera } from "./app/frigate";
-import type { SavedLayout, Settings } from "./app/api";
+import { DEFAULT_WALL_OPTIONS, type SavedLayout, type Settings } from "./app/api";
 import { findUpdate } from "./app/updates";
 import { mockCommands, type CommandHandlers } from "./test/mockCommands";
 
@@ -13,7 +13,7 @@ vi.mock("./app/updates", () => ({ findUpdate: vi.fn() }));
 const findUpdateMock = vi.mocked(findUpdate);
 
 const URL_SAVED = "http://frigate:5000";
-const empty: Settings = { frigateUrl: null, fullScreen: false, layouts: {} };
+const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, layouts: {} };
 const connected: Settings = { ...empty, frigateUrl: URL_SAVED };
 const camera = (name: string): Camera => ({ name, enabled: true, mainStream: name, subStream: `${name}_sub` });
 const cameras = [camera("maingate"), camera("garage")];
@@ -31,6 +31,7 @@ function wall(handlers: CommandHandlers = {}) {
     get_settings: () => connected,
     frigate_cameras: () => cameras,
     save_layout: () => null,
+    save_wall_options: () => null,
     set_full_screen: () => null,
     ...handlers,
   });
@@ -174,6 +175,80 @@ describe("App", () => {
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeInTheDocument();
   });
 
+  it("remembers a camera's stream choice without changing its neighbour", async () => {
+    const calls = wall();
+    render(<App />);
+    const garage = await screen.findByRole("figure", { name: "Garage" });
+    fireEvent.contextMenu(garage);
+    expect(screen.getByRole("menuitemradio", { name: "Automatic (Sub)" })).toBeChecked();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Main stream" }));
+    await waitFor(() => expect(calls).toContainEqual({ cmd: "save_layout", payload: {
+      server: URL_SAVED, layout: { tiles: [expect.objectContaining({ camera: "maingate" }), expect.objectContaining({ camera: "garage", stream: "main" })], hidden: [] },
+    } }));
+    fireEvent.contextMenu(garage);
+    expect(screen.getByRole("menuitemradio", { name: "Main stream" })).toBeChecked();
+    fireEvent.contextMenu(screen.getByRole("figure", { name: "Maingate" }));
+    expect(screen.getByRole("menuitemradio", { name: "Automatic (Sub)" })).toBeChecked();
+  });
+
+  it("heads a tile's menu with its camera, then its actions, then the wall's", async () => {
+    wall();
+    render(<App />);
+    fireEvent.contextMenu(await screen.findByRole("figure", { name: "Garage" }));
+    const menu = screen.getByRole("menu", { name: "Garage" });
+    expect(within(menu).getAllByRole("group").map((group) => Array.from(group.querySelectorAll("button"), (item) => item.textContent))).toEqual([
+      ["Maximise", "Reconnect", "Hide", "Show stream info"],
+      ["Automatic (Sub)", "Main stream", "Sub stream"],
+      ["Settings…", "Edit layout", "Fit to window", "Enter full screen"],
+    ]);
+    expect(within(menu).getByRole("group", { name: "Stream" })).toBeInTheDocument();
+    expect(within(menu).getByRole("group", { name: "Garage" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Maximise" }));
+    expect(screen.getByRole("figure", { name: "Garage" })).toHaveClass("is-maximised");
+    fireEvent.contextMenu(screen.getByRole("figure", { name: "Garage" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Restore" }));
+    expect(screen.getByRole("figure", { name: "Garage" })).not.toHaveClass("is-maximised");
+  });
+
+  it("hides a camera from its right-click menu, restoring it if maximised", async () => {
+    const calls = wall();
+    render(<App />);
+    const garage = await screen.findByRole("figure", { name: "Garage" });
+    fireEvent.doubleClick(garage);
+    fireEvent.contextMenu(garage);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Hide" }));
+    expect(screen.queryByRole("figure", { name: "Garage" })).not.toBeInTheDocument();
+    await waitFor(() => expect(calls).toContainEqual({ cmd: "save_layout", payload: {
+      server: URL_SAVED, layout: { tiles: [expect.objectContaining({ camera: "maingate" })], hidden: ["garage"] },
+    } }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit layout" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show Garage" }));
+    expect(await screen.findByRole("figure", { name: "Garage" })).not.toHaveClass("is-maximised");
+  });
+
+  it("shows stream info on every tile from the menu at any time, and saves the wall options", async () => {
+    const calls = wall({ get_settings: () => ({ ...connected, wall: { lockRatio: false, fitToWindow: true, streamInfo: false } }) });
+    render(<App />);
+    fireEvent.contextMenu(await screen.findByRole("figure", { name: "Garage" }));
+    expect(screen.queryByRole("complementary", { name: "Stream info" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Show stream info" })).not.toBeChecked();
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Show stream info" }));
+    expect(screen.getAllByRole("complementary", { name: "Stream info" })).toHaveLength(2);
+    fireEvent.contextMenu(screen.getByRole("main"));
+    expect(screen.getByRole("menuitemcheckbox", { name: "Fit to window" })).toBeChecked();
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Fit to window" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit layout" }));
+    // The saved lock shows in Edit layout, and changing it is saved too.
+    expect(screen.getByRole("checkbox", { name: "Lock to 16:9" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Fit to window" })).not.toBeChecked();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Lock to 16:9" }));
+    await waitFor(() => expect(calls.filter((call) => call.cmd === "save_wall_options").map((call) => call.payload)).toEqual([
+      { options: { lockRatio: false, fitToWindow: true, streamInfo: true } },
+      { options: { lockRatio: false, fitToWindow: false, streamInfo: true } },
+      { options: { lockRatio: true, fitToWindow: false, streamInfo: true } },
+    ]));
+  });
+
   it("closes the right-click menu on Escape or a click elsewhere", async () => {
     wall();
     render(<App />);
@@ -214,10 +289,14 @@ describe("App", () => {
   it("maximises a double-clicked tile until Escape", async () => {
     wall();
     render(<App />);
-    fireEvent.doubleClick(await screen.findByRole("figure", { name: "Garage" }));
-    expect(screen.getAllByRole("figure", { name: "Garage" })).toHaveLength(2);
+    const garage = await screen.findByRole("figure", { name: "Garage" });
+    fireEvent.doubleClick(garage);
+    expect(garage).toHaveClass("is-maximised");
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(screen.getAllByRole("figure", { name: "Garage" })).toHaveLength(1);
+    expect(garage).not.toHaveClass("is-maximised");
+    fireEvent.doubleClick(garage);
+    fireEvent.doubleClick(garage);
+    expect(garage).not.toHaveClass("is-maximised");
   });
 
   it("hides a tile, shows it again and resets the layout in Edit layout mode", async () => {
@@ -369,12 +448,27 @@ describe("App streams", () => {
     expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate_sub"]);
   });
 
-  it("plays the main stream when maximised, with the wall's streams stopped", async () => {
+  it("plays the main stream when maximised and keeps the rest of the wall connected", async () => {
     wall();
     render(<App />);
     fireEvent.doubleClick(await screen.findByRole("figure", { name: "Garage" }));
-    expect(FakeSocket.open()).toEqual(["garage"]);
+    // The window is wide enough for Automatic to pick main.
+    expect(FakeSocket.open().sort()).toEqual(["garage", "maingate_sub"]);
+    const maingate = FakeSocket.all.filter((socket) => socket.url.includes("maingate_sub"));
     fireEvent.keyDown(window, { key: "Escape" });
     expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate_sub"]);
+    // Restoring did not reconnect the other tiles.
+    expect(FakeSocket.all.filter((socket) => socket.url.includes("maingate_sub"))).toEqual(maingate);
+    expect(maingate).toHaveLength(1);
+  });
+
+  it("reconnects a tile from its right-click menu", async () => {
+    wall();
+    render(<App />);
+    const garage = await screen.findByRole("figure", { name: "Garage" });
+    fireEvent.contextMenu(garage);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reconnect" }));
+    expect(FakeSocket.all.filter((socket) => socket.url.includes("garage_sub")).map((socket) => socket.closed)).toEqual([true, false]);
+    expect(FakeSocket.all.filter((socket) => socket.url.includes("maingate_sub"))).toHaveLength(1);
   });
 });

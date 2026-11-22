@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Go2rtcPlayer, KEEP_S, RETRY_MAX_MS, STALL_CHECK_MS, STALL_MS, WEBRTC_TIMEOUT_MS, retryDelay, supportedMseCodecs, type PlayerState } from "./player";
+import { DECODE_FAILURES, FAILURE_MEMORY_MS, Go2rtcPlayer, KEEP_S, RETRY_MAX_MS, STALE_MS, STALL_CHECK_MS, STALL_MS, WEBRTC_TIMEOUT_MS, forgetFailures, isUndecodable, retryDelay, supportedMseCodecs, type PlayerState } from "./player";
 
 class FakeSocket {
   static OPEN = 1;
@@ -35,6 +35,8 @@ class FakeSocket {
 class FakePeer {
   static all: FakePeer[] = [];
   connectionState = "new";
+  /** The stats report's inbound video, when a test gives the peer one. */
+  inbound: { framesDecoded: number; framesDropped?: number } | null = null;
   transceivers: string[] = [];
   remote: unknown = null;
   candidates: unknown[] = [];
@@ -80,6 +82,15 @@ class FakeBuffer extends EventTarget {
   }
 }
 
+/** A FakePeer with `getStats`, which WebKit's WebRTC relies on for frame counts. */
+class StatsPeer extends FakePeer {
+  async getStats() {
+    const report = new Map<string, unknown>([["audio", { type: "inbound-rtp", kind: "audio", framesDecoded: 0 }]]);
+    if (this.inbound) report.set("video", { type: "inbound-rtp", kind: "video", ...this.inbound });
+    return report;
+  }
+}
+
 class FakeMediaSource extends EventTarget {
   static supported = (type: string) => type.includes("avc1");
   static isTypeSupported(type: string) {
@@ -87,6 +98,7 @@ class FakeMediaSource extends EventTarget {
   }
   static last: FakeMediaSource | null = null;
   readyState = "closed";
+  duration = NaN;
   buffers: { type: string; buffer: FakeBuffer }[] = [];
   constructor() {
     super();
@@ -117,7 +129,7 @@ function video(): TestVideo {
 
 /** Makes the element report `frames()` decoded frames, as WebKit and Chromium do. */
 function countFrames(element: HTMLVideoElement, frames: () => number) {
-  element.getVideoPlaybackQuality = () => ({ totalVideoFrames: frames() }) as VideoPlaybackQuality;
+  element.getVideoPlaybackQuality = () => ({ totalVideoFrames: frames(), droppedVideoFrames: 0 }) as VideoPlaybackQuality;
 }
 
 async function flush() {
@@ -146,6 +158,7 @@ describe("Go2rtcPlayer", () => {
     FakeSocket.all = [];
     FakePeer.all = [];
     FakeMediaSource.last = null;
+    forgetFailures();
     states = [];
     vi.stubGlobal("WebSocket", FakeSocket);
     vi.stubGlobal(
@@ -270,17 +283,144 @@ describe("Go2rtcPlayer", () => {
     expect(FakeSocket.all[1].url).toContain("/live/mse/");
     first.stop();
 
+    // go2rtc refusing one stream says nothing about the server's WebRTC.
     const second = make();
     second.start();
+    expect(FakeSocket.all[2].url).toContain("/live/webrtc/");
     FakeSocket.all[2].onclose?.();
     expect(FakeSocket.all[3].url).toContain("/live/mse/");
     second.stop();
 
+    forgetFailures();
     const third = make();
     third.start();
     FakePeer.all[2].state("failed");
     expect(FakeSocket.all[5].url).toContain("/live/mse/");
     third.stop();
+  });
+
+  it("remembers a server whose WebRTC did not connect, for a while", () => {
+    vi.stubGlobal("RTCPeerConnection", FakePeer);
+    vi.stubGlobal("MediaSource", FakeMediaSource);
+    const first = make();
+    first.start();
+    vi.advanceTimersByTime(WEBRTC_TIMEOUT_MS);
+    first.stop();
+
+    // A new player for the same server goes straight to MSE...
+    const second = make();
+    second.start();
+    expect(FakeSocket.all[FakeSocket.all.length - 1]?.url).toContain("/live/mse/");
+    expect(second.connection().fallback).toBe(true);
+    second.stop();
+    // ...but another server still tries WebRTC.
+    const other = new Go2rtcPlayer({ base: "https://other.test", stream: "garage_sub", video: video() });
+    other.start();
+    expect(FakeSocket.all[FakeSocket.all.length - 1]?.url).toContain("/live/webrtc/");
+    other.stop();
+
+    // Once the memory expires, WebRTC is tried again.
+    vi.advanceTimersByTime(FAILURE_MEMORY_MS);
+    const third = make();
+    third.start();
+    expect(FakeSocket.all[FakeSocket.all.length - 1]?.url).toBe("wss://frigate.test/live/webrtc/api/ws?src=garage_sub");
+    expect(third.connection().fallback).toBe(false);
+    third.stop();
+  });
+
+  it("keeps a WebRTC tile whose connection decodes frames, though the element counts none", async () => {
+    vi.stubGlobal("RTCPeerConnection", StatsPeer);
+    const element = video();
+    // WebKit's counters stay at zero for a MediaStream.
+    countFrames(element, () => 0);
+    const player = make(element);
+    player.start();
+    const peer = FakePeer.all[0];
+    peer.state("connected");
+    element.dispatchEvent(new Event("playing"));
+    expect(states).toEqual(["connecting", "playing"]);
+    for (let i = 1; i <= 20; i++) {
+      peer.inbound = { framesDecoded: i * 12, framesDropped: 1 };
+      await vi.advanceTimersByTimeAsync(STALL_CHECK_MS);
+    }
+    expect(FakeSocket.all).toHaveLength(1);
+    expect(states).toEqual(["connecting", "playing"]);
+    expect(await player.frames()).toEqual({ shown: 240, dropped: 1 });
+
+    // Frozen: stalled first, then reconnected.
+    await vi.advanceTimersByTimeAsync(STALE_MS);
+    expect(states[states.length - 1]).toBe("stalled");
+    peer.inbound = { framesDecoded: 250 };
+    await vi.advanceTimersByTimeAsync(STALL_CHECK_MS);
+    expect(states[states.length - 1]).toBe("playing");
+    await vi.advanceTimersByTimeAsync(STALL_MS);
+    expect(states[states.length - 1]).toBe("retrying");
+    player.stop();
+  });
+
+  it("counts the play position for WebRTC when the connection has no video stats", async () => {
+    vi.stubGlobal("RTCPeerConnection", StatsPeer);
+    const element = video();
+    const player = make(element);
+    player.start();
+    FakePeer.all[0].state("connected");
+    for (let i = 1; i <= 8; i++) {
+      element.currentTime = i;
+      await vi.advanceTimersByTimeAsync(STALL_CHECK_MS);
+    }
+    expect(states).toEqual(["connecting", "playing"]);
+    expect(FakeSocket.all).toHaveLength(1);
+    player.stop();
+  });
+
+  it("gives up on a stream the webview keeps failing to decode", () => {
+    vi.stubGlobal("MediaSource", FakeMediaSource);
+    const element = video();
+    const player = make(element);
+    player.start();
+    let error: { code: number } | null = { code: 3 };
+    Object.defineProperty(element, "error", { get: () => error });
+    for (let i = 1; i < DECODE_FAILURES; i++) {
+      element.dispatchEvent(new Event("error"));
+      expect(states[states.length - 1]).toBe("retrying");
+      vi.advanceTimersByTime(retryDelay(i - 1));
+    }
+    expect(isUndecodable("https://frigate.test", "garage_sub")).toBe(false);
+    element.dispatchEvent(new Event("error"));
+    expect(states[states.length - 1]).toBe("failed");
+    expect(isUndecodable("https://frigate.test", "garage_sub")).toBe(true);
+    expect(isUndecodable("https://frigate.test", "garage")).toBe(false);
+    const sockets = FakeSocket.all.length;
+    vi.advanceTimersByTime(RETRY_MAX_MS * 2);
+    expect(FakeSocket.all).toHaveLength(sockets);
+
+    // Any other error is reconnected as before, and the memory expires.
+    error = { code: 2 };
+    states = [];
+    player.start();
+    for (let i = 0; i <= DECODE_FAILURES; i++) {
+      element.dispatchEvent(new Event("error"));
+      vi.advanceTimersByTime(RETRY_MAX_MS);
+    }
+    expect(states).not.toContain("failed");
+    vi.advanceTimersByTime(FAILURE_MEMORY_MS);
+    expect(isUndecodable("https://frigate.test", "garage_sub")).toBe(false);
+    player.stop();
+  });
+
+  it("starts counting decode errors again after a frame shows", () => {
+    vi.stubGlobal("MediaSource", FakeMediaSource);
+    const element = video();
+    const player = make(element);
+    player.start();
+    Object.defineProperty(element, "error", { get: () => ({ code: 3 }) });
+    for (let i = 0; i < DECODE_FAILURES * 2; i++) {
+      element.dispatchEvent(new Event("playing"));
+      element.dispatchEvent(new Event("error"));
+      vi.advanceTimersByTime(retryDelay(0));
+    }
+    expect(states).not.toContain("failed");
+    player.stop();
   });
 
   it("plays fMP4 over MSE, appending data in order", () => {
@@ -296,6 +436,8 @@ describe("Go2rtcPlayer", () => {
 
     const source = FakeMediaSource.last as FakeMediaSource;
     socket.message(JSON.stringify({ type: "mse", value: 'video/mp4; codecs="avc1.640029"' }));
+    // A live stream has no end, so catching up never ends playback.
+    expect(source.duration).toBe(NaN);
     const chunk = new ArrayBuffer(4);
     socket.message(chunk);
     // Bytes are not a picture: the tile plays once the video does.
@@ -306,6 +448,7 @@ describe("Go2rtcPlayer", () => {
     source.open();
     const { type, buffer } = source.buffers[0];
     expect(type).toBe('video/mp4; codecs="avc1.640029"');
+    expect(source.duration).toBe(Infinity);
     expect(buffer.appended).toEqual([chunk]);
 
     buffer.updating = true;
@@ -323,19 +466,25 @@ describe("Go2rtcPlayer", () => {
     expect(FakeSocket.all).toHaveLength(1);
   });
 
-  it("reconnects an MSE stream whose picture stops moving", () => {
+  it("shows an MSE stream whose picture stops moving as stalled, then reconnects it", () => {
     vi.stubGlobal("MediaSource", FakeMediaSource);
     const element = video();
     const player = make(element);
     player.start();
+    expect(player.lastFrameAt()).toBeUndefined();
     element.dispatchEvent(new Event("playing"));
     element.currentTime = 1;
     vi.advanceTimersByTime(STALL_CHECK_MS);
+    const movedAt = player.lastFrameAt();
+    expect(movedAt).toBe(Date.now());
     // Frozen from here on.
-    vi.advanceTimersByTime(STALL_MS - STALL_CHECK_MS);
+    vi.advanceTimersByTime(STALE_MS);
+    expect(states[states.length - 1]).toBe("stalled");
+    vi.advanceTimersByTime(STALL_MS - STALL_CHECK_MS - STALE_MS);
     expect(FakeSocket.all).toHaveLength(1);
     vi.advanceTimersByTime(STALL_CHECK_MS);
     expect(states[states.length - 1]).toBe("retrying");
+    expect(player.lastFrameAt()).toBe(movedAt);
     vi.advanceTimersByTime(1000);
     expect(FakeSocket.all).toHaveLength(2);
     player.stop();
@@ -372,7 +521,7 @@ describe("Go2rtcPlayer", () => {
   it("reconnects a stream that buffers and moves on without decoding a frame", () => {
     vi.stubGlobal("MediaSource", FakeMediaSource);
     const element = video();
-    countFrames(element, () => 0);
+    element.getVideoPlaybackQuality = () => ({ totalVideoFrames: element.currentTime * 25, droppedVideoFrames: element.currentTime * 25 }) as VideoPlaybackQuality;
     const player = make(element);
     player.start();
     // WebKit says playing and the clock moves, but nothing is decoded.
@@ -451,15 +600,24 @@ describe("Go2rtcPlayer", () => {
     // Far behind: it trims to the last few seconds and jumps to their start.
     expect(buffer.removed).toEqual([[0, 30 - KEEP_S]]);
     expect(element.currentTime).toBe(30 - KEEP_S);
-    expect(element.playbackRate).toBe(2);
+    expect(element.playbackRate).toBeCloseTo(1.08);
 
     range = { start: 25, end: 30 };
     element.currentTime = 29.5;
     buffer.dispatchEvent(new Event("updateend"));
-    // Near the edge: no seek, no trim, and a gentle slow-down.
+    // Normal headroom: no seek, trim or change in speed.
     expect(buffer.removed).toHaveLength(1);
     expect(element.currentTime).toBe(29.5);
-    expect(element.playbackRate).toBeCloseTo(0.5);
+    expect(element.playbackRate).toBe(1);
+    element.currentTime = 29.8;
+    buffer.dispatchEvent(new Event("updateend"));
+    expect(element.playbackRate).toBeCloseTo(0.95);
+
+    // Playback that paused at the live edge carries on.
+    const plays = vi.mocked(element.play).mock.calls.length;
+    element.paused = true;
+    buffer.dispatchEvent(new Event("updateend"));
+    expect(element.play).toHaveBeenCalledTimes(plays + 1);
     player.stop();
   });
 

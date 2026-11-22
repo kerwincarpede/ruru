@@ -20,6 +20,7 @@ export interface TilePlacement {
   y: number;
   w: number;
   h: number;
+  stream?: "main" | "sub";
 }
 
 /** Mirrors `SavedLayout` in src-tauri/src/settings.rs: one server's wall. */
@@ -28,10 +29,21 @@ export interface SavedLayout {
   hidden: string[];
 }
 
+/** Mirrors `WallOptions` in src-tauri/src/settings.rs: how the wall is drawn. */
+export interface WallOptions {
+  lockRatio: boolean;
+  fitToWindow: boolean;
+  streamInfo: boolean;
+}
+
+/** The wall options before any are saved, as Rust defaults them. */
+export const DEFAULT_WALL_OPTIONS: WallOptions = { lockRatio: true, fitToWindow: true, streamInfo: false };
+
 /** Mirrors `Settings` in src-tauri/src/settings.rs. */
 export interface Settings {
   frigateUrl: string | null;
   fullScreen: boolean;
+  wall: WallOptions;
   layouts: Record<string, SavedLayout>;
 }
 
@@ -53,6 +65,11 @@ export function setFullScreen(fullScreen: boolean): Promise<void> {
 /** Saves the wall's layout for one Frigate server. */
 export function saveLayout(server: string, layout: SavedLayout): Promise<void> {
   return invoke<void>("save_layout", { server, layout });
+}
+
+/** Saves how the wall is drawn: Lock to 16:9, Fit to window and stream info. */
+export function saveWallOptions(options: WallOptions): Promise<void> {
+  return invoke<void>("save_wall_options", { options });
 }
 
 /**

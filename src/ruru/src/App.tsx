@@ -4,18 +4,20 @@ import { appInfo, type AppInfo } from "./app/api";
 import { cameraLabel, type Camera } from "./app/frigate";
 import { isMac, shortcutFor } from "./app/keys";
 import Logo from "./app/Logo";
-import { frigateCameras, getSettings, onFullScreenChanged, onOpenSettings, saveLayout, setFullScreen, type SavedLayout, type Settings } from "./app/api";
+import { DEFAULT_WALL_OPTIONS, frigateCameras, getSettings, onFullScreenChanged, onOpenSettings, saveLayout, saveWallOptions, setFullScreen, type SavedLayout, type Settings, type WallOptions } from "./app/api";
 import UpdatePrompt from "./app/UpdatePrompt";
 import { findUpdate, type AvailableUpdate } from "./app/updates";
 import SettingsDialog from "./settings/SettingsDialog";
-import { EMPTY_LAYOUT, showCamera } from "./wall/layout";
+import { EMPTY_LAYOUT, hideCamera, showCamera, wallPlacements } from "./wall/layout";
+import { tileMenu, type MenuItem, type MenuSection } from "./wall/menu";
+import type { StreamKind } from "./wall/streams";
 import Wall from "./wall/Wall";
-import WallMenu, { type MenuItem } from "./wall/WallMenu";
+import WallMenu from "./wall/WallMenu";
 
 /** How long the toolbar stays after the pointer stops moving. */
 export const TOOLBAR_HIDE_MS = 2500;
 
-const NO_SETTINGS: Settings = { frigateUrl: null, fullScreen: false, layouts: {} };
+const NO_SETTINGS: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, layouts: {} };
 
 function GearIcon() {
   return (
@@ -35,7 +37,10 @@ function App() {
   const [refresh, setRefresh] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [maximised, setMaximised] = useState<string | null>(null);
+  const [reconnects, setReconnects] = useState<Record<string, number>>({});
+  const [automatic, setAutomatic] = useState<Record<string, StreamKind>>({});
+  const [menu, setMenu] = useState<{ x: number; y: number; camera?: string } | null>(null);
   const [live, setLive] = useState(() => document.visibilityState !== "hidden");
   const [toolbar, setToolbar] = useState(true);
   const toolbarTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -161,15 +166,56 @@ function App() {
     void saveLayout(url, next).catch(() => {});
   };
 
+  // Lock to 16:9, Fit to window and stream info are saved as soon as they change.
+  const wallOptions = settings?.wall ?? DEFAULT_WALL_OPTIONS;
+  const changeWall = (change: Partial<WallOptions>) => {
+    const next = { ...wallOptions, ...change };
+    setSettings((current) => ({ ...(current ?? NO_SETTINGS), wall: next }));
+    void saveWallOptions(next).catch(() => {});
+  };
+
+  const onAutomatic = useCallback((camera: string, stream: StreamKind) => {
+    setAutomatic((now) => (now[camera] === stream ? now : { ...now, [camera]: stream }));
+  }, []);
+
   const closeMenu = useCallback(() => setMenu(null), []);
   const fullScreen = settings?.fullScreen ?? false;
-  const menuItems: MenuItem[] = [
+  const wallItems: MenuItem[] = [
     { label: "Settings…", onSelect: () => setSettingsOpen(true) },
     ...(url && cameras?.length
-      ? [{ label: editing ? "Done editing" : "Edit layout", onSelect: () => setEditing((now) => !now) }]
+      ? [
+          { label: editing ? "Done editing" : "Edit layout", onSelect: () => setEditing((now) => !now) },
+          { label: "Fit to window", kind: "checkbox" as const, checked: wallOptions.fitToWindow, onSelect: () => changeWall({ fitToWindow: !wallOptions.fitToWindow }) },
+        ]
       : []),
     { label: fullScreen ? "Exit full screen" : "Enter full screen", onSelect: toggleFullScreen },
   ];
+  const sections: MenuSection[] = [];
+  const target = cameras?.find((camera) => camera.name === menu?.camera);
+  if (target && cameras) {
+    const tiles = wallPlacements(cameras.map((camera) => camera.name), layout);
+    const name = target.name;
+    sections.push(...tileMenu({
+      label: cameraLabel(name),
+      maximised: maximised === name,
+      twoStreams: target.mainStream !== target.subStream,
+      choice: tiles.find((tile) => tile.camera === name)?.stream,
+      automatic: automatic[name] ?? "sub",
+      streamInfo: wallOptions.streamInfo,
+      onMaximise: () => setMaximised((now) => (now === name ? null : name)),
+      onReconnect: () => setReconnects((now) => ({ ...now, [name]: (now[name] ?? 0) + 1 })),
+      onHide: () => {
+        setMaximised((now) => (now === name ? null : now));
+        changeLayout(hideCamera({ tiles, hidden: layout?.hidden ?? [] }, name));
+      },
+      onStreamInfo: () => changeWall({ streamInfo: !wallOptions.streamInfo }),
+      onStream: (stream) => changeLayout({
+        hidden: layout?.hidden ?? [],
+        tiles: tiles.map((tile) => tile.camera === name ? { ...tile, stream } : tile),
+      }),
+    }));
+  }
+  sections.push({ items: wallItems });
   const settingsKey = isMac() ? "⌘ ," : "Ctrl+,";
   const hidden = layout?.hidden ?? [];
   const showToolbar = toolbar || editing || !url;
@@ -182,13 +228,19 @@ function App() {
         // Dialogs keep the webview's own menu, such as Paste in the URL field.
         if ((event.target as Element).closest('[role="dialog"]')) return;
         event.preventDefault();
-        setMenu({ x: event.clientX, y: event.clientY });
+        setMenu({ x: event.clientX, y: event.clientY, camera: (event.target as Element).closest<HTMLElement>("[data-camera]")?.dataset.camera });
       }}
     >
       <div className={`toolbar${showToolbar ? " is-shown" : ""}`} role="toolbar" aria-label="Wall">
         {editing && (
           <>
             <span className="toolbar-note">Drag tiles to move them and pull their corners to resize them.</span>
+            <label className="toolbar-note">
+              <input type="checkbox" checked={wallOptions.lockRatio} onChange={(event) => changeWall({ lockRatio: event.target.checked })} /> Lock to 16:9
+            </label>
+            <label className="toolbar-note">
+              <input type="checkbox" checked={wallOptions.fitToWindow} onChange={(event) => changeWall({ fitToWindow: event.target.checked })} /> Fit to window
+            </label>
             {hidden.map((camera) => (
               <button key={camera} type="button" onClick={() => changeLayout(showCamera(layout ?? EMPTY_LAYOUT, camera))}>
                 Show {cameraLabel(camera)}
@@ -243,12 +295,19 @@ function App() {
           layout={layout}
           live={live}
           editing={editing}
+          lockRatio={wallOptions.lockRatio}
+          fitToWindow={wallOptions.fitToWindow}
+          streamInfo={wallOptions.streamInfo}
           refresh={refresh}
+          maximised={maximised}
+          onMaximise={setMaximised}
+          reconnects={reconnects}
+          onAutomatic={onAutomatic}
           onLayout={changeLayout}
         />
       )}
 
-      {menu && <WallMenu x={menu.x} y={menu.y} items={menuItems} onClose={closeMenu} />}
+      {menu && <WallMenu x={menu.x} y={menu.y} sections={sections} onClose={closeMenu} />}
       {settingsOpen && settings && (
         <SettingsDialog
           settings={settings}

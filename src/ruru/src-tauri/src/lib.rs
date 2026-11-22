@@ -53,6 +53,7 @@ pub fn run() {
             settings::save_frigate_url,
             settings::set_full_screen,
             settings::save_layout,
+            settings::save_wall_options,
             frigate::test_frigate,
             frigate::frigate_cameras,
         ])
