@@ -13,7 +13,15 @@ Point it at your Frigate server, and every camera is live on one screen, laid ou
 
 ---
 
-> **Ruru is in early development.** There is no release yet. This page describes what Ruru is being built to do.
+> **Ruru is in early development.** It opens a placeholder window for now; this page describes what Ruru is being built to do.
+
+## Download
+
+Download the installer for your platform from the [latest release](https://github.com/kerwincarpede/ruru/releases/latest): `.msi` or `-setup.exe` for Windows, the universal `.dmg` for macOS, and `.AppImage`, `.deb` or `.rpm` for Linux. Ruru checks for a newer Stable release when it starts and asks before installing it.
+
+Each merge to `main` is also published as an **Edge** pre-release on the [releases page](https://github.com/kerwincarpede/ruru/releases). Edge builds are installed by hand.
+
+The installers are not signed with a paid certificate, so Windows SmartScreen and macOS Gatekeeper warn on first launch. On macOS, choose **Done**, then **Open Anyway** in **System Settings → Privacy & Security**.
 
 ## Why Ruru?
 
@@ -66,7 +74,7 @@ Ruru is a [Tauri](https://tauri.app/) desktop app: a Rust backend and a React + 
 - **Playback:** each tile opens a WebRTC connection to the camera's stream on Frigate's go2rtc restreamer, the same path Frigate's own live view uses. Video goes from Frigate to the tile without passing through Ruru's backend.
 - **Layout:** tile positions and sizes are saved on your computer, per Frigate server.
 
-Nothing leaves your computer except requests to the Frigate server you point it at. No analytics, no telemetry, no cloud account.
+Nothing leaves your computer except requests to the Frigate server you point it at, and a check of Ruru's GitHub releases for updates. No analytics, no telemetry, no cloud account.
 
 ## Inspiration
 

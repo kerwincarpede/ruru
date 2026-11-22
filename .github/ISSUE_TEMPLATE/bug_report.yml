@@ -1,0 +1,29 @@
+name: Report a problem
+description: Something in Ruru doesn't work the way it should.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead. Screenshots help.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Ruru version
+      description: Shown at the bottom of the Ruru window.
+      placeholder: "0.1.0"
+  - type: input
+    id: frigate
+    attributes:
+      label: Frigate version
+      description: Shown in Frigate's System page.
+      placeholder: "0.16.0"
+  - type: input
+    id: os
+    attributes:
+      label: System
+      description: Your operating system and, on Linux, X11 or Wayland.
+      placeholder: "Linux x86_64 (Wayland)"

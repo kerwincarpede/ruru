@@ -1,0 +1,222 @@
+name: Release
+
+# Every push to main is released as an Edge pre-release, with the version
+# read from the commits. Edge builds are installed by hand: installed copies
+# follow the Stable channel, and promote.yml makes a chosen Edge build the
+# Stable release. This run is also
+# main's CI: ci.yml runs only for pull requests, so each
+# merge is checked and built once, and those builds are the release. To force
+# a bump instead: Actions → Release → Run workflow, or
+#   gh workflow run release.yml -f bump=minor
+# A push that changes only docs (docs/ or Markdown) is not released.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - docs/**
+      - '**/*.md'
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump. "auto" reads each merge’s conventional commit message.
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+
+# Each merge keeps its own run. Only the short reservation job is serial;
+# two installer pipelines can run together without occupying runners to wait.
+
+# A duplicate dispatch for the same commit waits instead of deleting a draft
+# that another attempt is still uploading to.
+concurrency:
+  group: release-commit-${{ github.sha }}
+  queue: max
+
+permissions:
+  contents: read
+
+env:
+  # actions/checkout runs `git init`; naming the initial branch keeps git from
+  # printing its hint about the default branch name.
+  GIT_CONFIG_COUNT: 1
+  GIT_CONFIG_KEY_0: init.defaultBranch
+  GIT_CONFIG_VALUE_0: main
+
+jobs:
+  # Reserve a version with a draft, then release the queue immediately.
+  # The tag is created only once all checks and installers pass.
+  version:
+    name: Version
+    runs-on: ubuntu-24.04
+    # Only main may deploy to this environment, so a branch cannot release.
+    environment: release
+    concurrency:
+      group: release-version
+      queue: max
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      release_id: ${{ steps.draft.outputs.release_id }}
+      lane: ${{ steps.next.outputs.lane }}
+    steps:
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Releases are made from main, not $GITHUB_REF."
+          exit 1
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Choose the release version
+        id: next
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUMP: ${{ inputs.bump || 'auto' }}
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[]' | jq -s . > releases.json
+          python3 .github/scripts/release_version.py \
+            --releases releases.json --sha "$GITHUB_SHA" --bump "$BUMP" \
+            >> "$GITHUB_OUTPUT"
+          echo "lane=$((GITHUB_RUN_NUMBER % 2))" >> "$GITHUB_OUTPUT"
+
+      - name: Open a draft release
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.next.outputs.version }}
+          TAG: v${{ steps.next.outputs.version }}
+        run: |
+          # promote.py drops the "Edge build" paragraph when this release
+          # becomes Stable, so keep it on one line.
+          body=$(cat <<'BODY'
+          **Edge build.** Install it by hand from **Assets** below. Installed copies of Ruru update only to Stable releases, so they offer this build if it is promoted to Stable.
+
+          ## Install
+
+          Download the installer for your platform from **Assets** below:
+
+          | Platform | Installer |
+          | --- | --- |
+          | Windows | `.msi` or `-setup.exe` |
+          | macOS (Apple silicon or Intel) | `_universal.dmg` |
+          | Linux (x86_64) | `_amd64.AppImage`, `_amd64.deb` or `.x86_64.rpm` |
+          | Linux (arm64) | `_aarch64.AppImage`, `_arm64.deb` or `.aarch64.rpm` |
+
+          The installers are not signed with a paid certificate, so Windows SmartScreen and macOS Gatekeeper warn on first launch.
+
+          **Windows:** when SmartScreen says it protected your PC, choose **More info**, then **Run anyway**.
+
+          **macOS:** open the `.dmg`, drag Ruru to Applications and open it. When macOS says it cannot verify the app, choose **Done**, then go to **System Settings → Privacy & Security** and click **Open Anyway**. Alternatively run `xattr -dr com.apple.quarantine /Applications/Ruru.app` once.
+          BODY
+          )
+
+          # A retry keeps its reserved version and replaces its unfinished draft.
+          open_draft() {
+            drafts=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+              --jq ".[] | select(.draft and .tag_name == \"$TAG\") | .id") || return 1
+            for draft in $drafts; do
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$draft" || return 1
+            done
+            gh api "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$TAG" \
+              -f target_commitish="$GITHUB_SHA" \
+              -f name="$VERSION" \
+              -f body="$body" \
+              -F draft=true \
+              -F generate_release_notes=true \
+              --jq .id
+          }
+
+          # The API now and then refuses a call it accepts moments later (a
+          # one-off HTTP 403 failed a release after it had queued for nine
+          # minutes), so a failure gets two more tries before the run fails.
+          for attempt in 1 2 3; do
+            if id=$(open_draft) && [ -n "$id" ]; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Could not open the draft release for $TAG."
+              exit 1
+            fi
+            echo "::warning::Opening the draft release failed (try $attempt of 3); trying again in 20 seconds."
+            sleep 20
+          done
+          echo "release_id=$id" >> "$GITHUB_OUTPUT"
+
+  # The same checks and installer builds as every CI run, stamped with the
+  # release version and uploading the installers into the draft.
+  ci:
+    name: CI
+    needs: version
+    concurrency:
+      group: release-build-${{ needs.version.outputs.lane }}
+      queue: max
+    permissions:
+      contents: write
+    uses: ./.github/workflows/ci.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      release_id: ${{ needs.version.outputs.release_id }}
+    secrets: inherit
+
+  publish:
+    name: Publish release
+    needs: [version, ci]
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # Installed copies of Ruru read latest.json from the latest (Stable)
+      # release to find, and verify, the update package for their platform;
+      # promote.yml reuses this file when it makes the release Stable. Written
+      # here rather than by each build, so the four builds cannot race to
+      # rewrite it.
+      - name: Prepare release notes and add the updater manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.version.outputs.release_id }}
+          TAG: v${{ needs.version.outputs.version }}
+        run: |
+          mkdir sigs
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" \
+            --jq '.[] | select(.name | endswith(".sig")) | "\(.id) \(.name)"' |
+            while read -r id name; do
+              gh api -H "Accept: application/octet-stream" \
+                "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "sigs/$name"
+            done
+          # The release notes, this release's and recent ones', become the
+          # manifest's list of changes.
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" > release.json
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > history.json
+          python3 .github/scripts/updater_manifest.py \
+            --sigs sigs --release release.json --history history.json \
+            --download-base "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG" \
+            --release-notes release-notes.md \
+            > latest.json
+          cat latest.json
+          curl --fail-with-body -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @latest.json \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=latest.json" \
+            > /dev/null
+
+      # Publishing the draft creates its tag on the released commit. It is a
+      # pre-release and never the latest release, so Stable copies, which
+      # read releases/latest, do not see it.
+      - name: Publish the draft as a pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.version.outputs.release_id }}
+        run: |
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false -F prerelease=true -f make_latest=false -F body=@release-notes.md \
+            --jq '"Published \(.tag_name): \(.html_url)"'
