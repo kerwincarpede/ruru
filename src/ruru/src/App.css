@@ -135,6 +135,18 @@ button:disabled {
   pointer-events: auto;
 }
 
+/* In Edit layout the toolbar takes its own row above the wall, so it never
+   covers a tile's Hide button however many buttons it holds. */
+.window.is-editing .toolbar {
+  position: sticky;
+  top: 0;
+  right: auto;
+  flex: none;
+  max-width: none;
+  padding: 0.5rem 0.75rem;
+  background: var(--wall);
+}
+
 .toolbar .icon-button {
   display: grid;
   place-items: center;

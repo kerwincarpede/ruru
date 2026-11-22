@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Go2rtcPlayer, RETRY_MAX_MS, WEBRTC_TIMEOUT_MS, retryDelay, supportedMseCodecs, type PlayerState } from "./player";
+import { Go2rtcPlayer, RETRY_MAX_MS, STALL_CHECK_MS, STALL_MS, WEBRTC_TIMEOUT_MS, retryDelay, supportedMseCodecs, type PlayerState } from "./player";
 
 class FakeSocket {
   static OPEN = 1;
@@ -163,7 +163,8 @@ describe("Go2rtcPlayer", () => {
     const socket = FakeSocket.all[0];
     expect(socket.url).toBe("wss://frigate.test/live/webrtc/api/ws?src=garage_sub");
     const peer = FakePeer.all[0];
-    expect(peer.transceivers).toEqual(["video", "audio"]);
+    // Video only: tiles are muted.
+    expect(peer.transceivers).toEqual(["video"]);
 
     socket.open();
     await flush();
@@ -194,10 +195,17 @@ describe("Go2rtcPlayer", () => {
     expect(element.srcObject).toBe(media);
     expect(media.tracks).toEqual([videoTrack, audioTrack]);
     peer.state("connected");
+    // Connected is not playing until the first frame plays.
+    expect(states).toEqual(["connecting"]);
+    element.dispatchEvent(new Event("playing"));
     expect(states).toEqual(["connecting", "playing"]);
 
-    // Connected WebRTC outlives the timeout and the signalling socket.
-    vi.advanceTimersByTime(WEBRTC_TIMEOUT_MS * 2);
+    // Connected WebRTC with a moving picture outlives the timeout, the
+    // stall watchdog and the signalling socket.
+    for (let i = 1; i <= 10; i++) {
+      element.currentTime = i;
+      vi.advanceTimersByTime(STALL_CHECK_MS);
+    }
     socket.onclose?.();
     expect(FakeSocket.all).toHaveLength(1);
 
@@ -275,8 +283,11 @@ describe("Go2rtcPlayer", () => {
     socket.message(JSON.stringify({ type: "mse", value: 'video/mp4; codecs="avc1.640029"' }));
     const chunk = new ArrayBuffer(4);
     socket.message(chunk);
-    expect(states).toEqual(["connecting", "playing"]);
+    // Bytes are not a picture: the tile plays once the video does.
+    expect(states).toEqual(["connecting"]);
     expect(element.play).toHaveBeenCalled();
+    element.dispatchEvent(new Event("playing"));
+    expect(states).toEqual(["connecting", "playing"]);
     source.open();
     const { type, buffer } = source.buffers[0];
     expect(type).toBe('video/mp4; codecs="avc1.640029"');
@@ -295,6 +306,61 @@ describe("Go2rtcPlayer", () => {
     player.stop();
     vi.advanceTimersByTime(RETRY_MAX_MS);
     expect(FakeSocket.all).toHaveLength(1);
+  });
+
+  it("reconnects an MSE stream whose picture stops moving", () => {
+    vi.stubGlobal("MediaSource", FakeMediaSource);
+    const element = video();
+    const player = make(element);
+    player.start();
+    element.dispatchEvent(new Event("playing"));
+    element.currentTime = 1;
+    vi.advanceTimersByTime(STALL_CHECK_MS);
+    // Frozen from here on.
+    vi.advanceTimersByTime(STALL_MS - STALL_CHECK_MS);
+    expect(FakeSocket.all).toHaveLength(1);
+    vi.advanceTimersByTime(STALL_CHECK_MS);
+    expect(states[states.length - 1]).toBe("retrying");
+    vi.advanceTimersByTime(1000);
+    expect(FakeSocket.all).toHaveLength(2);
+    player.stop();
+  });
+
+  it("reconnects an MSE stream that sends bytes but never plays", () => {
+    vi.stubGlobal("MediaSource", FakeMediaSource);
+    const player = make();
+    player.start();
+    FakeSocket.all[0].open();
+    FakeSocket.all[0].message(new ArrayBuffer(4));
+    vi.advanceTimersByTime(STALL_MS);
+    expect(states).toEqual(["connecting", "retrying"]);
+    player.stop();
+  });
+
+  it("counts decoded frames when the webview reports them", () => {
+    vi.stubGlobal("MediaSource", FakeMediaSource);
+    const element = video();
+    let frames = 0;
+    element.getVideoPlaybackQuality = () => ({ totalVideoFrames: frames }) as VideoPlaybackQuality;
+    const player = make(element);
+    player.start();
+    for (let i = 0; i < 10; i++) {
+      frames += 5;
+      vi.advanceTimersByTime(STALL_CHECK_MS);
+    }
+    expect(FakeSocket.all).toHaveLength(1);
+    player.stop();
+  });
+
+  it("gives way to MSE when WebRTC connects but never shows a frame", () => {
+    vi.stubGlobal("RTCPeerConnection", FakePeer);
+    vi.stubGlobal("MediaSource", FakeMediaSource);
+    const player = make();
+    player.start();
+    FakePeer.all[0].state("connected");
+    vi.advanceTimersByTime(STALL_MS);
+    expect(FakeSocket.all[1].url).toContain("/live/mse/");
+    player.stop();
   });
 
   it("retries when neither WebRTC nor MSE exists", () => {

@@ -27,17 +27,17 @@ export const RETRY_MAX_MS = 30000;
 /** MSE plays this far behind the newest frame at most before it skips ahead. */
 const MAX_LAG_S = 1.5;
 
-/** The codecs go2rtc can send over MSE, as video-rtc.js lists them. */
-const MSE_CODECS = [
-  "avc1.640029",
-  "avc1.64002A",
-  "avc1.640033",
-  "hvc1.1.6.L153.B0",
-  "mp4a.40.2",
-  "mp4a.40.5",
-  "flac",
-  "opus",
-];
+/** A stream whose picture has not moved for this long is reconnected. */
+export const STALL_MS = 10000;
+/** How often the picture is checked for movement. */
+export const STALL_CHECK_MS = 2000;
+
+/**
+ * The video codecs go2rtc can send over MSE, from video-rtc.js. Tiles are
+ * muted, so no audio codec is asked for: a stream that declares audio but
+ * sends none would otherwise never become playable.
+ */
+const MSE_CODECS = ["avc1.640029", "avc1.64002A", "avc1.640033", "hvc1.1.6.L153.B0"];
 
 /** The delay before reconnect attempt `attempt` (0 is the first). */
 export function retryDelay(attempt: number): number {
@@ -56,6 +56,8 @@ export class Go2rtcPlayer {
   private socket: WebSocket | null = null;
   private peer: RTCPeerConnection | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private watchdog: ReturnType<typeof setInterval> | null = null;
+  private onPlaying: (() => void) | null = null;
   private attempt = 0;
   private stopped = true;
   /** WebRTC failed to connect once, so this player sticks to MSE. */
@@ -86,8 +88,37 @@ export class Go2rtcPlayer {
     this.setState("connecting");
     const mode: Mode = this.webrtcAvailable() ? "webrtc" : "mse";
     const generation = ++this.generation;
+    this.watch(generation, mode);
     if (mode === "webrtc") this.startWebRtc(generation);
     else this.startMse(generation);
+  }
+
+  /**
+   * Playing means the video plays, not that bytes arrive. Until then, and
+   * whenever the picture stops moving for STALL_MS, the stream reconnects.
+   */
+  private watch(generation: number, mode: Mode): void {
+    const { video } = this.options;
+    let played = false;
+    this.onPlaying = () => {
+      if (!this.current(generation)) return;
+      played = true;
+      this.playing();
+    };
+    video.addEventListener("playing", this.onPlaying);
+    let last = progress(video);
+    let lastMoved = Date.now();
+    this.watchdog = setInterval(() => {
+      const now = progress(video);
+      if (now !== last) {
+        last = now;
+        lastMoved = Date.now();
+      } else if (Date.now() - lastMoved >= STALL_MS) {
+        // WebRTC that connects but never shows a frame gives way to MSE.
+        if (mode === "webrtc" && !played) this.fallBack(generation);
+        else this.retry(generation);
+      }
+    }, STALL_CHECK_MS);
   }
 
   private webrtcAvailable(): boolean {
@@ -130,8 +161,8 @@ export class Go2rtcPlayer {
     const { base, stream, video } = this.options;
     const peer = new RTCPeerConnection({ bundlePolicy: "max-bundle" });
     this.peer = peer;
+    // Video only: tiles are muted, and a silent audio track must not hold playback up.
     peer.addTransceiver("video", { direction: "recvonly" });
-    peer.addTransceiver("audio", { direction: "recvonly" });
     let connected = false;
 
     const socket = new WebSocket(streamSocketUrl(base, "webrtc", stream));
@@ -165,7 +196,7 @@ export class Go2rtcPlayer {
         connected = true;
         if (this.timer) clearTimeout(this.timer);
         this.timer = null;
-        this.playing();
+        // The tile shows as playing once the video's first frame plays.
       } else if (state === "failed" || state === "disconnected" || state === "closed") {
         if (connected) this.retry(generation);
         else this.fallBack(generation);
@@ -260,10 +291,9 @@ export class Go2rtcPlayer {
       }
       queue.push(event.data as ArrayBuffer);
       if (!started) {
-        // The first video data: the stream is up.
+        // The first video data. The tile shows as playing once it decodes.
         started = true;
         play(video);
-        this.playing();
       }
       flush();
     };
@@ -274,6 +304,10 @@ export class Go2rtcPlayer {
     this.generation++;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (this.watchdog) clearInterval(this.watchdog);
+    this.watchdog = null;
+    if (this.onPlaying) this.options.video.removeEventListener("playing", this.onPlaying);
+    this.onPlaying = null;
     const { socket, peer } = this;
     this.socket = null;
     this.peer = null;
@@ -289,6 +323,12 @@ export class Go2rtcPlayer {
     }
     video.srcObject = null;
   }
+}
+
+/** How far the picture has got: decoded frames when the webview counts them, else the play position. */
+function progress(video: HTMLVideoElement): number {
+  const frames = typeof video.getVideoPlaybackQuality === "function" ? video.getVideoPlaybackQuality().totalVideoFrames : 0;
+  return frames > 0 ? frames : video.currentTime;
 }
 
 /** Starts the video; a refused autoplay leaves the snapshot showing. */

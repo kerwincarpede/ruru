@@ -233,6 +233,8 @@ describe("App", () => {
     render(<App />);
     await screen.findByRole("figure", { name: "Garage" });
     fireEvent.click(screen.getByRole("button", { name: "Edit layout" }));
+    // Edit layout gives the toolbar its own row, clear of the tiles' Hide buttons.
+    expect(screen.getByRole("main")).toHaveClass("is-editing");
 
     fireEvent.click(screen.getByRole("button", { name: "Hide Garage" }));
     expect(screen.queryByRole("figure", { name: "Garage" })).not.toBeInTheDocument();

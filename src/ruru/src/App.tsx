@@ -176,7 +176,7 @@ function App() {
 
   return (
     <main
-      className={`window${url ? " has-wall" : " placeholder"}`}
+      className={`window${url ? " has-wall" : " placeholder"}${editing ? " is-editing" : ""}`}
       onPointerMove={wake}
       onContextMenu={(event) => {
         // Dialogs keep the webview's own menu, such as Paste in the URL field.
