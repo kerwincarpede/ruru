@@ -12,10 +12,11 @@ Ruru is a Tauri 2 desktop app that shows every Frigate camera live on one screen
 
 ## Checks
 
-Run these before you push:
+Run these before you push. CI runs the same ones:
 
 ```sh
 npm ci                                   # repository root
+python3 -m unittest discover .github/scripts
 cd src/ruru
 npm run lint && npm run test:coverage && npm run build
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
@@ -23,7 +24,11 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-`npm run test:coverage` fails below 90% of lines or 83% of branches.
+`npm run test:coverage` fails below 90% of lines or 83% of branches. CI runs the Rust tests under `cargo llvm-cov`, which needs the `llvm-tools-preview` rustup component, instead of `cargo test`, and fails below the line floor in `.github/workflows/ci.yml`.
+
+## CI
+
+`.github/workflows/ci.yml` runs Checks on Linux, the Rust tests on Windows and macOS, and builds the app on four runners. Ordinary PRs link the app without installers; PRs that change packaging inputs (`src-tauri/` outside `src/` and `tests/`, `.github/`, package files) build and upload installers. Force packaging with `gh workflow run ci.yml --ref <branch> -f package=true`. See [docs/development.md](docs/development.md#ci).
 
 ## Read before you start
 
