@@ -24,8 +24,11 @@ export const WEBRTC_TIMEOUT_MS = 5000;
 /** The first reconnect delay; each failure doubles it up to the maximum. */
 export const RETRY_BASE_MS = 1000;
 export const RETRY_MAX_MS = 30000;
-/** MSE plays this far behind the newest frame at most before it skips ahead. */
-const MAX_LAG_S = 1.5;
+/** MSE keeps this many seconds of video, and skips ahead when it falls further behind. */
+export const KEEP_S = 5;
+/** MSE playback speeds up or slows down within these rates to stay near the live edge. */
+const MIN_RATE = 0.1;
+const MAX_RATE = 2;
 
 /** A stream whose picture has not moved for this long is reconnected. */
 export const STALL_MS = 10000;
@@ -94,30 +97,39 @@ export class Go2rtcPlayer {
   }
 
   /**
-   * Playing means the video plays, not that bytes arrive. Until then, and
-   * whenever the picture stops moving for STALL_MS, the stream reconnects.
+   * Playing means a frame was decoded, not that bytes arrived or that the
+   * element says `playing` (WebKit can say so with nothing decoded). Until
+   * then, and whenever no new frame is decoded for STALL_MS, the stream
+   * reconnects.
    */
   private watch(generation: number, mode: Mode): void {
     const { video } = this.options;
-    let played = false;
+    let shown = false;
+    const show = () => {
+      if (shown || !this.current(generation)) return;
+      shown = true;
+      this.playing();
+    };
     this.onPlaying = () => {
       if (!this.current(generation)) return;
-      played = true;
-      this.playing();
+      if (typeof video.requestVideoFrameCallback === "function") video.requestVideoFrameCallback(show);
+      else if (decoded(video)) show();
     };
     video.addEventListener("playing", this.onPlaying);
     let last = progress(video);
     let lastMoved = Date.now();
     this.watchdog = setInterval(() => {
       const now = progress(video);
-      if (now !== last) {
-        last = now;
+      if (moved(video, last, now)) {
         lastMoved = Date.now();
+        // A frame can decode after the element's `playing` event.
+        if (!video.paused && decoded(video)) show();
       } else if (Date.now() - lastMoved >= STALL_MS) {
         // WebRTC that connects but never shows a frame gives way to MSE.
-        if (mode === "webrtc" && !played) this.fallBack(generation);
+        if (mode === "webrtc" && !shown) this.fallBack(generation);
         else this.retry(generation);
       }
+      last = now;
     }, STALL_CHECK_MS);
   }
 
@@ -255,10 +267,25 @@ export class Go2rtcPlayer {
         this.retry(generation);
       }
     };
+    // As go2rtc's video-rtc.js does: keep only the last few seconds, jump
+    // ahead when playback falls behind them, and otherwise speed up or slow
+    // down a little to stay near the live edge. Seeking on every small lag
+    // restarts decoding from the next keyframe, which on a 5 fps camera
+    // left tiles without new frames long enough to trip the watchdog.
     const keepUp = () => {
-      if (!buffer || !video.buffered || video.buffered.length === 0) return;
+      if (!buffer || buffer.updating || !video.buffered || video.buffered.length === 0) return;
       const end = video.buffered.end(video.buffered.length - 1);
-      if (end - video.currentTime > MAX_LAG_S) video.currentTime = end - 0.2;
+      const keepFrom = end - KEEP_S;
+      const first = video.buffered.start(0);
+      if (keepFrom > first) {
+        try {
+          buffer.remove(first, keepFrom);
+        } catch {
+          // Trimming is housekeeping; the next update tries again.
+        }
+      }
+      if (video.currentTime < keepFrom) video.currentTime = keepFrom;
+      video.playbackRate = Math.max(MIN_RATE, Math.min(end - video.currentTime, MAX_RATE));
     };
 
     socket.onopen = () => {
@@ -325,10 +352,35 @@ export class Go2rtcPlayer {
   }
 }
 
-/** How far the picture has got: decoded frames when the webview counts them, else the play position. */
+/** The element has a picture: HAVE_CURRENT_DATA or better. */
+const HAVE_CURRENT_DATA = 2;
+
+/**
+ * How far decoding has got: the decoded-frame count when the webview
+ * reports one, since the play position can move with nothing decoded, and
+ * the play position only where that API is missing.
+ */
 function progress(video: HTMLVideoElement): number {
-  const frames = typeof video.getVideoPlaybackQuality === "function" ? video.getVideoPlaybackQuality().totalVideoFrames : 0;
-  return frames > 0 ? frames : video.currentTime;
+  return typeof video.getVideoPlaybackQuality === "function"
+    ? video.getVideoPlaybackQuality().totalVideoFrames
+    : video.currentTime;
+}
+
+/** Whether a frame has been decoded. */
+function decoded(video: HTMLVideoElement): boolean {
+  if (typeof video.getVideoPlaybackQuality === "function") return video.getVideoPlaybackQuality().totalVideoFrames > 0;
+  return video.readyState >= HAVE_CURRENT_DATA;
+}
+
+/**
+ * Whether the picture moved between two checks. A decoded-frame count that
+ * went back to a smaller number was reset by the webview (after a seek), and
+ * counts as movement once it is counting again. An element without a
+ * current picture never moves.
+ */
+function moved(video: HTMLVideoElement, last: number, now: number): boolean {
+  if (video.readyState < HAVE_CURRENT_DATA) return false;
+  return now > last || (now < last && now > 0);
 }
 
 /** Starts the video; a refused autoplay leaves the snapshot showing. */

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Go2rtcPlayer, RETRY_MAX_MS, STALL_CHECK_MS, STALL_MS, WEBRTC_TIMEOUT_MS, retryDelay, supportedMseCodecs, type PlayerState } from "./player";
+import { Go2rtcPlayer, KEEP_S, RETRY_MAX_MS, STALL_CHECK_MS, STALL_MS, WEBRTC_TIMEOUT_MS, retryDelay, supportedMseCodecs, type PlayerState } from "./player";
 
 class FakeSocket {
   static OPEN = 1;
@@ -71,8 +71,12 @@ class FakeBuffer extends EventTarget {
   updating = false;
   mode = "";
   appended: ArrayBuffer[] = [];
+  removed: [number, number][] = [];
   appendBuffer(data: ArrayBuffer) {
     this.appended.push(data);
+  }
+  remove(start: number, end: number) {
+    this.removed.push([start, end]);
   }
 }
 
@@ -99,10 +103,21 @@ class FakeMediaSource extends EventTarget {
   }
 }
 
-function video() {
-  const element = document.createElement("video");
+/** A video element whose picture state a test sets: jsdom never decodes. */
+type TestVideo = HTMLVideoElement & { ready: number; paused: boolean };
+
+function video(): TestVideo {
+  const element = document.createElement("video") as TestVideo;
   element.play = vi.fn().mockResolvedValue(undefined);
+  element.ready = 4;
+  Object.defineProperty(element, "readyState", { get: () => element.ready });
+  Object.defineProperty(element, "paused", { configurable: true, writable: true, value: false });
   return element;
+}
+
+/** Makes the element report `frames()` decoded frames, as WebKit and Chromium do. */
+function countFrames(element: HTMLVideoElement, frames: () => number) {
+  element.getVideoPlaybackQuality = () => ({ totalVideoFrames: frames() }) as VideoPlaybackQuality;
 }
 
 async function flush() {
@@ -337,18 +352,114 @@ describe("Go2rtcPlayer", () => {
     player.stop();
   });
 
-  it("counts decoded frames when the webview reports them", () => {
+  it("counts decoded frames when the webview reports them, through counter resets", () => {
     vi.stubGlobal("MediaSource", FakeMediaSource);
     const element = video();
     let frames = 0;
-    element.getVideoPlaybackQuality = () => ({ totalVideoFrames: frames }) as VideoPlaybackQuality;
+    countFrames(element, () => frames);
     const player = make(element);
     player.start();
-    for (let i = 0; i < 10; i++) {
-      frames += 5;
+    for (let i = 0; i < 20; i++) {
+      // A 5 fps camera whose counter WebKit resets now and then.
+      frames = i % 4 === 3 ? 2 : frames + 10;
       vi.advanceTimersByTime(STALL_CHECK_MS);
     }
     expect(FakeSocket.all).toHaveLength(1);
+    expect(states).toEqual(["connecting", "playing"]);
+    player.stop();
+  });
+
+  it("reconnects a stream that buffers and moves on without decoding a frame", () => {
+    vi.stubGlobal("MediaSource", FakeMediaSource);
+    const element = video();
+    countFrames(element, () => 0);
+    const player = make(element);
+    player.start();
+    // WebKit says playing and the clock moves, but nothing is decoded.
+    element.dispatchEvent(new Event("playing"));
+    for (let i = 1; i <= STALL_MS / STALL_CHECK_MS; i++) {
+      element.currentTime = i;
+      vi.advanceTimersByTime(STALL_CHECK_MS);
+    }
+    expect(states).toEqual(["connecting", "retrying"]);
+    player.stop();
+  });
+
+  it("reconnects when the element has no current picture for the stall window", () => {
+    vi.stubGlobal("MediaSource", FakeMediaSource);
+    const element = video();
+    element.ready = 1;
+    const player = make(element);
+    player.start();
+    for (let i = 1; i <= STALL_MS / STALL_CHECK_MS; i++) {
+      element.currentTime = i;
+      vi.advanceTimersByTime(STALL_CHECK_MS);
+    }
+    expect(states).toEqual(["connecting", "retrying"]);
+    player.stop();
+  });
+
+  it("shows playing only once a frame is decoded", () => {
+    vi.stubGlobal("MediaSource", FakeMediaSource);
+    const element = video();
+    let frames = 0;
+    countFrames(element, () => frames);
+    const player = make(element);
+    player.start();
+    element.dispatchEvent(new Event("playing"));
+    expect(states).toEqual(["connecting"]);
+    frames = 3;
+    vi.advanceTimersByTime(STALL_CHECK_MS);
+    expect(states).toEqual(["connecting", "playing"]);
+    player.stop();
+  });
+
+  it("waits for requestVideoFrameCallback where the webview has it", () => {
+    vi.stubGlobal("MediaSource", FakeMediaSource);
+    const element = video();
+    let frame: (() => void) | null = null;
+    element.requestVideoFrameCallback = (callback) => {
+      frame = callback as unknown as () => void;
+      return 1;
+    };
+    const player = make(element);
+    player.start();
+    element.dispatchEvent(new Event("playing"));
+    expect(states).toEqual(["connecting"]);
+    (frame as unknown as () => void)();
+    expect(states).toEqual(["connecting", "playing"]);
+    player.stop();
+  });
+
+  it("keeps MSE near the live edge and trims the old buffer", () => {
+    vi.stubGlobal("MediaSource", FakeMediaSource);
+    const element = video();
+    let range = { start: 0, end: 30 };
+    Object.defineProperty(element, "buffered", {
+      get: () => ({ length: 1, start: () => range.start, end: () => range.end }),
+    });
+    const player = make(element);
+    player.start();
+    const socket = FakeSocket.all[0];
+    const source = FakeMediaSource.last as FakeMediaSource;
+    source.open();
+    socket.message(JSON.stringify({ type: "mse", value: 'video/mp4; codecs="avc1.640029"' }));
+    const { buffer } = source.buffers[0];
+
+    element.currentTime = 2;
+    buffer.dispatchEvent(new Event("updateend"));
+    // Far behind: it trims to the last few seconds and jumps to their start.
+    expect(buffer.removed).toEqual([[0, 30 - KEEP_S]]);
+    expect(element.currentTime).toBe(30 - KEEP_S);
+    expect(element.playbackRate).toBe(2);
+
+    range = { start: 25, end: 30 };
+    element.currentTime = 29.5;
+    buffer.dispatchEvent(new Event("updateend"));
+    // Near the edge: no seek, no trim, and a gentle slow-down.
+    expect(buffer.removed).toHaveLength(1);
+    expect(element.currentTime).toBe(29.5);
+    expect(element.playbackRate).toBeCloseTo(0.5);
     player.stop();
   });
 

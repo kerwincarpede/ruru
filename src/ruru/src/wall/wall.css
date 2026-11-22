@@ -1,7 +1,9 @@
+/* The wall fills the space under the toolbar row in Edit layout, and the
+   window only scrolls when the tiles really are taller than it. */
 .wall {
   position: relative;
-  flex: 1;
-  min-height: 100%;
+  flex: 1 0 auto;
+  min-height: 0;
   background: var(--wall);
 }
 
