@@ -20,6 +20,7 @@ export interface TilePlacement {
   y: number;
   w: number;
   h: number;
+  stream?: "main" | "sub";
 }
 
 /** Mirrors `SavedLayout` in src-tauri/src/settings.rs: one server's wall. */

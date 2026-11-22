@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import GridLayout from "react-grid-layout";
 import type { Camera } from "../app/frigate";
 import type { SavedLayout } from "../app/api";
-import { COLUMNS, GAP, fromGridItems, hideCamera, rowHeight, toGridItems, wallPlacements, type GridItem } from "./layout";
+import { COLUMNS, GAP, ROW_RATIO, fromGridItems, hideCamera, rowHeight, toGridItems, wallPlacements, type GridItem } from "./layout";
 import Tile from "./Tile";
 
 interface WallProps {
@@ -15,6 +15,7 @@ interface WallProps {
   /** False while the window is hidden: every stream stops. */
   live: boolean;
   editing: boolean;
+  lockRatio?: boolean;
   refresh: number;
   /** The layout changed in Edit layout mode and should be saved. */
   onLayout: (layout: SavedLayout) => void;
@@ -38,7 +39,7 @@ function useWidth() {
  * Every camera's tile on a grid. In Edit layout mode tiles drag, resize and
  * hide; otherwise a double-click maximises a tile onto its main stream.
  */
-export default function Wall({ base, cameras, layout, live, editing, refresh, onLayout }: WallProps) {
+export default function Wall({ base, cameras, layout, live, editing, lockRatio = true, refresh, onLayout }: WallProps) {
   const [box, width] = useWidth();
   const [maximised, setMaximised] = useState<string | null>(null);
   const names = useMemo(() => cameras.map((camera) => camera.name), [cameras]);
@@ -56,22 +57,32 @@ export default function Wall({ base, cameras, layout, live, editing, refresh, on
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  const save = (next: GridItem[]) => onLayout(fromGridItems(next, hidden));
+  const save = (next: GridItem[]) => onLayout(fromGridItems(next, hidden, layout));
+
+  const streamFor = (camera: Camera, large = false) => {
+    const choice = layout?.tiles.find((tile) => tile.camera === camera.name)?.stream;
+    return (choice ?? (large ? "main" : "sub")) === "main" ? camera.mainStream : camera.subStream;
+  };
 
   return (
     <div ref={box} className={`wall${editing ? " is-editing" : ""}`}>
       <GridLayout
-        className="wall-grid"
+        className={lockRatio ? "wall-grid lock-ratio" : "wall-grid"}
         width={width}
         cols={COLUMNS}
         rowHeight={rowHeight(width)}
-        margin={[GAP, GAP]}
+        margin={[GAP, GAP * ROW_RATIO]}
         containerPadding={[GAP, GAP]}
         layout={items}
         isDraggable={editing}
         isResizable={editing}
         draggableCancel=".tile-hide"
         onDragStop={save}
+        onResize={(_items, _old, tile, placeholder) => {
+          if (!lockRatio) return;
+          tile.h = tile.w;
+          if (placeholder) placeholder.h = tile.h;
+        }}
         onResizeStop={save}
       >
         {items.map((item) => {
@@ -81,13 +92,13 @@ export default function Wall({ base, cameras, layout, live, editing, refresh, on
               <Tile
                 base={base}
                 camera={camera}
-                stream={camera.subStream}
+                stream={streamFor(camera)}
                 // The wall's streams pause while one camera fills the window.
                 live={live && !open}
                 refresh={refresh}
                 editing={editing}
                 onOpen={() => setMaximised(camera.name)}
-                onHide={() => onLayout(hideCamera(fromGridItems(items, hidden), camera.name))}
+                onHide={() => onLayout(hideCamera(fromGridItems(items, hidden, layout), camera.name))}
               />
             </div>
           );
@@ -95,7 +106,7 @@ export default function Wall({ base, cameras, layout, live, editing, refresh, on
       </GridLayout>
       {open && (
         <div className="wall-maximised" onDoubleClick={() => setMaximised(null)}>
-          <Tile base={base} camera={open} stream={open.mainStream} live={live} refresh={refresh} />
+          <Tile base={base} camera={open} stream={streamFor(open, true)} live={live} refresh={refresh} />
         </div>
       )}
     </div>

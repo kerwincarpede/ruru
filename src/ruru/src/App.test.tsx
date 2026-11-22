@@ -174,6 +174,22 @@ describe("App", () => {
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeInTheDocument();
   });
 
+  it("remembers a camera's stream choice without changing its neighbour", async () => {
+    const calls = wall();
+    render(<App />);
+    const garage = await screen.findByRole("figure", { name: "Garage" });
+    fireEvent.contextMenu(garage);
+    expect(screen.getByRole("menuitemradio", { name: "Automatic stream" })).toBeChecked();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Main stream" }));
+    await waitFor(() => expect(calls).toContainEqual({ cmd: "save_layout", payload: {
+      server: URL_SAVED, layout: { tiles: [expect.objectContaining({ camera: "maingate" }), expect.objectContaining({ camera: "garage", stream: "main" })], hidden: [] },
+    } }));
+    fireEvent.contextMenu(garage);
+    expect(screen.getByRole("menuitemradio", { name: "Main stream" })).toBeChecked();
+    fireEvent.contextMenu(screen.getByRole("figure", { name: "Maingate" }));
+    expect(screen.getByRole("menuitemradio", { name: "Automatic stream" })).toBeChecked();
+  });
+
   it("closes the right-click menu on Escape or a click elsewhere", async () => {
     wall();
     render(<App />);

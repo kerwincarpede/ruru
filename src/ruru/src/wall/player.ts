@@ -27,8 +27,8 @@ export const RETRY_MAX_MS = 30000;
 /** MSE keeps this many seconds of video, and skips ahead when it falls further behind. */
 export const KEEP_S = 5;
 /** MSE playback speeds up or slows down within these rates to stay near the live edge. */
-const MIN_RATE = 0.1;
-const MAX_RATE = 2;
+const MIN_RATE = 0.95;
+const MAX_RATE = 1.08;
 
 /** A stream whose picture has not moved for this long is reconnected. */
 export const STALL_MS = 10000;
@@ -70,6 +70,16 @@ export class Go2rtcPlayer {
 
   constructor(options: PlayerOptions) {
     this.options = options;
+  }
+
+  /** Local transport details; no extra connection or network request. */
+  connection() {
+    return {
+      generation: this.generation,
+      transport: this.peer ? "WebRTC" : this.socket ? "MSE" : undefined,
+      status: this.peer?.connectionState ?? (this.socket ? (this.socket.readyState === WebSocket.OPEN ? "connected" : "connecting") : undefined),
+      fallback: this.webrtcFailed,
+    };
   }
 
   /** Starts playing. Calling it while playing does nothing. */
@@ -277,7 +287,7 @@ export class Go2rtcPlayer {
       const end = video.buffered.end(video.buffered.length - 1);
       const keepFrom = end - KEEP_S;
       const first = video.buffered.start(0);
-      if (keepFrom > first) {
+      if (keepFrom - first >= 2) {
         try {
           buffer.remove(first, keepFrom);
         } catch {
@@ -285,7 +295,8 @@ export class Go2rtcPlayer {
         }
       }
       if (video.currentTime < keepFrom) video.currentTime = keepFrom;
-      video.playbackRate = Math.max(MIN_RATE, Math.min(end - video.currentTime, MAX_RATE));
+      const lead = end - video.currentTime;
+      video.playbackRate = lead > 1.5 ? MAX_RATE : lead < 0.35 ? MIN_RATE : 1;
     };
 
     socket.onopen = () => {
@@ -297,10 +308,12 @@ export class Go2rtcPlayer {
         const message = parseMessage(event.data);
         if (message?.type === "mse" && !buffer) {
           const create = () => {
+            if (!this.current(generation)) return;
             try {
               buffer = source.addSourceBuffer(message.value);
               buffer.mode = "segments";
               buffer.addEventListener("updateend", () => {
+                if (!this.current(generation)) return;
                 keepUp();
                 flush();
               });
@@ -349,6 +362,7 @@ export class Go2rtcPlayer {
       video.removeAttribute("src");
     }
     video.srcObject = null;
+    video.playbackRate = 1;
   }
 }
 
@@ -362,13 +376,18 @@ const HAVE_CURRENT_DATA = 2;
  */
 function progress(video: HTMLVideoElement): number {
   return typeof video.getVideoPlaybackQuality === "function"
-    ? video.getVideoPlaybackQuality().totalVideoFrames
+    ? displayedFrames(video)
     : video.currentTime;
 }
 
 /** Whether a frame has been decoded. */
+function displayedFrames(video: HTMLVideoElement): number {
+  const { totalVideoFrames, droppedVideoFrames } = video.getVideoPlaybackQuality();
+  return totalVideoFrames - droppedVideoFrames;
+}
+
 function decoded(video: HTMLVideoElement): boolean {
-  if (typeof video.getVideoPlaybackQuality === "function") return video.getVideoPlaybackQuality().totalVideoFrames > 0;
+  if (typeof video.getVideoPlaybackQuality === "function") return displayedFrames(video) > 0;
   return video.readyState >= HAVE_CURRENT_DATA;
 }
 

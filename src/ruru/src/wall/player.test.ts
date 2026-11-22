@@ -117,7 +117,7 @@ function video(): TestVideo {
 
 /** Makes the element report `frames()` decoded frames, as WebKit and Chromium do. */
 function countFrames(element: HTMLVideoElement, frames: () => number) {
-  element.getVideoPlaybackQuality = () => ({ totalVideoFrames: frames() }) as VideoPlaybackQuality;
+  element.getVideoPlaybackQuality = () => ({ totalVideoFrames: frames(), droppedVideoFrames: 0 }) as VideoPlaybackQuality;
 }
 
 async function flush() {
@@ -372,7 +372,7 @@ describe("Go2rtcPlayer", () => {
   it("reconnects a stream that buffers and moves on without decoding a frame", () => {
     vi.stubGlobal("MediaSource", FakeMediaSource);
     const element = video();
-    countFrames(element, () => 0);
+    element.getVideoPlaybackQuality = () => ({ totalVideoFrames: element.currentTime * 25, droppedVideoFrames: element.currentTime * 25 }) as VideoPlaybackQuality;
     const player = make(element);
     player.start();
     // WebKit says playing and the clock moves, but nothing is decoded.
@@ -451,15 +451,18 @@ describe("Go2rtcPlayer", () => {
     // Far behind: it trims to the last few seconds and jumps to their start.
     expect(buffer.removed).toEqual([[0, 30 - KEEP_S]]);
     expect(element.currentTime).toBe(30 - KEEP_S);
-    expect(element.playbackRate).toBe(2);
+    expect(element.playbackRate).toBeCloseTo(1.08);
 
     range = { start: 25, end: 30 };
     element.currentTime = 29.5;
     buffer.dispatchEvent(new Event("updateend"));
-    // Near the edge: no seek, no trim, and a gentle slow-down.
+    // Normal headroom: no seek, trim or change in speed.
     expect(buffer.removed).toHaveLength(1);
     expect(element.currentTime).toBe(29.5);
-    expect(element.playbackRate).toBeCloseTo(0.5);
+    expect(element.playbackRate).toBe(1);
+    element.currentTime = 29.8;
+    buffer.dispatchEvent(new Event("updateend"));
+    expect(element.playbackRate).toBeCloseTo(0.95);
     player.stop();
   });
 

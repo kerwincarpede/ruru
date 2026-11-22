@@ -27,6 +27,14 @@ pub const MAX_TILE_OFFSET: u32 = 10_000;
 /// The longest camera name a layout may name.
 const MAX_CAMERA_NAME: usize = 200;
 
+/// A feed selected explicitly instead of the wall and maximised defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StreamChoice {
+    Main,
+    Sub,
+}
+
 /// One tile's place on the wall, in grid units.
 ///
 /// Mirrored by `TilePlacement` in `src/app/api.ts`.
@@ -38,6 +46,8 @@ pub struct TilePlacement {
     pub y: u32,
     pub w: u32,
     pub h: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream: Option<StreamChoice>,
 }
 
 /// The wall layout saved for one Frigate server: where each tile sits and
@@ -385,6 +395,7 @@ mod tests {
             y,
             w,
             h,
+            stream: None,
         }
     }
 

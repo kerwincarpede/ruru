@@ -8,7 +8,7 @@ import { frigateCameras, getSettings, onFullScreenChanged, onOpenSettings, saveL
 import UpdatePrompt from "./app/UpdatePrompt";
 import { findUpdate, type AvailableUpdate } from "./app/updates";
 import SettingsDialog from "./settings/SettingsDialog";
-import { EMPTY_LAYOUT, showCamera } from "./wall/layout";
+import { EMPTY_LAYOUT, showCamera, wallPlacements } from "./wall/layout";
 import Wall from "./wall/Wall";
 import WallMenu, { type MenuItem } from "./wall/WallMenu";
 
@@ -35,7 +35,8 @@ function App() {
   const [refresh, setRefresh] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [lockRatio, setLockRatio] = useState(true);
+  const [menu, setMenu] = useState<{ x: number; y: number; camera?: string } | null>(null);
   const [live, setLive] = useState(() => document.visibilityState !== "hidden");
   const [toolbar, setToolbar] = useState(true);
   const toolbarTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -163,13 +164,27 @@ function App() {
 
   const closeMenu = useCallback(() => setMenu(null), []);
   const fullScreen = settings?.fullScreen ?? false;
-  const menuItems: MenuItem[] = [
+  const wallItems: MenuItem[] = [
     { label: "Settings…", onSelect: () => setSettingsOpen(true) },
     ...(url && cameras?.length
       ? [{ label: editing ? "Done editing" : "Edit layout", onSelect: () => setEditing((now) => !now) }]
       : []),
     { label: fullScreen ? "Exit full screen" : "Enter full screen", onSelect: toggleFullScreen },
   ];
+  const streamItems: MenuItem[] = [];
+  const target = cameras?.find((camera) => camera.name === menu?.camera);
+  if (target && cameras && target.mainStream !== target.subStream) {
+    const tiles = wallPlacements(cameras.map((camera) => camera.name), layout);
+    const current = tiles.find((tile) => tile.camera === target.name)?.stream;
+    streamItems.push(...([undefined, "main", "sub"] as const).map((stream) => ({
+      label: stream === "main" ? "Main stream" : stream === "sub" ? "Sub stream" : "Automatic stream",
+      checked: stream === current,
+      onSelect: () => changeLayout({
+        hidden: layout?.hidden ?? [],
+        tiles: tiles.map((tile) => tile.camera === target.name ? { ...tile, stream } : tile),
+      }),
+    })));
+  }
   const settingsKey = isMac() ? "⌘ ," : "Ctrl+,";
   const hidden = layout?.hidden ?? [];
   const showToolbar = toolbar || editing || !url;
@@ -182,13 +197,16 @@ function App() {
         // Dialogs keep the webview's own menu, such as Paste in the URL field.
         if ((event.target as Element).closest('[role="dialog"]')) return;
         event.preventDefault();
-        setMenu({ x: event.clientX, y: event.clientY });
+        setMenu({ x: event.clientX, y: event.clientY, camera: (event.target as Element).closest<HTMLElement>("[data-camera]")?.dataset.camera });
       }}
     >
       <div className={`toolbar${showToolbar ? " is-shown" : ""}`} role="toolbar" aria-label="Wall">
         {editing && (
           <>
             <span className="toolbar-note">Drag tiles to move them and pull their corners to resize them.</span>
+            <label className="toolbar-note">
+              <input type="checkbox" checked={lockRatio} onChange={(event) => setLockRatio(event.target.checked)} /> Lock to 16:9
+            </label>
             {hidden.map((camera) => (
               <button key={camera} type="button" onClick={() => changeLayout(showCamera(layout ?? EMPTY_LAYOUT, camera))}>
                 Show {cameraLabel(camera)}
@@ -243,12 +261,13 @@ function App() {
           layout={layout}
           live={live}
           editing={editing}
+          lockRatio={lockRatio}
           refresh={refresh}
           onLayout={changeLayout}
         />
       )}
 
-      {menu && <WallMenu x={menu.x} y={menu.y} items={menuItems} onClose={closeMenu} />}
+      {menu && <WallMenu x={menu.x} y={menu.y} items={[...streamItems, ...wallItems]} onClose={closeMenu} />}
       {settingsOpen && settings && (
         <SettingsDialog
           settings={settings}

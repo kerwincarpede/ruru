@@ -26,7 +26,7 @@ Ruru connects to Frigate's unauthenticated port, usually 5000. Logging in to Fri
 ### Using the wall
 
 - **Double-click** a tile to fill the window with that camera at full quality. Double-click again or press `Esc` to go back.
-- Choose **Edit layout** to drag tiles, resize them from their corners, or **Hide** them. **Reset to Frigate order** puts every camera back. Choose **Done** when the wall looks right. Ruru remembers the layout for each Frigate server.
+- Choose **Edit layout** to drag tiles, resize them from their corners, or **Hide** them. **Lock to 16:9** keeps a tile widescreen as you resize it. Untick it to resize freely. **Reset to Frigate order** puts every camera back and clears stream choices. Choose **Done** when the wall looks right. Ruru remembers the layout for each Frigate server.
 - Press `F11` (`Ctrl+⌘ F` on macOS), or right-click and choose **Enter full screen**, to fill the screen. Ruru starts full screen next time if you left it that way.
 
 ## Download
@@ -68,7 +68,9 @@ Connect to your Frigate server once, and Ruru reads its camera list for you. Add
 <td width="50%" valign="top">
 
 ### Live, with as little delay as possible
-Video plays straight from Frigate's built-in restreamer (go2rtc) over WebRTC, so what you see is close to real time, with MSE as a fallback where WebRTC is not available. The wall plays each camera's smaller sub stream, and a maximised camera its main stream. Ruru never decodes, copies or re-encodes your video itself.
+Video plays straight from Frigate's built-in restreamer (go2rtc) over WebRTC, so what you see is close to real time, with MSE as a fallback where WebRTC is not available. With **Automatic stream**, the wall plays each camera's smaller sub stream when available, and a maximised camera its main stream. Right-click a camera that has both feeds and choose **Main stream** or **Sub stream** to use that feed in both views. Ruru never decodes, copies or re-encodes your video itself.
+
+Choose **Edit layout** to see playback diagnostics on each tile. The overlay shows the stream name, connection type, picture size and displayed frames per second. Dropped frames are counted over the last sample (about one second). A dash means no measurement is available yet. For MSE, seconds buffered is the distance to the end of the received video, not the delay since the camera captured it. Low FPS with few drops can be a low-rate source; try the main stream on that tile. If dropped frames increase, try the sub stream instead.
 
 </td>
 </tr>

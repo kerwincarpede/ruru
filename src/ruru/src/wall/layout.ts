@@ -70,9 +70,9 @@ export function toGridItems(placements: TilePlacement[]): GridItem[] {
 }
 
 /** The layout to save after the grid changed: its items and the hidden cameras. */
-export function fromGridItems(items: GridItem[], hidden: string[]): SavedLayout {
+export function fromGridItems(items: GridItem[], hidden: string[], saved?: SavedLayout): SavedLayout {
   return {
-    tiles: items.map(({ i, x, y, w, h }) => ({ camera: i, x, y, w, h })),
+    tiles: items.map(({ i, x, y, w, h }) => ({ camera: i, x, y, w, h, stream: saved?.tiles.find((tile) => tile.camera === i)?.stream })),
     hidden: [...hidden],
   };
 }

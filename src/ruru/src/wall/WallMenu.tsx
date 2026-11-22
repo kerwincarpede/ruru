@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 export interface MenuItem {
   label: string;
+  checked?: boolean;
   onSelect: () => void;
 }
 
@@ -43,7 +44,8 @@ export default function WallMenu({ x, y, items, onClose }: WallMenuProps) {
         <button
           key={item.label}
           type="button"
-          role="menuitem"
+          role={item.checked === undefined ? "menuitem" : "menuitemradio"}
+          aria-checked={item.checked}
           onClick={() => {
             onClose();
             item.onSelect();
