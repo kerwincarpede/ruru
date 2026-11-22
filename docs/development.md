@@ -8,7 +8,7 @@ Ruru is built with Rust and [Tauri 2](https://tauri.app/), with a React + TypeSc
 | --- | --- |
 | `package.json` | npm workspace root over `src/*`; holds the one lockfile |
 | `src/ruru/` | The Tauri project |
-| `src/ruru/src/` | Frontend: React + TypeScript + Vite |
+| `src/ruru/src/` | Frontend: React + TypeScript + Vite. `settings/` is the Settings dialog, `wall/` the camera wall, its layout and its go2rtc player |
 | `src/ruru/src-tauri/` | Backend: Rust |
 | `src/ruru/src-tauri/icons/` | App icons, generated from `icons/source/app-icon.svg` (see the README there) |
 | `.github/workflows/release.yml` | Edge releases for code pushes to `main` |
@@ -40,6 +40,20 @@ npm run tauri dev
 ```
 
 This starts Vite on port 1420 and opens the Ruru window. Frontend changes reload at once; Rust changes rebuild and restart the app.
+
+### Connecting to Frigate
+
+Ruru needs a Frigate server to show anything. Choose **Connect to Frigate**, enter the server's unauthenticated address (port 5000 by default), and **Save**. The Rust backend fetches `/api/version`, `/api/config` and `/api/go2rtc/streams` itself, because Frigate sends no CORS headers. Video and snapshots go from Frigate straight to the webview: WebRTC over `/live/webrtc/api/ws` first, then MSE over `/live/mse/api/ws`, and snapshots from `/api/<camera>/latest.webp`.
+
+For each camera, Ruru takes the main and sub go2rtc streams from `live.streams` when it names more than one; otherwise from the `rtsp://127.0.0.1:8554/<name>` paths of the `record` (main) and `detect` (sub) inputs; otherwise `<camera>` and `<camera>_sub` when go2rtc has them. A camera with one stream uses it for both.
+
+Settings are saved as `settings.json` in the app config folder (for example `~/.config/com.kerwincarpede.ruru/` on Linux). Delete it to start again from **Connect to Frigate**.
+
+On Linux, WebKitGTK ships with WebRTC turned off, so Ruru turns it on for the main window at startup (`src-tauri/src/webview.rs`). A WebKitGTK built without WebRTC plays over MSE instead.
+
+The frontend tests fake the backend with `mockCommands` and stub `WebSocket`, `RTCPeerConnection` and `MediaSource`; the Rust tests parse trimmed copies of Frigate's answers in `src-tauri/src/frigate/fixtures/`. No test needs a Frigate server.
+
+### Fake updates
 
 To see the update prompt without a newer release, set `RURU_FAKE_UPDATE` in a debug build. `1` offers version 99.0.0; any other value is the version offered:
 

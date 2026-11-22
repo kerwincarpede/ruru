@@ -13,7 +13,21 @@ Point it at your Frigate server, and every camera is live on one screen, laid ou
 
 ---
 
-> **Ruru is in early development.** It opens a placeholder window for now; this page describes what Ruru is being built to do.
+## Get started
+
+1. Open Ruru and choose **Connect to Frigate**.
+2. Enter the address you open Frigate at, such as `http://frigate.local:5000`, choose **Test connection** to check it, then **Save**.
+3. Every camera appears on the wall and plays live.
+
+Open **Settings** again from the gear at the top right (it shows when you move the pointer), with `Ctrl+,` (`⌘ ,` on macOS), or from the menu you get by right-clicking the wall.
+
+Ruru connects to Frigate's unauthenticated port, usually 5000. Logging in to Frigate's port 8971 is not supported yet.
+
+### Using the wall
+
+- **Double-click** a tile to fill the window with that camera at full quality. Double-click again or press `Esc` to go back.
+- Choose **Edit layout** to drag tiles, resize them from their corners, or **Hide** them. **Reset to Frigate order** puts every camera back. Choose **Done** when the wall looks right. Ruru remembers the layout for each Frigate server.
+- Press `F11` (`Ctrl+⌘ F` on macOS), or right-click and choose **Enter full screen**, to fill the screen. Ruru starts full screen next time if you left it that way.
 
 ## Download
 
@@ -33,7 +47,7 @@ Frigate is great at recording and detecting, but watching all your cameras at on
 
 Ruru is named after the ruru, the morepork: a small New Zealand owl that keeps watch through the night.
 
-## What it will do
+## What it does
 
 <table>
 <tr>
@@ -46,7 +60,7 @@ Connect to your Frigate server once, and Ruru reads its camera list for you. Add
 <td width="50%" valign="top">
 
 ### Live, with as little delay as possible
-Video plays straight from Frigate's built-in restreamer (go2rtc) over WebRTC, so what you see is close to real time. Ruru never decodes, copies or re-encodes your video itself.
+Video plays straight from Frigate's built-in restreamer (go2rtc) over WebRTC, so what you see is close to real time, with MSE as a fallback where WebRTC is not available. The wall plays each camera's smaller sub stream, and a maximised camera its main stream. Ruru never decodes, copies or re-encodes your video itself.
 
 </td>
 </tr>
@@ -70,9 +84,9 @@ Runs full screen on a spare monitor or a wall-mounted display, reconnects on its
 
 Ruru is a [Tauri](https://tauri.app/) desktop app: a Rust backend and a React + TypeScript interface.
 
-- **Discovery:** the Rust backend reads your camera list from Frigate's HTTP API (`/api/config`).
-- **Playback:** each tile opens a WebRTC connection to the camera's stream on Frigate's go2rtc restreamer, the same path Frigate's own live view uses. Video goes from Frigate to the tile without passing through Ruru's backend.
-- **Layout:** tile positions and sizes are saved on your computer, per Frigate server.
+- **Discovery:** the Rust backend reads your cameras and their streams from Frigate's HTTP API (`/api/version`, `/api/config` and `/api/go2rtc/streams`) when Ruru starts and whenever its window comes back into focus.
+- **Playback:** each tile opens a WebRTC connection to the camera's stream on Frigate's go2rtc restreamer, the same path Frigate's own live view uses, and falls back to MSE. It shows the camera's latest snapshot until the video starts, reconnects on its own, and stops while the window is hidden. Video goes from Frigate to the tile without passing through Ruru's backend.
+- **Layout and settings:** the Frigate address, full screen, and each server's tile positions and sizes are saved in `settings.json` in Ruru's config folder on your computer.
 
 Nothing leaves your computer except requests to the Frigate server you point it at, and a check of Ruru's GitHub releases for updates. No analytics, no telemetry, no cloud account.
 

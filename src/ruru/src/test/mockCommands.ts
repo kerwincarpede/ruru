@@ -1,11 +1,19 @@
 import type { InvokeArgs } from "@tauri-apps/api/core";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import type { AppInfo } from "../app/api";
+import type { Camera, FrigateStatus } from "../app/frigate";
+import type { SavedLayout, Settings } from "../app/api";
 
 /** The Rust commands the page can call, by name, typed by hand from src-tauri/src/. */
 type Commands = {
   app_info: () => AppInfo;
   fake_update: () => string | null;
+  get_settings: () => Settings;
+  save_frigate_url: (args: { url: string }) => Settings;
+  set_full_screen: (args: { fullScreen: boolean }) => null;
+  save_layout: (args: { server: string; layout: SavedLayout }) => null;
+  test_frigate: (args: { url: string }) => FrigateStatus;
+  frigate_cameras: (args: { url: string }) => Camera[];
 };
 
 /** A Rust command the page can call. */
@@ -37,6 +45,7 @@ export function mockCommands(handlers: CommandHandlers): CommandCall[] {
     const handler = byName.get(cmd);
     if (handler) return handler(payload);
     throw new Error(`No mock for the "${cmd}" command`);
-  });
+    // Events (`listen`, `emit`) are faked too, so a test can `emit` what Rust would.
+  }, { shouldMockEvents: true });
   return calls;
 }

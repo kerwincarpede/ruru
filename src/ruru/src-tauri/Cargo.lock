@@ -2849,12 +2849,16 @@ dependencies = [
 name = "ruru"
 version = "0.1.0"
 dependencies = [
+ "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-process",
  "tauri-plugin-updater",
+ "url",
+ "webkit2gtk",
 ]
 
 [[package]]
