@@ -26,14 +26,17 @@ pub fn fake_update_version(value: Option<&str>, debug: bool) -> Option<String> {
     }
 }
 
+/// The fake update's version, reading `RURU_FAKE_UPDATE` through `lookup`
+/// (an environment lookup by name).
+fn fake_update_from(lookup: impl Fn(&str) -> Option<String>, debug: bool) -> Option<String> {
+    fake_update_version(lookup(FAKE_UPDATE_VAR).as_deref(), debug)
+}
+
 /// The fake update's version, or `None` to check for a real one. Always
 /// `None` in a release build, whatever the environment says.
 #[tauri::command]
 pub fn fake_update() -> Option<String> {
-    fake_update_version(
-        std::env::var(FAKE_UPDATE_VAR).ok().as_deref(),
-        cfg!(debug_assertions),
-    )
+    fake_update_from(|name| std::env::var(name).ok(), cfg!(debug_assertions))
 }
 
 #[cfg(test)]
@@ -65,13 +68,27 @@ mod tests {
         );
     }
 
+    /// An environment holding only `name=value`.
+    fn env(name: &'static str, value: &'static str) -> impl Fn(&str) -> Option<String> {
+        move |asked| (asked == name).then(|| value.to_string())
+    }
+
     #[test]
-    fn the_command_reads_the_environment() {
-        // The test binary is a debug build; the variable is unset in CI.
-        let expected = fake_update_version(
-            std::env::var(FAKE_UPDATE_VAR).ok().as_deref(),
-            cfg!(debug_assertions),
+    fn the_command_reads_ruru_fake_update() {
+        assert_eq!(
+            fake_update_from(env("RURU_FAKE_UPDATE", "1"), true).as_deref(),
+            Some("99.0.0")
         );
-        assert_eq!(fake_update(), expected);
+        assert_eq!(
+            fake_update_from(env("RURU_FAKE_UPDATE", "0.2.0"), true).as_deref(),
+            Some("0.2.0")
+        );
+        assert_eq!(fake_update_from(env("RURU_FAKE_UPDATE", "1"), false), None);
+    }
+
+    #[test]
+    fn other_variables_fake_nothing() {
+        assert_eq!(fake_update_from(env("FAKE_UPDATE", "1"), true), None);
+        assert_eq!(fake_update_from(|_| None, true), None);
     }
 }
