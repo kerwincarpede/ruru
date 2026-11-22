@@ -10,9 +10,10 @@ pub struct AppInfo {
 }
 
 /// Ruru's name and the version this binary was built as, so the page shows
-/// the version that is actually running.
+/// the version that is actually running. Not `pub`: a public command at the
+/// crate root clashes with the macros `#[tauri::command]` exports (E0255).
 #[tauri::command]
-pub fn app_info() -> AppInfo {
+fn app_info() -> AppInfo {
     AppInfo {
         name: "Ruru".into(),
         version: env!("CARGO_PKG_VERSION").into(),

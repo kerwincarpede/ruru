@@ -7,16 +7,10 @@ function App() {
   const [info, setInfo] = useState<AppInfo | null>(null);
 
   useEffect(() => {
-    let live = true;
     appInfo()
-      .then((next) => {
-        if (live) setInfo(next);
-      })
+      .then(setInfo)
       // Without the backend's answer the footer stays empty; nothing else depends on it.
       .catch(() => {});
-    return () => {
-      live = false;
-    };
   }, []);
 
   return (

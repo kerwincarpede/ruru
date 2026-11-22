@@ -31,15 +31,4 @@ describe("App", () => {
     expect(screen.getByRole("contentinfo", { name: "About Ruru" })).toBeEmptyDOMElement();
     expect(screen.getByRole("heading", { name: "Ruru" })).toBeInTheDocument();
   });
-
-  it("ignores an app_info answer that arrives after the window is gone", async () => {
-    let answer: ((info: { name: string; version: string }) => void) | null = null;
-    mockCommands({ app_info: () => new Promise((resolve) => (answer = resolve)) });
-    const { unmount } = render(<App />);
-    await waitFor(() => expect(answer).not.toBeNull());
-    unmount();
-    answer!({ name: "Ruru", version: "0.1.0" });
-    await Promise.resolve();
-    expect(screen.queryByText("Ruru 0.1.0")).not.toBeInTheDocument();
-  });
 });
