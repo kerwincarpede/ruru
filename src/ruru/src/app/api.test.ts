@@ -12,7 +12,7 @@ describe("appInfo", () => {
   });
 });
 
-const settings: Settings = { frigateUrl: "http://f", fullScreen: false, wall: DEFAULT_WALL_OPTIONS, layouts: {} };
+const settings: Settings = { frigateUrl: "http://f", fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", layouts: {} };
 
 describe("settings commands", () => {
   it("calls each command with camelCase arguments", async () => {

@@ -2,12 +2,15 @@ import type { InvokeArgs } from "@tauri-apps/api/core";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import type { AppInfo } from "../app/api";
 import type { Camera, FrigateStatus } from "../app/frigate";
-import type { SavedLayout, Settings, WallOptions } from "../app/api";
+import type { SavedLayout, Settings, UpdateChannel, WallOptions } from "../app/api";
 
 /** The Rust commands the page can call, by name, typed by hand from src-tauri/src/. */
 type Commands = {
   app_info: () => AppInfo;
   fake_update: () => string | null;
+  check_update: () => string | null;
+  install_update: () => null;
+  set_update_channel: (args: { channel: UpdateChannel }) => Settings;
   get_settings: () => Settings;
   save_frigate_url: (args: { url: string }) => Settings;
   set_full_screen: (args: { fullScreen: boolean }) => null;

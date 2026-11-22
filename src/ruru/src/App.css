@@ -163,6 +163,14 @@ button:disabled {
   font-size: 0.85rem;
 }
 
+/* The running version, at the start of the Edit layout toolbar. */
+.toolbar-version {
+  margin-right: auto;
+  color: var(--on-wall);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
 .wall-error,
 .wall-empty {
   margin: 3.5rem auto 0;

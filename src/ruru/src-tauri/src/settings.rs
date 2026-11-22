@@ -1,6 +1,6 @@
 //! Ruru's settings, stored as `settings.json` in the app config folder: the
 //! Frigate URL, whether the window is full screen, how the wall is drawn,
-//! and one wall layout per Frigate server.
+//! the update channel, and one wall layout per Frigate server.
 //!
 //! Missing keys fall back to their defaults and unknown keys are ignored, so
 //! settings files from other versions still load.
@@ -86,6 +86,28 @@ impl Default for WallOptions {
     }
 }
 
+/// Which releases Ruru updates to, chosen in Settings › Updates.
+///
+/// Mirrored by `UpdateChannel` in `src/app/api.ts`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateChannel {
+    /// Releases the owner has promoted. Every copy starts here.
+    #[default]
+    Stable,
+    /// Every merge to main, as soon as it is built.
+    Edge,
+}
+
+/// Reads a stored channel leniently: anything Ruru does not know, such as a
+/// channel from a newer version, is Stable rather than a broken file.
+fn lenient_channel<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<UpdateChannel, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
 /// Everything Ruru remembers between launches.
 ///
 /// Mirrored by `Settings` in `src/app/api.ts`.
@@ -99,6 +121,9 @@ pub struct Settings {
     pub full_screen: bool,
     /// How the wall is drawn.
     pub wall: WallOptions,
+    /// Which releases the update check offers.
+    #[serde(deserialize_with = "lenient_channel")]
+    pub update_channel: UpdateChannel,
     /// Layouts by normalised Frigate URL.
     pub layouts: BTreeMap<String, SavedLayout>,
 }
@@ -281,6 +306,14 @@ impl SettingsStore {
         self.update(|settings| settings.wall = wall)
     }
 
+    /// Saves which releases the update check offers.
+    pub fn set_update_channel(
+        &mut self,
+        channel: UpdateChannel,
+    ) -> Result<&Settings, SettingsError> {
+        self.update(|settings| settings.update_channel = channel)
+    }
+
     /// Saves the layout for the Frigate server at `server`.
     pub fn set_layout(
         &mut self,
@@ -335,7 +368,7 @@ pub fn track_full_screen(window: &WebviewWindow) {
     });
 }
 
-fn lock(state: &SharedSettings) -> std::sync::MutexGuard<'_, SettingsStore> {
+pub(crate) fn lock(state: &SharedSettings) -> std::sync::MutexGuard<'_, SettingsStore> {
     // A panic while holding the lock leaves the settings as they were.
     state
         .lock()
@@ -398,6 +431,19 @@ pub async fn save_wall_options(
     lock(&state)
         .set_wall_options(options)
         .map(|_| ())
+        .map_err(|err| err.to_string())
+}
+
+/// Saves the update channel the user picked and returns the settings with it.
+/// The page checks the new channel straight after.
+#[tauri::command]
+pub async fn set_update_channel(
+    state: State<'_, SharedSettings>,
+    channel: UpdateChannel,
+) -> Result<Settings, String> {
+    lock(&state)
+        .set_update_channel(channel)
+        .cloned()
         .map_err(|err| err.to_string())
 }
 
@@ -543,6 +589,38 @@ mod tests {
     }
 
     #[test]
+    fn the_update_channel_is_stable_until_edge_is_saved() {
+        assert_eq!(Settings::default().update_channel, UpdateChannel::Stable);
+        let dir = TempDir::new("channel");
+        let mut store = SettingsStore::open(Some(dir.file()));
+        assert_eq!(
+            store
+                .set_update_channel(UpdateChannel::Edge)
+                .unwrap()
+                .update_channel,
+            UpdateChannel::Edge
+        );
+        assert_eq!(
+            SettingsStore::open(Some(dir.file()))
+                .current()
+                .update_channel,
+            UpdateChannel::Edge
+        );
+    }
+
+    #[test]
+    fn an_unknown_update_channel_reads_as_stable() {
+        for stored in [r#""nightly""#, "3", "null", r#"{"edge": true}"#] {
+            let settings: Settings = serde_json::from_str(&format!(
+                r#"{{"frigateUrl": "http://a", "updateChannel": {stored}}}"#
+            ))
+            .unwrap();
+            assert_eq!(settings.update_channel, UpdateChannel::Stable, "{stored}");
+            assert_eq!(settings.frigate_url.as_deref(), Some("http://a"));
+        }
+    }
+
+    #[test]
     fn a_broken_file_opens_with_defaults_and_is_replaced_on_the_next_change() {
         let dir = TempDir::new("broken");
         fs::create_dir_all(dir.file().parent().unwrap()).unwrap();
@@ -587,6 +665,7 @@ mod tests {
             frigate_url: Some("http://a".into()),
             full_screen: true,
             wall: WallOptions::default(),
+            update_channel: UpdateChannel::Edge,
             layouts: BTreeMap::new(),
         };
         settings.layouts.insert(
@@ -602,6 +681,7 @@ mod tests {
                 "frigateUrl": "http://a",
                 "fullScreen": true,
                 "wall": {"lockRatio": true, "fitToWindow": true, "streamInfo": false},
+                "updateChannel": "edge",
                 "layouts": {"http://a": {"tiles": [{"camera": "cam", "x": 1, "y": 2, "w": 3, "h": 4}], "hidden": []}}
             })
         );

@@ -1,18 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { check, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
-import { fakeUpdate, findUpdate } from "./updates";
+import { describe, expect, it } from "vitest";
+import { checkForUpdate, fakeUpdate, findUpdate, versionLabel } from "./updates";
 import { mockCommands } from "../test/mockCommands";
-
-vi.mock("@tauri-apps/plugin-updater", () => ({ check: vi.fn() }));
-vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: vi.fn() }));
-
-const checkMock = vi.mocked(check);
-const relaunchMock = vi.mocked(relaunch);
-
-function realUpdate(version: string, downloadAndInstall = vi.fn().mockResolvedValue(undefined)) {
-  return { version, downloadAndInstall } as unknown as Update;
-}
 
 describe("fakeUpdate", () => {
   it("returns the version fake_update offers", async () => {
@@ -22,56 +10,79 @@ describe("fakeUpdate", () => {
   });
 });
 
-describe("findUpdate", () => {
-  beforeEach(() => {
-    checkMock.mockReset();
-    relaunchMock.mockReset().mockResolvedValue(undefined);
-  });
+describe("versionLabel", () => {
+  const info = { name: "Ruru", version: "0.3.0" };
 
+  it("names the version, and says Edge on the Edge channel", () => {
+    expect(versionLabel(info, "stable")).toBe("Ruru 0.3.0");
+    expect(versionLabel(info, "edge")).toBe("Ruru 0.3.0 · Edge");
+  });
+});
+
+describe("checkForUpdate", () => {
   it("offers the fake update without checking, and installing it does nothing", async () => {
-    mockCommands({ fake_update: () => "99.0.0" });
-    const update = await findUpdate();
+    const calls = mockCommands({ fake_update: () => "99.0.0" });
+    const update = await checkForUpdate();
     expect(update?.version).toBe("99.0.0");
     await update?.install();
-    expect(checkMock).not.toHaveBeenCalled();
-    expect(relaunchMock).not.toHaveBeenCalled();
+    expect(calls.map((call) => call.cmd)).toEqual(["fake_update"]);
   });
 
-  it("offers a newer Stable release, which installs and then restarts", async () => {
-    mockCommands({ fake_update: () => null });
-    const downloadAndInstall = vi.fn().mockResolvedValue(undefined);
-    checkMock.mockResolvedValue(realUpdate("0.2.0", downloadAndInstall));
-    const update = await findUpdate();
-    expect(update?.version).toBe("0.2.0");
-    expect(relaunchMock).not.toHaveBeenCalled();
+  it("offers the release check_update finds, which install_update installs", async () => {
+    const calls = mockCommands({ fake_update: () => null, check_update: () => "0.4.0", install_update: () => null });
+    const update = await checkForUpdate();
+    expect(update?.version).toBe("0.4.0");
+    expect(calls.map((call) => call.cmd)).toEqual(["fake_update", "check_update"]);
     await update?.install();
-    expect(downloadAndInstall).toHaveBeenCalledOnce();
-    expect(relaunchMock).toHaveBeenCalledOnce();
+    expect(calls.map((call) => call.cmd)).toEqual(["fake_update", "check_update", "install_update"]);
   });
 
-  it("does not restart when the install fails", async () => {
-    mockCommands({ fake_update: () => null });
-    checkMock.mockResolvedValue(realUpdate("0.2.0", vi.fn().mockRejectedValue(new Error("bad signature"))));
-    const update = await findUpdate();
-    await expect(update?.install()).rejects.toThrow("bad signature");
-    expect(relaunchMock).not.toHaveBeenCalled();
+  it("rejects with why an install failed", async () => {
+    mockCommands({
+      fake_update: () => null,
+      check_update: () => "0.4.0",
+      install_update: () => {
+        throw "The update could not be installed: bad signature";
+      },
+    });
+    const update = await checkForUpdate();
+    await expect(update?.install()).rejects.toBe("The update could not be installed: bad signature");
   });
 
   it("offers nothing when this copy is up to date", async () => {
-    mockCommands({ fake_update: () => null });
-    checkMock.mockResolvedValue(null);
-    await expect(findUpdate()).resolves.toBeNull();
+    mockCommands({ fake_update: () => null, check_update: () => null });
+    await expect(checkForUpdate()).resolves.toBeNull();
   });
 
-  it("stays silent when the check fails, as it does before the first Stable release", async () => {
-    mockCommands({ fake_update: () => null });
-    checkMock.mockRejectedValue(new Error("404 Not Found"));
+  it("rejects with why the check failed", async () => {
+    mockCommands({
+      fake_update: () => null,
+      check_update: () => {
+        throw "Could not find Edge releases: timed out";
+      },
+    });
+    await expect(checkForUpdate()).rejects.toBe("Could not find Edge releases: timed out");
+  });
+});
+
+describe("findUpdate", () => {
+  it("offers what the check finds", async () => {
+    mockCommands({ fake_update: () => null, check_update: () => "0.4.0" });
+    await expect(findUpdate()).resolves.toMatchObject({ version: "0.4.0" });
+  });
+
+  it("stays silent when the check fails", async () => {
+    mockCommands({
+      fake_update: () => null,
+      check_update: () => {
+        throw "Could not check for updates: 404 Not Found";
+      },
+    });
     await expect(findUpdate()).resolves.toBeNull();
   });
 
   it("stays silent when the backend cannot answer", async () => {
     mockCommands({});
     await expect(findUpdate()).resolves.toBeNull();
-    expect(checkMock).not.toHaveBeenCalled();
   });
 });

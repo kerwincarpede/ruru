@@ -33,7 +33,7 @@ Ruru connects to Frigate's unauthenticated port, usually 5000. Logging in to Fri
 
 ## Download
 
-Download the installer for your platform from the [latest release](https://github.com/kerwincarpede/ruru/releases/latest): `.msi` or `-setup.exe` for Windows, the universal `.dmg` for macOS, and `.AppImage`, `.deb` or `.rpm` for Linux. Ruru checks for a newer Stable release when it starts and asks before installing it.
+Download the installer for your platform from the [latest release](https://github.com/kerwincarpede/ruru/releases/latest): `.msi` or `-setup.exe` for Windows, the universal `.dmg` for macOS, and `.AppImage`, `.deb` or `.rpm` for Linux. Ruru checks for a newer release when it starts and asks before installing it.
 
 On Linux you can install the latest Stable release with one command. It uses the `.deb` on Debian and Ubuntu, the `.rpm` on Fedora and openSUSE, and the `.AppImage` anywhere else:
 
@@ -43,7 +43,14 @@ curl -fsSL https://raw.githubusercontent.com/kerwincarpede/ruru/main/install.sh 
 
 Set `RURU_FORMAT` to `deb`, `rpm` or `appimage` to choose the installer, or `RURU_VERSION` (for example `0.1.2`) to install a specific release. The package installs ask for your password through `sudo`. The AppImage goes in `~/.local/bin` and needs no password.
 
-Each merge to `main` is also published as an **Edge** pre-release on the [releases page](https://github.com/kerwincarpede/ruru/releases). Edge builds are installed by hand.
+### Stable and Edge
+
+Ruru updates from one of two channels. Pick one with **Update channel** in **Settings → Updates**, which also shows the version you have and has **Check for updates**.
+
+- **Stable** (default): get updates after they've been tried on Edge.
+- **Edge**: get every change as soon as it's built, from each merge to `main`. You may run into bugs. **Edit layout** and **Settings → Updates** show **Edge** next to the version, such as **Ruru 0.4.0 · Edge**.
+
+Switching channel checks the new one straight away. Ruru never installs an older version, so moving from Edge back to Stable keeps the version you have until Stable passes it. Every Edge build is also on the [releases page](https://github.com/kerwincarpede/ruru/releases) as a pre-release.
 
 The installers are not signed with a paid certificate, so Windows SmartScreen and macOS Gatekeeper warn on first launch. On macOS, choose **Done**, then **Open Anyway** in **System Settings → Privacy & Security**.
 
@@ -98,7 +105,7 @@ Ruru is a [Tauri](https://tauri.app/) desktop app: a Rust backend and a React + 
 
 - **Discovery:** the Rust backend reads your cameras and their streams from Frigate's HTTP API (`/api/version`, `/api/config` and `/api/go2rtc/streams`) when Ruru starts and whenever its window comes back into focus.
 - **Playback:** each tile opens a WebRTC connection to the camera's stream on Frigate's go2rtc restreamer, the same path Frigate's own live view uses, and falls back to MSE. It shows the camera's latest snapshot until the video starts, reconnects on its own, and stops while the window is hidden. Video goes from Frigate to the tile without passing through Ruru's backend.
-- **Layout and settings:** the Frigate address, full screen, the wall options, and each server's tile positions and sizes are saved in `settings.json` in Ruru's config folder on your computer.
+- **Layout and settings:** the Frigate address, full screen, the wall options, the update channel, and each server's tile positions and sizes are saved in `settings.json` in Ruru's config folder on your computer.
 
 Nothing leaves your computer except requests to the Frigate server you point it at, and a check of Ruru's GitHub releases for updates. No analytics, no telemetry, no cloud account.
 

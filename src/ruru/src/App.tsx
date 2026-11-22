@@ -6,7 +6,7 @@ import { isMac, shortcutFor } from "./app/keys";
 import Logo from "./app/Logo";
 import { DEFAULT_WALL_OPTIONS, frigateCameras, getSettings, onFullScreenChanged, onOpenSettings, saveLayout, saveWallOptions, setFullScreen, type SavedLayout, type Settings, type WallOptions } from "./app/api";
 import UpdatePrompt from "./app/UpdatePrompt";
-import { findUpdate, type AvailableUpdate } from "./app/updates";
+import { findUpdate, versionLabel, type AvailableUpdate } from "./app/updates";
 import SettingsDialog from "./settings/SettingsDialog";
 import { EMPTY_LAYOUT, hideCamera, showCamera, wallPlacements } from "./wall/layout";
 import { tileMenu, type MenuItem, type MenuSection } from "./wall/menu";
@@ -17,7 +17,7 @@ import WallMenu from "./wall/WallMenu";
 /** How long the toolbar stays after the pointer stops moving. */
 export const TOOLBAR_HIDE_MS = 2500;
 
-const NO_SETTINGS: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, layouts: {} };
+const NO_SETTINGS: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", layouts: {} };
 
 function GearIcon() {
   return (
@@ -55,10 +55,13 @@ function App() {
   }, []);
 
   // One check per launch. findUpdate never rejects: a failed check offers nothing.
+  // A channel switch in Settings meanwhile makes its answer stale.
+  const channelSwitches = useRef(0);
   useEffect(() => {
     let current = true;
+    const switches = channelSwitches.current;
     void findUpdate().then((found) => {
-      if (current) setUpdate(found);
+      if (current && switches === channelSwitches.current) setUpdate(found);
     });
     return () => {
       current = false;
@@ -219,6 +222,7 @@ function App() {
   const settingsKey = isMac() ? "⌘ ," : "Ctrl+,";
   const hidden = layout?.hidden ?? [];
   const showToolbar = toolbar || editing || !url;
+  const version = info ? versionLabel(info, settings?.updateChannel ?? "stable") : null;
 
   return (
     <main
@@ -234,6 +238,7 @@ function App() {
       <div className={`toolbar${showToolbar ? " is-shown" : ""}`} role="toolbar" aria-label="Wall">
         {editing && (
           <>
+            {version && <span className="toolbar-note toolbar-version">{version}</span>}
             <span className="toolbar-note">Drag tiles to move them and pull their corners to resize them.</span>
             <label className="toolbar-note">
               <input type="checkbox" checked={wallOptions.lockRatio} onChange={(event) => changeWall({ lockRatio: event.target.checked })} /> Lock to 16:9
@@ -311,6 +316,12 @@ function App() {
       {settingsOpen && settings && (
         <SettingsDialog
           settings={settings}
+          info={info}
+          onChannelSaved={(saved) => {
+            channelSwitches.current += 1;
+            setSettings(saved);
+          }}
+          onUpdate={setUpdate}
           onSaved={(saved) => {
             setSettings(saved);
             if (saved.frigateUrl !== url) {
@@ -324,11 +335,7 @@ function App() {
       {update && <UpdatePrompt update={update} onClose={() => setUpdate(null)} />}
       {!url && (
         <footer className="footer" aria-label="About Ruru">
-          {info && (
-            <span>
-              {info.name} {info.version}
-            </span>
-          )}
+          {version && <span>{version}</span>}
         </footer>
       )}
     </main>

@@ -131,7 +131,7 @@ Release builds run the Build jobs in the `release` environment, which holds the 
 
 `install.sh` at the repository root is the Linux one-line installer from the README. It reads the latest Stable release from the GitHub API (or the tag in `RURU_VERSION`) and picks the installer by matching the asset names above, so renaming the Linux installers means updating its patterns. Check it with `sh -n install.sh` and by running it in an Ubuntu container.
 
-Each non-docs push to `main`, such as a merged code pull request, is released as an Edge build: a [GitHub release](https://github.com/kerwincarpede/ruru/releases) of that commit, marked as a pre-release and never as the latest release, with the installers attached (`.msi` and `-setup.exe` for Windows, a universal `.dmg` for macOS, and `.AppImage`, `.deb` and `.rpm` for Linux). Edge builds are installed by hand. Installed copies update only to Stable releases, which are Edge releases promoted later with the same installers (see [Promoting to Stable](#promoting-to-stable)).
+Each non-docs push to `main`, such as a merged code pull request, is released as an Edge build: a [GitHub release](https://github.com/kerwincarpede/ruru/releases) of that commit, marked as a pre-release and never as the latest release, with the installers attached (`.msi` and `-setup.exe` for Windows, a universal `.dmg` for macOS, and `.AppImage`, `.deb` and `.rpm` for Linux). Copies on the Edge update channel offer it. A Stable release is an Edge release promoted later, with the same installers (see [Promoting to Stable](#promoting-to-stable)), and Stable copies offer only those.
 
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) has three jobs:
 
@@ -170,7 +170,7 @@ Before publishing, the workflow cleans up GitHub's generated **What's Changed** 
 
 ### Promoting to Stable
 
-[`.github/workflows/promote.yml`](../.github/workflows/promote.yml) makes an Edge release the latest release, which installed copies update to. Nothing is rebuilt. Run it from `main` with **Actions → Promote to Stable → Run workflow**, or:
+[`.github/workflows/promote.yml`](../.github/workflows/promote.yml) makes an Edge release the latest release, which Stable copies update to. Nothing is rebuilt. Run it from `main` with **Actions → Promote to Stable → Run workflow**, or:
 
 ```sh
 gh workflow run promote.yml                  # the newest Edge release
@@ -181,7 +181,9 @@ It runs in the `stable` environment, which only `main` may deploy to and which w
 
 ### Updates
 
-Installed copies update themselves with Tauri's [updater plugin](https://v2.tauri.app/plugin/updater/). At startup the page (`src/ruru/src/app/updates.ts`) reads `latest.json` from the latest release, `https://github.com/kerwincarpede/ruru/releases/latest/download/latest.json` (`plugins.updater.endpoints` in `tauri.conf.json`). When it names a newer version, Ruru shows **Ruru \<version\> is ready. Install and restart?** with **Install and restart** and **Not now**. Install and restart downloads and installs the package for the platform and installer type, then restarts through the process plugin. Not now closes the prompt until the next launch. A failed check, including the 404 before the first Stable release, shows nothing.
+Installed copies update themselves with Tauri's [updater plugin](https://v2.tauri.app/plugin/updater/), driven from Rust (`src/ruru/src-tauri/src/update.rs`): `check_update` checks and keeps the update it finds, and `install_update` downloads and installs the package for the platform and installer type, then restarts Ruru. The page (`src/ruru/src/app/updates.ts`) checks once at startup. When there is a newer version, Ruru shows **Ruru \<version\> is ready. Install and restart?** with **Install and restart** and **Not now**. Not now closes the prompt until the next launch. A failed startup check shows nothing.
+
+The channel is **Settings → Updates** (`updateChannel` in `settings.json`, `stable` or `edge`; anything else reads as Stable). Stable reads the latest release's manifest, `https://github.com/kerwincarpede/ruru/releases/latest/download/latest.json` (also `plugins.updater.endpoints` in `tauri.conf.json`). Edge asks `https://api.github.com/repos/kerwincarpede/ruru/releases` for the highest published `v<version>` release with a `latest.json`, Stable ones included, and reads `releases/download/v<version>/latest.json`. It skips drafts, other tags and pre-release versions, so a build that finishes late never moves Edge backwards. Only a newer version counts as an update, so a copy moved from Edge back to Stable keeps its version until Stable passes it. Switching channel (`set_update_channel`) forgets the update the old channel offered and checks the new one at once; `install_update` refuses an update found on a channel that is no longer picked. **Settings → Updates** shows a failed check's reason and **Check for updates** checks again. **Edit layout**, **Settings → Updates** and the footer before a server is connected show the version, with **· Edge** on the Edge channel.
 
 A release builds the update packages because CI turns on `bundle.createUpdaterArtifacts` when it stamps the version: the `.app.tar.gz` on macOS, and the installers themselves elsewhere, each with a `.sig`. The publish job writes `latest.json` from those signatures ([`.github/scripts/updater_manifest.py`](../.github/scripts/updater_manifest.py)) and refuses to publish a release that is missing macOS, Linux or Windows.
 
