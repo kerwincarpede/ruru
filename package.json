@@ -1,0 +1,7 @@
+{
+  "name": "ruru-workspace",
+  "private": true,
+  "workspaces": [
+    "src/*"
+  ]
+}

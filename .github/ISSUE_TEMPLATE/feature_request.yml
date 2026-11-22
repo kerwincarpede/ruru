@@ -1,0 +1,23 @@
+name: Suggest an idea
+description: Something Ruru could do, or do better.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What's your idea?
+      description: What you'd like Ruru to do, and what it would help you with.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Ruru version
+      description: Shown at the bottom of the Ruru window.
+      placeholder: "0.1.0"
+  - type: input
+    id: os
+    attributes:
+      label: System
+      description: Your operating system and, on Linux, X11 or Wayland.
+      placeholder: "Linux x86_64 (Wayland)"
