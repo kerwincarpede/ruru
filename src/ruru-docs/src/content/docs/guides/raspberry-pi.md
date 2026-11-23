@@ -56,6 +56,8 @@ Ruru needs a graphical session. Use a small Wayland compositor rather than a ful
 - **Kiosk (recommended):** `cage` runs Ruru as the only app, full screen. Nothing else is on screen. The Pi archive has cage 0.2.0.
 - **Light desktop:** `labwc` is the compositor Raspberry Pi OS's own desktop uses. Use it if you also want a desktop on the Pi, with Ruru starting when you log in. The Pi archive has labwc 0.9.2.
 
+To turn the screen off and on from Home Assistant under labwc, install `wlopm` with `sudo apt install wlopm`. See [Display](/ruru/guides/home-assistant/#display).
+
 ## Set up the Pi
 
 ### 1. Connect a monitor

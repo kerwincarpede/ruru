@@ -1,6 +1,7 @@
 use serde::Serialize;
 use tauri::Manager;
 
+mod display;
 mod frigate;
 mod menu;
 mod mqtt;
