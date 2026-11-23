@@ -24,6 +24,12 @@ const MAX_BACKOFF: Duration = Duration::from_secs(60);
 /// Messages that can queue for the broker: every camera's discovery and
 /// problem, with room to spare.
 pub const QUEUE: usize = 4 * crate::settings::MAX_TILES + 64;
+/// The largest message Ruru takes in. Frigate's `camera_activity` lists
+/// every camera with its settings and tracked objects, well past the 10 KiB
+/// rumqttc allows by default; a larger one would drop the connection.
+const MAX_INCOMING: usize = 1024 * 1024;
+/// The largest message Ruru sends, rumqttc's default.
+const MAX_OUTGOING: usize = 10 * 1024;
 
 /// Where and how to connect.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,7 +92,8 @@ pub fn options(
     let mut options = MqttOptions::new(client_id, broker.host.clone(), broker.port);
     options
         .set_keep_alive(KEEP_ALIVE)
-        .set_request_channel_capacity(QUEUE);
+        .set_request_channel_capacity(QUEUE)
+        .set_max_packet_size(MAX_INCOMING, MAX_OUTGOING);
     if !broker.username.is_empty() {
         options.set_credentials(
             broker.username.clone(),
@@ -188,6 +195,7 @@ mod tests {
         assert_eq!(credentials.password, "secret");
         assert_eq!(options.last_will(), Some(will));
         assert_eq!(options.keep_alive(), KEEP_ALIVE);
+        assert_eq!(options.max_packet_size(), MAX_INCOMING);
     }
 
     #[test]

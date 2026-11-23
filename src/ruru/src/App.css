@@ -12,6 +12,8 @@
   --wall: #0d0e11;
   --on-wall: #f4f2ee;
   --chrome: rgb(30 33 40 / 78%);
+  --motion: #f2c14e;
+  --alert: #e5484d;
 
   color-scheme: light dark;
   font-family: "Instrument Sans Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -37,6 +39,8 @@
     --wall: #08090b;
     --on-wall: #ece9e3;
     --chrome: rgb(30 33 40 / 82%);
+    --motion: #e8b73f;
+    --alert: #f2555a;
   }
 }
 

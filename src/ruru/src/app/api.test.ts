@@ -1,7 +1,7 @@
 import { emit } from "@tauri-apps/api/event";
 import { clearMocks } from "@tauri-apps/api/mocks";
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, appInfo, getSettings, onOpenSettings, saveFrigateUrl, saveLayout, saveWallOptions, setFullScreen, type Settings } from "./api";
+import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, appInfo, cameraActivity, getSettings, onCameraActivity, onOpenSettings, saveFrigateUrl, saveLayout, saveWallOptions, setFullScreen, type Settings } from "./api";
 import { mockCommands } from "../test/mockCommands";
 
 describe("appInfo", () => {
@@ -28,13 +28,13 @@ describe("settings commands", () => {
     await expect(saveFrigateUrl(" http://f/ ")).resolves.toEqual(settings);
     await setFullScreen(true);
     await saveLayout("http://f", layout);
-    await saveWallOptions({ lockRatio: false, fitToWindow: true, streamInfo: true });
+    await saveWallOptions({ lockRatio: false, fitToWindow: true, streamInfo: true, activity: false });
     expect(calls).toEqual([
       { cmd: "get_settings", payload: {} },
       { cmd: "save_frigate_url", payload: { url: " http://f/ " } },
       { cmd: "set_full_screen", payload: { fullScreen: true } },
       { cmd: "save_layout", payload: { server: "http://f", layout } },
-      { cmd: "save_wall_options", payload: { options: { lockRatio: false, fitToWindow: true, streamInfo: true } } },
+      { cmd: "save_wall_options", payload: { options: { lockRatio: false, fitToWindow: true, streamInfo: true, activity: false } } },
     ]);
   });
 });
@@ -52,6 +52,26 @@ describe("onOpenSettings", () => {
   it("gives a no-op without a backend", async () => {
     clearMocks();
     const stop = await onOpenSettings(vi.fn());
+    expect(() => stop()).not.toThrow();
+  });
+});
+describe("camera activity", () => {
+  const activity = { garage: { motion: true, objects: { person: 1 }, review: "alert" as const } };
+
+  it("asks for the activity heard so far and hears each change", async () => {
+    const calls = mockCommands({ camera_activity: () => activity });
+    await expect(cameraActivity()).resolves.toEqual(activity);
+    expect(calls.map((call) => call.cmd)).toEqual(["camera_activity"]);
+    const handler = vi.fn();
+    const stop = await onCameraActivity(handler);
+    await emit("camera-activity", activity);
+    expect(handler).toHaveBeenCalledWith(activity);
+    stop();
+  });
+
+  it("gives a no-op without a backend", async () => {
+    clearMocks();
+    const stop = await onCameraActivity(vi.fn());
     expect(() => stop()).not.toThrow();
   });
 });

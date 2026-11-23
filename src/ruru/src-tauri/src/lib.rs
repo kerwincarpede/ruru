@@ -65,6 +65,7 @@ pub fn run() {
             mqtt::save_mqtt,
             mqtt::report_wall_state,
             mqtt::report_tile_problem,
+            mqtt::camera_activity,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Ruru");

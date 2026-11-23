@@ -14,7 +14,8 @@ function open(settings = empty) {
   const onUpdate = vi.fn();
   const onClose = vi.fn();
   const onMqttSaved = vi.fn();
-  const props = { info, onSaved, onChannelSaved, onMqttSaved, onUpdate, onClose };
+  const onActivity = vi.fn();
+  const props = { info, onSaved, onChannelSaved, onMqttSaved, onActivity, onUpdate, onClose };
   const { rerender } = render(<SettingsDialog settings={settings} {...props} />);
   // The window passes the saved settings back in, as App does.
   onChannelSaved.mockImplementation((saved: Settings) => rerender(<SettingsDialog settings={saved} {...props} />));

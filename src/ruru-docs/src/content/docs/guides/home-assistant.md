@@ -1,6 +1,6 @@
 ---
 title: Home Assistant
-description: Show the wall in Home Assistant as a device, with its state and a problem sensor for each camera.
+description: Show the wall in Home Assistant as a device, with its state and a problem sensor for each camera, and show Frigate's activity on the tiles.
 sidebar:
   order: 2
 ---
@@ -38,6 +38,18 @@ Every entity shows as unavailable while Ruru is not connected, such as when the 
 
 If the connection drops, Ruru connects again on its own, waiting a little longer after each failure, up to a minute.
 
+## Activity on the tiles
+
+Frigate publishes what it sees to the same broker. While Ruru is connected, each tile shows its camera's activity:
+
+- **Motion:** a yellow outline round the tile while Frigate sees motion.
+- **Objects:** a chip at the top right for each kind of object moving in view, such as **Person**, or **Car ×2** for two. Parked and other still objects get no chip.
+- **Alert:** a red highlight round the tile, and **Alert** in its caption, while Frigate has an alert open for the camera. Which objects and zones raise an alert is set in Frigate's `review` settings.
+
+**Show activity** is on by default. Turn it off in **Settings → Home Assistant**, or right-click the wall and untick **Show activity**. The tiles go quiet while Ruru is not connected to the broker.
+
+Frigate must have MQTT turned on with the same broker, and **Frigate prefix** must match the `topic_prefix` in Frigate's `mqtt` settings, usually `frigate`.
+
 ## Topics
 
 Ruru publishes under `ruru/<device id>/`, where the device id is made once for each computer and kept in `settings.json`:
@@ -49,3 +61,5 @@ Ruru publishes under `ruru/<device id>/`, where the device id is made once for e
 | `ruru/<device id>/problem/<camera>` | `ON` or `OFF`. |
 
 Discovery configs are retained under `<discovery prefix>/<component>/<device id>/<object id>/config`. Change **Discovery prefix** only if you changed it in Home Assistant's MQTT settings.
+
+For activity, Ruru publishes `<frigate prefix>/onConnect` when it connects, so Frigate answers with every camera's activity on `<frigate prefix>/camera_activity`. It then follows `<camera>/motion`, `<camera>/<object>/active` and `<camera>/review_status` under the Frigate prefix. It never reads snapshots.

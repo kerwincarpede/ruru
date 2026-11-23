@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import type { CameraActivity } from "../app/api";
 import { cameraLabel, snapshotUrl, type Camera } from "../app/frigate";
 import { Go2rtcPlayer, isUndecodable, type PlayerState } from "./player";
 import { AUTO_SETTLE_MS, automaticStream, knownWidth, recordWidth, type StreamKind } from "./streams";
+import { objectChip } from "./activity";
 import TileDiagnostics from "./TileDiagnostics";
 
 interface TileProps {
@@ -19,6 +21,8 @@ interface TileProps {
   refresh?: number;
   editing?: boolean;
   streamInfo?: boolean;
+  /** What Frigate says is happening on the camera; undefined draws no activity. */
+  activity?: CameraActivity;
   onOpen?: () => void;
   onHide?: () => void;
   /** Told what Automatic plays on this tile whenever that changes. */
@@ -137,7 +141,7 @@ type Slots = { front: 0 | 1; streams: [string | null, string | null] };
  * frame shows, so the picture never stops moving; a stream the webview
  * cannot decode gives way to the camera's other stream.
  */
-export default function Tile({ base, camera, choice, live, maximised = false, reconnect = 0, refresh = 0, editing = false, streamInfo = false, onOpen, onHide, onAutomatic, onProblem }: TileProps) {
+export default function Tile({ base, camera, choice, live, maximised = false, reconnect = 0, refresh = 0, editing = false, streamInfo = false, activity, onOpen, onHide, onAutomatic, onProblem }: TileProps) {
   const figure = useRef<HTMLElement>(null);
   const videoA = useRef<HTMLVideoElement>(null);
   const videoB = useRef<HTMLVideoElement>(null);
@@ -246,7 +250,9 @@ export default function Tile({ base, camera, choice, live, maximised = false, re
     }
   };
 
-  const className = ["tile", playing && "is-playing", stale && "is-stale", maximised && "is-maximised"].filter(Boolean).join(" ");
+  const objects = Object.entries(activity?.objects ?? {}).filter(([, count]) => count > 0);
+  const alert = activity?.review === "alert";
+  const className = ["tile", playing && "is-playing", stale && "is-stale", maximised && "is-maximised", editing && "is-editing", activity?.motion && "has-motion", alert && "is-alert"].filter(Boolean).join(" ");
   return (
     <figure ref={figure} className={className} aria-label={label} data-camera={camera.name} onDoubleClick={editing ? undefined : onOpen}>
       <img className="tile-snapshot" src={`${snapshotUrl(base, camera.name)}${refresh ? `?t=${refresh}` : ""}`} alt="" draggable={false} />
@@ -272,8 +278,18 @@ export default function Tile({ base, camera, choice, live, maximised = false, re
           {wanted === "main" ? "Main" : "Sub"} stream can't play · showing {other} stream
         </span>
       )}
+      {objects.length > 0 && (
+        <ul className="tile-objects" aria-label="Objects in view">
+          {objects.map(([object, count]) => (
+            <li key={object} className="tile-chip">
+              {objectChip(object, count)}
+            </li>
+          ))}
+        </ul>
+      )}
       <figcaption className="tile-name">
         {label}
+        {alert && <span className="tile-status"> · Alert</span>}
         {status && <span className="tile-status"> · {status}</span>}
       </figcaption>
       {editing && onHide && (

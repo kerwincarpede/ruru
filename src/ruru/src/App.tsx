@@ -4,7 +4,7 @@ import { appInfo, type AppInfo } from "./app/api";
 import { cameraLabel, type Camera } from "./app/frigate";
 import { isMac, shortcutFor } from "./app/keys";
 import Logo from "./app/Logo";
-import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, frigateCameras, getSettings, onFullScreenChanged, onOpenSettings, reportTileProblem, reportWallState, saveLayout, saveWallOptions, setFullScreen, type SavedLayout, type Settings, type WallOptions } from "./app/api";
+import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, cameraActivity, frigateCameras, getSettings, onCameraActivity, onFullScreenChanged, onOpenSettings, reportTileProblem, reportWallState, saveLayout, saveWallOptions, setFullScreen, type Activity, type SavedLayout, type Settings, type WallOptions } from "./app/api";
 import UpdatePrompt from "./app/UpdatePrompt";
 import { findUpdate, versionLabel, type AvailableUpdate } from "./app/updates";
 import SettingsDialog from "./settings/SettingsDialog";
@@ -42,6 +42,7 @@ function App() {
   const [automatic, setAutomatic] = useState<Record<string, StreamKind>>({});
   const [menu, setMenu] = useState<{ x: number; y: number; camera?: string } | null>(null);
   const [live, setLive] = useState(() => document.visibilityState !== "hidden");
+  const [activity, setActivity] = useState<Activity>({});
   const [toolbar, setToolbar] = useState(true);
   const toolbarTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -149,6 +150,29 @@ function App() {
     };
   }, [toggleFullScreen]);
 
+  // Frigate's activity arrives over the Home Assistant connection. What the
+  // backend heard before the page started listening is asked for once.
+  useEffect(() => {
+    let current = true;
+    let stop: (() => void) | null = null;
+    void onCameraActivity((next) => {
+      if (current) setActivity(next);
+    }).then((unlisten) => {
+      if (!current) return unlisten();
+      stop = unlisten;
+      cameraActivity()
+        .then((now) => {
+          if (current) setActivity(now);
+        })
+        // Without an answer the tiles wait for the next change.
+        .catch(() => {});
+    });
+    return () => {
+      current = false;
+      stop?.();
+    };
+  }, []);
+
   // The toolbar shows while the pointer moves, then fades away.
   const wake = () => {
     setToolbar(true);
@@ -169,7 +193,7 @@ function App() {
     void saveLayout(url, next).catch(() => {});
   };
 
-  // Lock to 16:9, Fit to window and stream info are saved as soon as they change.
+  // Lock to 16:9, Fit to window, stream info and activity are saved as soon as they change.
   const wallOptions = settings?.wall ?? DEFAULT_WALL_OPTIONS;
   const changeWall = (change: Partial<WallOptions>) => {
     const next = { ...wallOptions, ...change };
@@ -204,6 +228,10 @@ function App() {
       ? [
           { label: editing ? "Done editing" : "Edit layout", onSelect: () => setEditing((now) => !now) },
           { label: "Fit to window", kind: "checkbox" as const, checked: wallOptions.fitToWindow, onSelect: () => changeWall({ fitToWindow: !wallOptions.fitToWindow }) },
+          // Activity comes from Frigate over the Home Assistant connection.
+          ...(settings?.mqtt.enabled
+            ? [{ label: "Show activity", kind: "checkbox" as const, checked: wallOptions.activity, onSelect: () => changeWall({ activity: !wallOptions.activity }) }]
+            : []),
         ]
       : []),
     { label: fullScreen ? "Exit full screen" : "Enter full screen", onSelect: toggleFullScreen },
@@ -318,6 +346,7 @@ function App() {
           lockRatio={wallOptions.lockRatio}
           fitToWindow={wallOptions.fitToWindow}
           streamInfo={wallOptions.streamInfo}
+          activity={wallOptions.activity ? activity : undefined}
           refresh={refresh}
           maximised={maximised}
           onMaximise={setMaximised}
@@ -338,6 +367,7 @@ function App() {
             setSettings(saved);
           }}
           onMqttSaved={setSettings}
+          onActivity={(on) => changeWall({ activity: on })}
           onUpdate={setUpdate}
           onSaved={(saved) => {
             setSettings(saved);
