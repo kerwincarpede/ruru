@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { saveMqtt, testMqtt, type MqttInput, type MqttSettings, type Settings } from "../app/api";
 
 interface HomeAssistantPageProps {
@@ -42,6 +42,13 @@ export default function HomeAssistantPage({ mqtt, onSaved, onClose }: HomeAssist
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const saved = mqtt.passwordStorage !== "none" && !password;
+
+  // The page scrolls, so a result below the fold is brought into view.
+  const result = useRef<HTMLDivElement>(null);
+  const shown = test.kind === "ok" || test.kind === "failed" || saveError !== null;
+  useEffect(() => {
+    if (shown) result.current?.scrollIntoView?.({ block: "nearest" });
+  }, [shown, test, saveError]);
   const changed = () => {
     setTest({ kind: "idle" });
     setSaveError(null);
@@ -179,9 +186,9 @@ export default function HomeAssistantPage({ mqtt, onSaved, onClose }: HomeAssist
           </div>
         </div>
         <span id="mqtt-password-hint" className="field-hint">
-          {mqtt.passwordStorage === "file"
-            ? "This computer has no keychain Ruru can use, so the password is kept in Ruru’s settings file."
-            : "The password is kept in this computer’s keychain."}
+          {mqtt.passwordStorage === "file" && "This computer has no keychain Ruru can use, so the password is kept in Ruru’s settings file."}
+          {mqtt.passwordStorage === "keychain" && "The password is kept in this computer’s keychain."}
+          {mqtt.passwordStorage === "none" && "Ruru keeps the password in this computer’s keychain if it has one, or else in Ruru’s settings file."}
         </span>
         <div className="field-row">
           <div className="field field-grow">
@@ -217,22 +224,24 @@ export default function HomeAssistantPage({ mqtt, onSaved, onClose }: HomeAssist
             />
           </div>
         </div>
-        <div className="settings-test" aria-live="polite">
-          <button type="button" onClick={() => void runTest()} disabled={!host.trim() || test.kind === "testing"}>
-            {test.kind === "testing" ? "Testing…" : "Test connection"}
-          </button>
-          {test.kind === "ok" && <p className="test-ok">Connected to the broker at {test.address}.</p>}
-          {test.kind === "failed" && (
+        <div ref={result} className="settings-results">
+          <div className="settings-test" aria-live="polite">
+            <button type="button" onClick={() => void runTest()} disabled={!host.trim() || test.kind === "testing"}>
+              {test.kind === "testing" ? "Testing…" : "Test connection"}
+            </button>
+            {test.kind === "ok" && <p className="test-ok">Connected to the broker at {test.address}.</p>}
+            {test.kind === "failed" && (
+              <p className="test-failed" role="alert">
+                {test.message}
+              </p>
+            )}
+          </div>
+          {saveError && (
             <p className="test-failed" role="alert">
-              {test.message}
+              {saveError}
             </p>
           )}
         </div>
-        {saveError && (
-          <p className="test-failed" role="alert">
-            {saveError}
-          </p>
-        )}
       </div>
       <footer className="dialog-foot">
         <button type="button" onClick={onClose}>

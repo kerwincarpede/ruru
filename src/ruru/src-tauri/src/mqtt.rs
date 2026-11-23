@@ -250,7 +250,7 @@ impl Session {
         let current: BTreeSet<String> = wall.cameras.iter().cloned().collect();
         let mut messages = Vec::new();
         for camera in self.announced.difference(&current) {
-            messages.push(discovery::camera_removal(&self.topics, camera));
+            messages.extend(discovery::camera_removal(&self.topics, camera));
             self.on_broker.remove(&discovery::problem_object(camera));
         }
         for camera in &wall.cameras {
@@ -846,11 +846,13 @@ mod tests {
             topics(&messages),
             [
                 "homeassistant/binary_sensor/0123456789ab/front_door_problem/config",
+                "ruru/0123456789ab/problem/front_door",
                 "homeassistant/binary_sensor/0123456789ab/yard_problem/config",
                 "ruru/0123456789ab/problem/yard",
             ]
         );
-        assert!(messages[0].payload.is_empty());
+        // The hidden camera loses its config and its retained state.
+        assert!(messages[0].payload.is_empty() && messages[1].payload.is_empty());
         // A camera Home Assistant has not been told about gets no problem state.
         assert!(session.problem("front_door", true).is_empty());
         assert_eq!(session.problem("yard", true)[0].payload, "ON");

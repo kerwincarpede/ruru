@@ -202,13 +202,10 @@ pub fn camera_config(topics: &Topics, device: &Device, camera: &str) -> Message 
     )
 }
 
-/// Removes a camera's problem sensor from Home Assistant: an empty retained
-/// config.
-pub fn camera_removal(topics: &Topics, camera: &str) -> Message {
-    Message::retained(
-        topics.discovery("binary_sensor", &problem_object(camera)),
-        "",
-    )
+/// Removes a camera's problem sensor from Home Assistant, and its retained
+/// state from the broker.
+pub fn camera_removal(topics: &Topics, camera: &str) -> Vec<Message> {
+    stale_problem(topics, &problem_object(camera))
 }
 
 /// Removes a problem sensor known only by its object id, such as one left
@@ -328,8 +325,15 @@ mod tests {
             fixture(include_str!("fixtures/discovery-problem.json"))
         );
         let removal = camera_removal(&topics(), "front_door");
-        assert_eq!(removal.topic, config.topic);
-        assert!(removal.retain && removal.payload.is_empty());
+        let removed: Vec<&str> = removal.iter().map(|m| m.topic.as_str()).collect();
+        assert_eq!(
+            removed,
+            [
+                config.topic.as_str(),
+                "ruru/0123456789ab/problem/front_door"
+            ]
+        );
+        assert!(removal.iter().all(|m| m.retain && m.payload.is_empty()));
     }
 
     #[test]

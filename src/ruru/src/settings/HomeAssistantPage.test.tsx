@@ -35,7 +35,7 @@ describe("SettingsDialog Home Assistant page", () => {
     expect(screen.getByLabelText("Discovery prefix")).toHaveValue("homeassistant");
     expect(screen.getByLabelText("Frigate prefix")).toHaveValue("frigate");
     expect(screen.getByRole("button", { name: "Test connection" })).toBeDisabled();
-    expect(screen.getByText("The password is kept in this computer’s keychain.")).toBeInTheDocument();
+    expect(screen.getByText("Ruru keeps the password in this computer’s keychain if it has one, or else in Ruru’s settings file.")).toBeInTheDocument();
   });
 
   it("tests the broker with what was typed and says it connected", async () => {
@@ -63,9 +63,14 @@ describe("SettingsDialog Home Assistant page", () => {
         throw "The broker at ha.local:1883 refused the username or password.";
       },
     });
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
     openHomeAssistant({ host: "ha.local" });
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("refused the username or password");
+    // The result is scrolled into view, clear of the footer.
+    expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
+    delete (Element.prototype as Partial<Element>).scrollIntoView;
   });
 
   it("refuses a port that is not a number without asking the broker", async () => {
@@ -117,6 +122,11 @@ describe("SettingsDialog Home Assistant page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].payload).toMatchObject({ password: null });
+  });
+
+  it("says the keychain holds a saved password", () => {
+    openHomeAssistant({ host: "ha.local", username: "ruru", passwordStorage: "keychain" });
+    expect(screen.getByText("The password is kept in this computer’s keychain.")).toBeInTheDocument();
   });
 
   it("says when the password is kept in the settings file", () => {
