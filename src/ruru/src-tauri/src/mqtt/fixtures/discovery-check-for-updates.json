@@ -1,0 +1,21 @@
+{
+  "name": "Check for updates",
+  "unique_id": "ruru_0123456789ab_check_for_updates",
+  "availability_topic": "ruru/0123456789ab/availability",
+  "command_topic": "ruru/0123456789ab/command/check_for_updates",
+  "payload_press": "PRESS",
+  "entity_category": "config",
+  "icon": "mdi:cloud-refresh",
+  "device": {
+    "identifiers": ["ruru_0123456789ab"],
+    "name": "Ruru on wall",
+    "manufacturer": "Ruru",
+    "model": "Ruru camera wall",
+    "sw_version": "1.2.3"
+  },
+  "origin": {
+    "name": "Ruru",
+    "sw_version": "1.2.3",
+    "support_url": "https://kerwincarpede.github.io/ruru/"
+  }
+}
