@@ -22,6 +22,8 @@ You need an MQTT broker that Home Assistant is connected to, such as the Mosquit
 
 Ruru keeps the password in your computer's keychain. When there is no keychain Ruru can use, such as on a Raspberry Pi without a desktop keyring, it keeps the password in `settings.json` and the page says so.
 
+Ruru never asks you to unlock the keychain, so no password prompt covers the wall. On Linux the login keyring stays locked when the computer logs in automatically, and Ruru treats a locked keyring as one it can't use. If the password is already in a locked keyring, Ruru connects without it, and **Test connection** says the keychain is locked. Enter the password again and choose **Save** to keep it in `settings.json`.
+
 ## What Home Assistant sees
 
 The device is called **Ruru on** and the computer's name, such as **Ruru on kitchen-pi**. It has:
