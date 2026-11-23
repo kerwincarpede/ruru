@@ -60,6 +60,6 @@ Ruru saves everything in `settings.json` in its config folder:
 | macOS | `~/Library/Application Support/com.kerwincarpede.ruru/` |
 | Linux | `~/.config/com.kerwincarpede.ruru/` |
 
-The MQTT broker password is kept in your computer's keychain: the macOS Keychain, Windows Credential Manager, or the Secret Service (such as GNOME Keyring) on Linux. When there is no keychain Ruru can use, the password goes in `settings.json`, and **Settings → Home Assistant** says so.
+The MQTT broker password is kept in your computer's keychain: the macOS Keychain, Windows Credential Manager, or the Secret Service (such as GNOME Keyring) on Linux. When there is no keychain Ruru can use, including a locked one that would ask for its password, the password goes in `settings.json`, and **Settings → Home Assistant** says so.
 
 To start again from **Connect to Frigate**, quit Ruru and delete `settings.json`.
