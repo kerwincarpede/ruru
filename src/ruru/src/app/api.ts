@@ -34,10 +34,12 @@ export interface WallOptions {
   lockRatio: boolean;
   fitToWindow: boolean;
   streamInfo: boolean;
+  /** Tiles show Frigate's motion, objects and alerts. */
+  activity: boolean;
 }
 
 /** The wall options before any are saved, as Rust defaults them. */
-export const DEFAULT_WALL_OPTIONS: WallOptions = { lockRatio: true, fitToWindow: true, streamInfo: false };
+export const DEFAULT_WALL_OPTIONS: WallOptions = { lockRatio: true, fitToWindow: true, streamInfo: false, activity: true };
 
 /** Mirrors `UpdateChannel` in src-tauri/src/settings.rs: which releases Ruru updates to. */
 export type UpdateChannel = "stable" | "edge";
@@ -107,7 +109,7 @@ export function saveLayout(server: string, layout: SavedLayout): Promise<void> {
   return invoke<void>("save_layout", { server, layout });
 }
 
-/** Saves how the wall is drawn: Lock to 16:9, Fit to window and stream info. */
+/** Saves how the wall is drawn: Lock to 16:9, Fit to window, stream info and activity. */
 export function saveWallOptions(options: WallOptions): Promise<void> {
   return invoke<void>("save_wall_options", { options });
 }
@@ -176,6 +178,38 @@ export interface WallReport {
 /** Tells the backend the wall's state, for Home Assistant. */
 export function reportWallState(report: WallReport): Promise<void> {
   return invoke<void>("report_wall_state", { report });
+}
+
+/** Mirrors `Review` in src-tauri/src/mqtt/activity.rs: how far Frigate's review of a camera has got. */
+export type ReviewStatus = "none" | "detection" | "alert";
+
+/** Mirrors `CameraActivity` in src-tauri/src/mqtt/activity.rs: what Frigate says is happening on one camera. */
+export interface CameraActivity {
+  motion: boolean;
+  /** How many objects of each label are moving in view; labels with none are left out. */
+  objects: Record<string, number>;
+  review: ReviewStatus;
+}
+
+/** Mirrors `Activity` in src-tauri/src/mqtt/activity.rs: every camera's activity by name. Quiet cameras are left out. */
+export type Activity = Record<string, CameraActivity>;
+
+/** Every camera's activity as Frigate last told it over the Home Assistant connection. */
+export function cameraActivity(): Promise<Activity> {
+  return invoke<Activity>("camera_activity");
+}
+
+/**
+ * Calls `handler` with every camera's activity whenever Frigate says any of
+ * it changed. Resolves to a function that stops listening; a backend
+ * without events gives a no-op.
+ */
+export async function onCameraActivity(handler: (activity: Activity) => void): Promise<() => void> {
+  try {
+    return await listen<Activity>("camera-activity", (event) => handler(event.payload));
+  } catch {
+    return () => {};
+  }
 }
 
 /** Tells the backend whether a tile has a problem, for Home Assistant. */

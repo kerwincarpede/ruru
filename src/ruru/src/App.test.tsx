@@ -4,7 +4,7 @@ import { emit } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { Camera } from "./app/frigate";
-import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, type SavedLayout, type Settings } from "./app/api";
+import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, type Activity, type SavedLayout, type Settings } from "./app/api";
 import { findUpdate } from "./app/updates";
 import { mockCommands, type CommandHandlers } from "./test/mockCommands";
 
@@ -23,6 +23,7 @@ function backend(handlers: CommandHandlers = {}) {
   return mockCommands({
     app_info: () => ({ name: "Ruru", version: "0.1.0" }),
     get_settings: () => empty,
+    camera_activity: () => ({}),
     ...handlers,
   });
 }
@@ -265,7 +266,7 @@ describe("App", () => {
   });
 
   it("shows stream info on every tile from the menu at any time, and saves the wall options", async () => {
-    const calls = wall({ get_settings: () => ({ ...connected, wall: { lockRatio: false, fitToWindow: true, streamInfo: false } }) });
+    const calls = wall({ get_settings: () => ({ ...connected, wall: { lockRatio: false, fitToWindow: true, streamInfo: false, activity: true } }) });
     render(<App />);
     fireEvent.contextMenu(await screen.findByRole("figure", { name: "Garage" }));
     expect(screen.queryByRole("complementary", { name: "Stream info" })).not.toBeInTheDocument();
@@ -281,10 +282,59 @@ describe("App", () => {
     expect(screen.getByRole("checkbox", { name: "Fit to window" })).not.toBeChecked();
     fireEvent.click(screen.getByRole("checkbox", { name: "Lock to 16:9" }));
     await waitFor(() => expect(calls.filter((call) => call.cmd === "save_wall_options").map((call) => call.payload)).toEqual([
-      { options: { lockRatio: false, fitToWindow: true, streamInfo: true } },
-      { options: { lockRatio: false, fitToWindow: false, streamInfo: true } },
-      { options: { lockRatio: true, fitToWindow: false, streamInfo: true } },
+      { options: { lockRatio: false, fitToWindow: true, streamInfo: true, activity: true } },
+      { options: { lockRatio: false, fitToWindow: false, streamInfo: true, activity: true } },
+      { options: { lockRatio: true, fitToWindow: false, streamInfo: true, activity: true } },
     ]));
+  });
+
+  it("draws Frigate's activity on the tiles as it changes", async () => {
+    wall({ camera_activity: () => ({ maingate: { motion: true, objects: {}, review: "none" } }) });
+    render(<App />);
+    const maingate = await screen.findByRole("figure", { name: "Maingate" });
+    const garage = screen.getByRole("figure", { name: "Garage" });
+    await waitFor(() => expect(maingate).toHaveClass("has-motion"));
+    expect(garage).not.toHaveClass("has-motion");
+    await act(() => emit("camera-activity", { garage: { motion: true, objects: { car: 2, person: 1 }, review: "alert" } }));
+    expect(garage).toHaveClass("has-motion", "is-alert");
+    expect(within(garage).getByRole("list", { name: "Objects in view" })).toHaveTextContent("Car ×2Person");
+    expect(within(garage).getByText("· Alert")).toBeInTheDocument();
+    // Each event holds every camera's activity, so the maingate is quiet now.
+    expect(maingate).not.toHaveClass("has-motion");
+    await act(() => emit("camera-activity", {}));
+    expect(garage).not.toHaveClass("has-motion");
+    expect(within(garage).queryByRole("list", { name: "Objects in view" })).not.toBeInTheDocument();
+  });
+
+  it("keeps an activity event that arrives before the answer to camera_activity", async () => {
+    let answer: (activity: Activity) => void = () => {};
+    wall({ camera_activity: () => new Promise<Activity>((resolve) => (answer = resolve)) });
+    render(<App />);
+    const garage = await screen.findByRole("figure", { name: "Garage" });
+    await act(() => emit("camera-activity", {}));
+    await act(async () => answer({ garage: { motion: true, objects: {}, review: "alert" } }));
+    expect(garage).not.toHaveClass("is-alert");
+    expect(garage).not.toHaveClass("has-motion");
+  });
+
+  it("offers Show activity while Home Assistant is on, and hides the activity when it is off", async () => {
+    const on: Settings = { ...connected, mqtt: { ...DEFAULT_MQTT_SETTINGS, enabled: true, host: "ha.local" } };
+    const calls = wall({
+      get_settings: () => on,
+      camera_activity: () => ({ garage: { motion: true, objects: { person: 1 }, review: "detection" } }),
+    });
+    render(<App />);
+    const garage = await screen.findByRole("figure", { name: "Garage" });
+    await waitFor(() => expect(within(garage).getByText("Person")).toBeInTheDocument());
+    fireEvent.contextMenu(garage);
+    const option = screen.getByRole("menuitemcheckbox", { name: "Show activity" });
+    expect(option).toBeChecked();
+    fireEvent.click(option);
+    expect(garage).not.toHaveClass("has-motion");
+    expect(within(garage).queryByText("Person")).not.toBeInTheDocument();
+    await waitFor(() => expect(calls).toContainEqual({ cmd: "save_wall_options", payload: { options: { ...DEFAULT_WALL_OPTIONS, activity: false } } }));
+    fireEvent.contextMenu(garage);
+    expect(screen.getByRole("menuitemcheckbox", { name: "Show activity" })).not.toBeChecked();
   });
 
   it("closes the right-click menu on Escape or a click elsewhere", async () => {

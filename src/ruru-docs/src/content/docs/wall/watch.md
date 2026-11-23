@@ -25,9 +25,13 @@ Right-click a tile for that camera's menu:
 | **Show stream info** | Shows playback details on every tile. See [Stream info](/ruru/wall/streams/#stream-info). |
 | **Automatic**, **Main stream**, **Sub stream** | Which of the camera's streams the tile plays. Only on cameras that have both. See [Streams](/ruru/wall/streams/). |
 
-The wall's own items follow below: **Settings…**, **Edit layout**, **Fit to window** and **Enter full screen**. Right-click anywhere else on the wall for just those.
+The wall's own items follow below: **Settings…**, **Edit layout**, **Fit to window**, **Show activity** while **Connect to Home Assistant** is on, and **Enter full screen**. Right-click anywhere else on the wall for just those.
 
 The arrow keys move through the menu, `Home` and `End` jump to the first and last items, and `Esc` closes it.
+
+## Motion, objects and alerts
+
+With [Home Assistant](/ruru/guides/home-assistant/#activity-on-the-tiles) connected, a tile is outlined in yellow while its camera sees motion, shows a chip such as **Person** for each kind of object moving, and turns red with **Alert** in its caption during a Frigate alert. Untick **Show activity** in the right-click menu to hide them.
 
 ## Full screen
 

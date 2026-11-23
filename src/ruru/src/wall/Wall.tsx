@@ -4,7 +4,7 @@ import "./wall.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import GridLayout from "react-grid-layout";
 import type { Camera } from "../app/frigate";
-import type { SavedLayout } from "../app/api";
+import type { Activity, SavedLayout } from "../app/api";
 import { COLUMNS, GAP, ROW_RATIO, fitWidth, fromGridItems, gridRows, hideCamera, rowHeight, toGridItems, wallPlacements, type GridItem } from "./layout";
 import type { StreamKind } from "./streams";
 import Tile from "./Tile";
@@ -20,6 +20,8 @@ interface WallProps {
   /** Shrink the grid so the whole wall fits the window's height as well as its width. */
   fitToWindow?: boolean;
   streamInfo?: boolean;
+  /** What Frigate says is happening on each camera; undefined draws no activity. */
+  activity?: Activity;
   refresh: number;
   /** The camera filling the window, if any. */
   maximised?: string | null;
@@ -63,6 +65,7 @@ export default function Wall({
   lockRatio = true,
   fitToWindow = false,
   streamInfo = false,
+  activity,
   refresh,
   maximised = null,
   onMaximise,
@@ -129,6 +132,7 @@ export default function Wall({
                   refresh={refresh}
                   editing={editing}
                   streamInfo={streamInfo}
+                  activity={activity?.[camera.name]}
                   onOpen={() => onMaximise?.(item.i === open ? null : camera.name)}
                   onHide={() => onLayout(hideCamera(fromGridItems(items, hidden, layout), camera.name))}
                   onAutomatic={onAutomatic && ((stream) => onAutomatic(camera.name, stream))}

@@ -26,6 +26,7 @@ Choose **Save** to use the address. See [Connect to Frigate](/ruru/get-started/c
 | **Username** and **Password** | The broker login. Leave the password empty to keep the saved one. To remove the saved password, clear the username and save. |
 | **Discovery prefix** | Where Home Assistant looks for new devices. Usually `homeassistant`. |
 | **Frigate prefix** | The topic prefix set in Frigate's `mqtt` settings. Usually `frigate`. |
+| **Show activity** | Shows Frigate's motion, objects and alerts on each tile. On by default. Also in the wall's right-click menu. |
 | **Test connection** | Connects to the broker once, and says whether it worked. |
 
 Choose **Save** to connect, or to disconnect when **Connect to Home Assistant** is off. See [Home Assistant](/ruru/guides/home-assistant/).
@@ -43,7 +44,7 @@ Changes on this page save as you make them.
 
 These are set on the wall itself and remembered for next time:
 
-- **Lock to 16:9**, **Fit to window** and **Show stream info**. See [Arrange the wall](/ruru/wall/arrange/) and [Stream info](/ruru/wall/streams/#stream-info).
+- **Lock to 16:9**, **Fit to window**, **Show stream info** and **Show activity**. See [Arrange the wall](/ruru/wall/arrange/), [Stream info](/ruru/wall/streams/#stream-info) and [Activity on the tiles](/ruru/guides/home-assistant/#activity-on-the-tiles).
 - Each tile's position, size and stream choice, and which cameras are hidden, saved for each Frigate server.
 - Whether Ruru was full screen.
 

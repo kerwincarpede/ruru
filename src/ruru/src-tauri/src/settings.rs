@@ -75,6 +75,9 @@ pub struct WallOptions {
     pub fit_to_window: bool,
     /// Each tile shows its stream info overlay.
     pub stream_info: bool,
+    /// Each tile shows Frigate's motion, objects and alerts, heard over the
+    /// Home Assistant connection.
+    pub activity: bool,
 }
 
 impl Default for WallOptions {
@@ -83,6 +86,7 @@ impl Default for WallOptions {
             lock_ratio: true,
             fit_to_window: true,
             stream_info: false,
+            activity: true,
         }
     }
 }
@@ -677,9 +681,10 @@ mod tests {
     }
 
     #[test]
-    fn wall_options_default_to_locked_and_fitted_without_stream_info() {
+    fn wall_options_default_to_locked_and_fitted_with_activity_without_stream_info() {
         let defaults = WallOptions::default();
         assert!(defaults.lock_ratio && defaults.fit_to_window && !defaults.stream_info);
+        assert!(defaults.activity);
         assert_eq!(Settings::default().wall, defaults);
         // A file from before the options, or with only some of them, keeps the rest.
         let partial: Settings =
@@ -690,6 +695,7 @@ mod tests {
                 lock_ratio: false,
                 fit_to_window: true,
                 stream_info: true,
+                activity: true,
             }
         );
     }
@@ -702,6 +708,7 @@ mod tests {
             lock_ratio: false,
             fit_to_window: false,
             stream_info: true,
+            activity: false,
         };
         assert_eq!(store.set_wall_options(wall).unwrap().wall, wall);
         assert_eq!(SettingsStore::open(Some(dir.file())).current().wall, wall);
@@ -805,7 +812,7 @@ mod tests {
             serde_json::json!({
                 "frigateUrl": "http://a",
                 "fullScreen": true,
-                "wall": {"lockRatio": true, "fitToWindow": true, "streamInfo": false},
+                "wall": {"lockRatio": true, "fitToWindow": true, "streamInfo": false, "activity": true},
                 "updateChannel": "edge",
                 "mqtt": {
                     "enabled": false,

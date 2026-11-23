@@ -8,6 +8,7 @@ const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WAL
 
 function openHomeAssistant(mqtt: Partial<MqttSettings> = {}) {
   const onMqttSaved = vi.fn();
+  const onActivity = vi.fn();
   const onClose = vi.fn();
   render(
     <SettingsDialog
@@ -16,12 +17,13 @@ function openHomeAssistant(mqtt: Partial<MqttSettings> = {}) {
       onSaved={vi.fn()}
       onChannelSaved={vi.fn()}
       onMqttSaved={onMqttSaved}
+      onActivity={onActivity}
       onUpdate={vi.fn()}
       onClose={onClose}
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Home Assistant" }));
-  return { onMqttSaved, onClose };
+  return { onMqttSaved, onActivity, onClose };
 }
 
 const type = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
@@ -127,6 +129,26 @@ describe("SettingsDialog Home Assistant page", () => {
   it("says the keychain holds a saved password", () => {
     openHomeAssistant({ host: "ha.local", username: "ruru", passwordStorage: "keychain" });
     expect(screen.getByText("The password is kept in this computer’s keychain.")).toBeInTheDocument();
+  });
+
+  it("shows activity by default and saves a change with the connection", async () => {
+    mockCommands({ save_mqtt: () => empty });
+    const { onActivity, onClose } = openHomeAssistant();
+    const option = screen.getByRole("checkbox", { name: "Show activity" });
+    expect(option).toBeChecked();
+    fireEvent.click(option);
+    expect(onActivity).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(onActivity).toHaveBeenCalledWith(false);
+  });
+
+  it("leaves Show activity alone when it was not changed", async () => {
+    mockCommands({ save_mqtt: () => empty });
+    const { onActivity, onClose } = openHomeAssistant();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(onActivity).not.toHaveBeenCalled();
   });
 
   it("says when the password is kept in the settings file", () => {

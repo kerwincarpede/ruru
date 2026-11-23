@@ -1,7 +1,8 @@
 //! The connection to the MQTT broker in Home Assistant, turned on in
 //! Settings › Home Assistant. Each install becomes one Home Assistant device,
 //! found through MQTT discovery, with its availability, the wall's state and
-//! a problem sensor per camera.
+//! a problem sensor per camera. It also follows Frigate's topics on the same
+//! broker, so each tile can show its camera's motion, objects and alerts.
 //!
 //! The page reports the wall's state and each tile's problems; this module
 //! keeps the latest and publishes it whenever it changes or the connection
@@ -9,6 +10,7 @@
 //! failure, and the broker marks the device offline through the last will
 //! when Ruru goes away.
 
+mod activity;
 mod client;
 mod discovery;
 mod password;
@@ -22,11 +24,12 @@ use std::{
 
 use rumqttc::{AsyncClient, Event, LastWill, Packet, QoS};
 use serde::Deserialize;
-use tauri::{AppHandle, Manager, State, async_runtime::JoinHandle};
+use tauri::{AppHandle, Emitter, Manager, State, async_runtime::JoinHandle};
 
 use crate::settings::{
     self, MAX_TILES, MqttSettings, Settings, SettingsError, SharedSettings, valid_camera_name,
 };
+use activity::{Activity, FrigateTopics};
 use client::Broker;
 use discovery::{Device, Message, WallState};
 use password::{Keychain, PasswordChange};
@@ -349,10 +352,16 @@ struct Inner {
     generation: u64,
     task: Option<JoinHandle<()>>,
     link: Option<Link>,
+    /// What Frigate last said about each camera, while connected.
+    activity: Activity,
 }
 
 impl Inner {
     /// The link of connection `generation`, if it is still the current one.
+    fn current(&self, generation: u64) -> bool {
+        self.generation == generation
+    }
+
     fn link(&mut self, generation: u64) -> Option<(&mut Link, &Wall)> {
         if self.generation != generation {
             return None;
@@ -380,6 +389,26 @@ pub fn manage(app: &tauri::App) {
     restart(app.handle());
 }
 
+/// Tells the page every camera's activity.
+fn emit_activity(app: &AppHandle, activity: &Activity) {
+    if let Err(err) = app.emit(activity::EVENT, activity) {
+        eprintln!("Ruru: camera activity could not reach the page: {err}");
+    }
+}
+
+/// Forgets Frigate's activity, if connection `generation` is still the
+/// current one, and tells the page if there was any.
+fn forget_activity(app: &AppHandle, generation: u64) {
+    let state = app.state::<MqttState>();
+    let cleared = {
+        let mut inner = state.lock();
+        inner.current(generation) && inner.activity.clear()
+    };
+    if cleared {
+        emit_activity(app, &Activity::default());
+    }
+}
+
 /// Drops the connection and, if Settings › Home Assistant has it on,
 /// connects again with the saved settings.
 pub fn restart(app: &AppHandle) {
@@ -394,6 +423,10 @@ pub fn restart(app: &AppHandle) {
         task.abort();
     }
     inner.link = None;
+    // What the old connection heard is gone with it.
+    if inner.activity.clear() {
+        emit_activity(app, &Activity::default());
+    }
     if !mqtt.enabled || mqtt.host.is_empty() || mqtt.device_id.is_empty() {
         return;
     }
@@ -423,13 +456,20 @@ pub fn restart(app: &AppHandle) {
             password,
         };
         let topics = Topics::new(&mqtt.device_id, &mqtt.discovery_prefix);
-        run(app, generation, broker, topics).await;
+        let frigate = FrigateTopics::new(&mqtt.frigate_prefix);
+        run(app, generation, broker, topics, frigate).await;
     }));
 }
 
 /// Keeps one connection up until it is replaced, publishing everything
-/// again on each connect.
-async fn run(app: AppHandle, generation: u64, broker: Broker, topics: Topics) {
+/// again on each connect and following Frigate's activity.
+async fn run(
+    app: AppHandle,
+    generation: u64,
+    broker: Broker,
+    topics: Topics,
+    frigate: FrigateTopics,
+) {
     let will = LastWill::new(topics.availability(), "offline", QoS::AtLeastOnce, true);
     let client_id = format!("{}-{}", topics::ROOT, topics.device_id());
     let options = match client::options(&broker, &client_id, Some(will)) {
@@ -477,6 +517,7 @@ async fn run(app: AppHandle, generation: u64, broker: Broker, topics: Topics) {
                 if let Err(err) = client.try_subscribe(problem_configs.clone(), QoS::AtLeastOnce) {
                     eprintln!("Ruru: could not read the device's discovery configs: {err}");
                 }
+                follow_frigate(&client, &frigate);
             }
             // Home Assistant restarted and forgot its devices.
             Ok(Event::Incoming(Packet::Publish(publish)))
@@ -485,6 +526,10 @@ async fn run(app: AppHandle, generation: u64, broker: Broker, topics: Topics) {
                 announce(true);
             }
             Ok(Event::Incoming(Packet::Publish(publish))) => {
+                if let Some(update) = frigate.parse(&publish.topic, &publish.payload) {
+                    take_activity(&app, generation, update);
+                    continue;
+                }
                 let state = app.state::<MqttState>();
                 let mut inner = state.lock();
                 if let Some((link, wall)) = inner.link(generation) {
@@ -504,11 +549,38 @@ async fn run(app: AppHandle, generation: u64, broker: Broker, topics: Topics) {
                         link.session.connected = false;
                     }
                 }
+                // Nothing Frigate said can be trusted until it says it again.
+                forget_activity(&app, generation);
                 eprintln!("Ruru: MQTT: {}", client::describe(&broker, &err));
                 tokio::time::sleep(client::backoff(attempt)).await;
                 attempt = attempt.saturating_add(1);
             }
         }
+    }
+}
+
+/// Follows Frigate's activity topics and asks Frigate for every camera's
+/// activity now. Subscribing first means the answer is not missed.
+fn follow_frigate(client: &AsyncClient, frigate: &FrigateTopics) {
+    for topic in frigate.subscriptions() {
+        if let Err(err) = client.try_subscribe(topic, QoS::AtMostOnce) {
+            eprintln!("Ruru: could not follow Frigate's activity: {err}");
+        }
+    }
+    if let Err(err) = client.try_publish(frigate.on_connect(), QoS::AtMostOnce, false, "") {
+        eprintln!("Ruru: could not ask Frigate for its activity: {err}");
+    }
+}
+
+/// Takes in one message from Frigate and tells the page if anything changed.
+fn take_activity(app: &AppHandle, generation: u64, update: activity::Update) {
+    let state = app.state::<MqttState>();
+    let changed = {
+        let mut inner = state.lock();
+        (inner.current(generation) && inner.activity.apply(update)).then(|| inner.activity.clone())
+    };
+    if let Some(activity) = changed {
+        emit_activity(app, &activity);
     }
 }
 
@@ -645,6 +717,13 @@ pub fn report_wall_state(state: State<'_, MqttState>, report: WallReport) -> Res
         link.send(messages);
     }
     Ok(())
+}
+
+/// Every camera's activity as Frigate last told it, for a page that has
+/// just started listening for changes.
+#[tauri::command]
+pub fn camera_activity(state: State<'_, MqttState>) -> Activity {
+    state.lock().activity.clone()
 }
 
 /// Takes a tile's problem from the page: on when it can't play or has been

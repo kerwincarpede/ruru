@@ -204,4 +204,23 @@ describe("Tile", () => {
     rerender(<Tile base={base} camera={camera} live streamInfo />);
     expect(screen.getByRole("complementary", { name: "Stream info" })).toHaveTextContent("cam_sub");
   });
+
+  it("outlines motion, shows a chip per moving object and highlights an alert", () => {
+    const { rerender } = render(<Tile base={base} camera={camera} live />);
+    const tile = screen.getByRole("figure", { name: "Cam" });
+    expect(tile).not.toHaveClass("has-motion");
+    rerender(<Tile base={base} camera={camera} live activity={{ motion: true, objects: { person: 1, license_plate: 0 }, review: "detection" }} />);
+    expect(tile).toHaveClass("has-motion");
+    expect(tile).not.toHaveClass("is-alert");
+    // A label with no moving objects gets no chip.
+    expect(screen.getAllByRole("listitem").map((chip) => chip.textContent)).toEqual(["Person"]);
+    rerender(<Tile base={base} camera={camera} live activity={{ motion: false, objects: { person: 2, dog: 1 }, review: "alert" }} />);
+    expect(tile).toHaveClass("is-alert");
+    expect(tile).not.toHaveClass("has-motion");
+    expect(screen.getAllByRole("listitem").map((chip) => chip.textContent)).toEqual(["Person ×2", "Dog"]);
+    expect(screen.getByText("· Alert")).toBeInTheDocument();
+    rerender(<Tile base={base} camera={camera} live activity={{ motion: false, objects: {}, review: "none" }} />);
+    expect(tile).not.toHaveClass("is-alert");
+    expect(screen.queryByRole("list", { name: "Objects in view" })).not.toBeInTheDocument();
+  });
 });

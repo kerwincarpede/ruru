@@ -3,8 +3,12 @@ import { saveMqtt, testMqtt, type MqttInput, type MqttSettings, type Settings } 
 
 interface HomeAssistantPageProps {
   mqtt: MqttSettings;
+  /** Tiles show Frigate's motion, objects and alerts. */
+  activity: boolean;
   /** The connection was saved; the window uses the new settings. */
   onSaved: (settings: Settings) => void;
+  /** Show activity was changed and saved with the connection. */
+  onActivity: (on: boolean) => void;
   onClose: () => void;
 }
 
@@ -27,7 +31,7 @@ function parsePort(text: string): number | null {
 }
 
 /** Settings › Home Assistant: the MQTT broker in Home Assistant that Ruru connects to. */
-export default function HomeAssistantPage({ mqtt, onSaved, onClose }: HomeAssistantPageProps) {
+export default function HomeAssistantPage({ mqtt, activity, onSaved, onActivity, onClose }: HomeAssistantPageProps) {
   const [enabled, setEnabled] = useState(mqtt.enabled);
   const [host, setHost] = useState(mqtt.host);
   const [port, setPort] = useState(String(mqtt.port));
@@ -37,6 +41,7 @@ export default function HomeAssistantPage({ mqtt, onSaved, onClose }: HomeAssist
   const [password, setPassword] = useState<string | null>(null);
   const [discoveryPrefix, setDiscoveryPrefix] = useState(mqtt.discoveryPrefix);
   const [frigatePrefix, setFrigatePrefix] = useState(mqtt.frigatePrefix);
+  const [showActivity, setShowActivity] = useState(activity);
   const [test, setTest] = useState<Test>({ kind: "idle" });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -79,6 +84,7 @@ export default function HomeAssistantPage({ mqtt, onSaved, onClose }: HomeAssist
     setSaveError(null);
     try {
       onSaved(await saveMqtt(value, password || null));
+      if (showActivity !== activity) onActivity(showActivity);
       onClose();
     } catch (error) {
       setSaveError(message(error));
@@ -224,6 +230,13 @@ export default function HomeAssistantPage({ mqtt, onSaved, onClose }: HomeAssist
             />
           </div>
         </div>
+        <label className="check">
+          <input type="checkbox" checked={showActivity} aria-describedby="mqtt-activity-hint" onChange={(event) => setShowActivity(event.target.checked)} />
+          Show activity
+        </label>
+        <span id="mqtt-activity-hint" className="field-hint">
+          Each tile is outlined while Frigate sees motion, shows a chip for each kind of object moving, and is highlighted during an alert.
+        </span>
         <div ref={result} className="settings-results">
           <div className="settings-test" aria-live="polite">
             <button type="button" onClick={() => void runTest()} disabled={!host.trim() || test.kind === "testing"}>
