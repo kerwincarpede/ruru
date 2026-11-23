@@ -1,0 +1,348 @@
+/* Ruru's owl. Its colours follow the theme on the window's background, and
+   always use the dark set on the wall, which is near-black in both themes.
+   Every movement is slow and occasional, and all of it stops under
+   prefers-reduced-motion. */
+.owl {
+  --owl-brow: #7a5532;
+  --owl-beak: #b08a55;
+  --owl-glow: 0.22;
+  --owl-bg: var(--bg);
+  display: block;
+  overflow: visible;
+}
+
+@media (prefers-color-scheme: dark) {
+  .owl {
+    --owl-brow: #ece0c8;
+    --owl-beak: #cdb48a;
+    --owl-glow: 0.38;
+  }
+}
+
+.owl.on-wall {
+  --owl-brow: #ece0c8;
+  --owl-beak: #cdb48a;
+  --owl-glow: 0.38;
+  --owl-bg: var(--wall);
+}
+
+.owl-glow {
+  opacity: var(--owl-glow);
+}
+
+.owl-brow,
+.owl-lash {
+  fill: none;
+  stroke: var(--owl-brow);
+  stroke-linecap: round;
+}
+
+.owl-brow {
+  stroke-width: 10;
+}
+
+.owl-lash {
+  stroke-width: 6;
+  opacity: 0;
+}
+
+.owl-beak {
+  fill: var(--owl-beak);
+}
+
+.owl-lid {
+  fill: var(--owl-bg);
+  transform: translateY(-48px);
+}
+
+.owl-z {
+  fill: var(--owl-brow);
+  font: 600 20px/1 system-ui, sans-serif;
+  opacity: 0;
+}
+
+.owl-eye,
+.owl-side,
+.owl-z {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* Awake: a blink every few seconds, a double-blink once a cycle, and very
+   rarely a wink with the left eye. */
+.owl.is-awake .owl-eye {
+  animation: owl-blink-awake 21s ease-in-out infinite;
+}
+
+.owl.is-awake .owl-l {
+  animation: owl-wink 47s ease-in-out infinite;
+}
+
+/* Scanning: look left, look right, then stop dead and stare out for a beat. */
+.owl.is-scanning .owl-pupil {
+  animation: owl-scan 9s ease-in-out infinite;
+}
+
+.owl.is-scanning .owl-eye {
+  animation: owl-blink 9s ease-in-out 4s infinite;
+}
+
+/* Counting: the pupils glance towards the camera that last connected. */
+.owl.is-counting .owl-pupil {
+  transform: translateX(var(--owl-look));
+  transition: transform 450ms ease;
+}
+
+.owl.is-counting .owl-eye {
+  animation: owl-blink 7s ease-in-out infinite;
+}
+
+/* Drowsy: the lids sink as if nodding off. The owl is drawn again on each
+   retry, so they snap open and start sinking again. */
+.owl.is-drowsy .owl-glow {
+  opacity: calc(var(--owl-glow) * 0.5);
+}
+
+.owl.is-drowsy .owl-lid {
+  transform: translateY(-26px);
+  animation: owl-droop 4.8s ease-in forwards;
+}
+
+.owl.is-drowsy .owl-pupil {
+  transform: translateY(4px);
+}
+
+/* Puzzled: a glance left, a glance right, then a small shrug of the brows. */
+.owl.is-puzzled .owl-pupil {
+  animation: owl-glance 10s ease-in-out infinite;
+}
+
+.owl.is-puzzled .owl-brows {
+  animation: owl-shrug 10s ease-in-out infinite;
+}
+
+/* Closed and asleep: shut eyes are a curved lash line, never a dark disc. */
+.owl:is(.is-closed, .is-asleep) .owl-glow,
+.owl:is(.is-closed, .is-asleep) .owl-eye {
+  opacity: 0;
+}
+
+.owl:is(.is-closed, .is-asleep) .owl-lash {
+  opacity: 1;
+}
+
+/* Closed: now and then the right eye peeks open and shuts again. */
+.owl.is-closed .owl-r .owl-eye {
+  animation: owl-peek 13s ease-in-out infinite;
+}
+
+.owl.is-closed .owl-r .owl-lash {
+  animation: owl-peek-lash 13s ease-in-out infinite;
+}
+
+/* Asleep: the brows rise and fall with each breath, and a "z" drifts up. */
+.owl.is-asleep .owl-brows {
+  animation: owl-breathe 5s ease-in-out infinite;
+}
+
+.owl.is-asleep .owl-z {
+  animation: owl-z 10s ease-out infinite;
+}
+
+/* Dim: small and quiet beside the live tiles, with a slow sleepy blink. */
+.owl.is-dim {
+  opacity: 0.5;
+}
+
+.owl.is-dim .owl-glow {
+  opacity: 0;
+}
+
+.owl.is-dim .owl-eye {
+  animation: owl-sleepy-blink 11s ease-in-out infinite;
+}
+
+@keyframes owl-blink {
+  0%,
+  94%,
+  100% {
+    transform: scaleY(1);
+  }
+  96% {
+    transform: scaleY(0.08);
+  }
+}
+
+@keyframes owl-blink-awake {
+  0%,
+  29%,
+  31.4%,
+  61%,
+  63.4%,
+  90%,
+  92.2%,
+  93.8%,
+  96%,
+  100% {
+    transform: scaleY(1);
+  }
+  30.2%,
+  62.2%,
+  91.1%,
+  94.9% {
+    transform: scaleY(0.08);
+  }
+}
+
+@keyframes owl-wink {
+  0%,
+  70%,
+  74%,
+  100% {
+    transform: scaleY(1);
+  }
+  71%,
+  73% {
+    transform: scaleY(0.08);
+  }
+}
+
+@keyframes owl-scan {
+  0%,
+  6%,
+  100% {
+    transform: translateX(0);
+  }
+  16%,
+  24% {
+    transform: translateX(-13px);
+  }
+  36%,
+  44% {
+    transform: translateX(13px);
+  }
+  54%,
+  58% {
+    transform: translateX(-13px);
+  }
+  /* Stop dead and stare. */
+  61%,
+  80% {
+    transform: translateX(0) translateY(2px);
+  }
+}
+
+@keyframes owl-droop {
+  0% {
+    transform: translateY(-48px);
+  }
+  6% {
+    transform: translateY(-26px);
+  }
+  100% {
+    transform: translateY(18px);
+  }
+}
+
+@keyframes owl-glance {
+  0%,
+  10%,
+  56%,
+  100% {
+    transform: translate(0, 0);
+  }
+  16%,
+  28% {
+    transform: translate(-13px, -3px);
+  }
+  36%,
+  48% {
+    transform: translate(13px, -3px);
+  }
+}
+
+@keyframes owl-shrug {
+  0%,
+  58%,
+  74%,
+  100% {
+    transform: translateY(0);
+  }
+  62%,
+  68% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes owl-peek {
+  0%,
+  78%,
+  92%,
+  100% {
+    opacity: 0;
+    transform: scaleY(0.1);
+  }
+  81%,
+  88% {
+    opacity: 1;
+    transform: scaleY(0.6);
+  }
+}
+
+@keyframes owl-peek-lash {
+  0%,
+  78%,
+  92%,
+  100% {
+    opacity: 1;
+  }
+  80%,
+  89% {
+    opacity: 0;
+  }
+}
+
+@keyframes owl-breathe {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(3px);
+  }
+}
+
+@keyframes owl-z {
+  0%,
+  55% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.7);
+  }
+  62% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(12px, -28px) scale(1.1);
+  }
+}
+
+@keyframes owl-sleepy-blink {
+  0%,
+  86%,
+  100% {
+    transform: scaleY(1);
+  }
+  90%,
+  93% {
+    transform: scaleY(0.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .owl,
+  .owl * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

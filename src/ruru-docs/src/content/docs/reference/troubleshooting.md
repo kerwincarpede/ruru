@@ -12,6 +12,16 @@ sidebar:
 - If Frigate runs in Docker, its container must publish port 5000.
 - Include `http://` and the port, such as `http://frigate.local:5000`.
 
+## Ruru says it can't reach Frigate
+
+Ruru can't read the cameras from the Frigate address in Settings, and tries again every 5 seconds. The owl's heading says why:
+
+- **Ruru can't reach Frigate**: nothing answered. Check that Frigate is running and that this computer is on the same network.
+- **Frigate turned Ruru away**: Frigate answered with an HTTP error, such as 401. Check the address, and that Frigate allows access without signing in on this port.
+- **That doesn't look like Frigate**: something else answered. Check the address and port.
+
+Choose **Settings** to fix the address and follow [Test connection fails](#test-connection-fails), or **Try again** once Frigate is back.
+
 ## A camera is missing
 
 Ruru shows the cameras Frigate has. Check that the camera is in Frigate's config, then switch to another window and back to Ruru: it reads the camera list again when its window comes back into focus.

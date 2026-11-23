@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { appInfo, type AppInfo } from "./app/api";
 import { cameraLabel, type Camera } from "./app/frigate";
 import { isMac, shortcutFor } from "./app/keys";
-import Logo from "./app/Logo";
+import Owl from "./app/Owl";
 import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, cameraActivity, frigateCameras, getSettings, onCameraActivity, onFullScreenChanged, onOpenSettings, onWallCommand, reportTileProblem, reportWallState, saveLayout, saveWallOptions, setFullScreen, type Activity, type SavedLayout, type Settings, type WallOptions } from "./app/api";
 import AutoUpdateNotice from "./app/AutoUpdateNotice";
 import UpdatePrompt from "./app/UpdatePrompt";
@@ -12,12 +12,19 @@ import SettingsDialog from "./settings/SettingsDialog";
 import { EMPTY_LAYOUT, hideCamera, showCamera, wallPlacements } from "./wall/layout";
 import { tileMenu, type MenuItem, type MenuSection } from "./wall/menu";
 import type { StreamKind } from "./wall/streams";
+import Connecting from "./wall/Connecting";
+import { EveryCameraHidden, NoCameras } from "./wall/EmptyWall";
+import StreamsOff from "./wall/StreamsOff";
 import Wall from "./wall/Wall";
 import WallMenu from "./wall/WallMenu";
 
 /** How long the toolbar stays after the pointer stops moving. */
 export const TOOLBAR_HIDE_MS = 2500;
 
+/** How often Ruru asks Frigate for its cameras again until it first answers. */
+export const RETRY_MS = 5_000;
+/** The longest the wall stays covered while its tiles start their streams. */
+export const CONNECTING_MS = 20_000;
 const NO_SETTINGS: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
 
 function GearIcon() {
@@ -45,7 +52,28 @@ function App() {
   const [menu, setMenu] = useState<{ x: number; y: number; camera?: string } | null>(null);
   const [live, setLive] = useState(() => document.visibilityState !== "hidden");
   // Stopped from the wall menu or Home Assistant, such as overnight; Ruru starts with them on.
-  const [streams, setStreams] = useState(true);
+  const [streams, setStreamsOn] = useState(true);
+  // The cameras whose tiles have played since Ruru last started connecting
+  // them, and whether that first connection is over. It starts again for a
+  // new Frigate address and when the streams start after being off.
+  const [connected, setConnected] = useState<string[]>([]);
+  const [connectDone, setConnectDone] = useState(false);
+  const restartConnecting = useCallback(() => {
+    setConnected([]);
+    setConnectDone(false);
+  }, []);
+  const streamsRef = useRef(true);
+  // Layout editing needs the tiles, which go while the streams are off.
+  const setStreams = useCallback(
+    (on: boolean) => {
+      if (on === streamsRef.current) return;
+      streamsRef.current = on;
+      setStreamsOn(on);
+      if (on) restartConnecting();
+      else setEditing(false);
+    },
+    [restartConnecting],
+  );
   const [activity, setActivity] = useState<Activity>({});
   const [toolbar, setToolbar] = useState(true);
   const toolbarTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -127,6 +155,23 @@ function App() {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [url, discover]);
+
+  // Until Frigate has answered once, Ruru keeps asking it.
+  // Each try restarts the wait, and counts so the owl wakes up for it.
+  const [attempt, setAttempt] = useState(0);
+  const unreached = url !== null && cameras === null && discoveryError !== null;
+  const retry = useCallback(
+    (server: string) => {
+      setAttempt((count) => count + 1);
+      void discover(server);
+    },
+    [discover],
+  );
+  useEffect(() => {
+    if (!unreached || !url) return;
+    const timer = setTimeout(() => retry(url), RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [unreached, url, retry, attempt]);
 
   // Streams stop while the window is hidden or minimised.
   useEffect(() => {
@@ -229,7 +274,7 @@ function App() {
       current = false;
       stop?.();
     };
-  }, [changeFullScreen]);
+  }, [changeFullScreen, setStreams]);
 
   // The toolbar shows while the pointer moves, then fades away.
   const wake = () => {
@@ -265,6 +310,20 @@ function App() {
   const onWall = url && cameras ? wallPlacements(cameras.map((camera) => camera.name), layout).map((tile) => tile.camera) : null;
   const onWallKey = onWall ? JSON.stringify(onWall) : null;
   const shownMaximised = maximised && onWall?.includes(maximised) ? maximised : null;
+
+  // The wall stays covered until every tile on it has played, or for
+  // CONNECTING_MS at most; a camera that can't connect shows its own trouble.
+  const allConnected = onWall !== null && onWall.every((camera) => connected.includes(camera));
+  if (allConnected && !connectDone) setConnectDone(true);
+  const connectingCameras = onWall !== null && onWall.length > 0 && streams && !connectDone;
+  useEffect(() => {
+    if (!connectingCameras) return;
+    const timer = setTimeout(() => setConnectDone(true), CONNECTING_MS);
+    return () => clearTimeout(timer);
+  }, [connectingCameras]);
+  const onPlaying = useCallback((camera: string) => {
+    setConnected((now) => (now.includes(camera) ? now : [...now, camera]));
+  }, []);
   useEffect(() => {
     if (onWallKey === null) return;
     const report = { maximised: shownMaximised, fullScreen: fullScreenNow, windowShown: live, streams, cameras: JSON.parse(onWallKey) as string[] };
@@ -284,8 +343,8 @@ function App() {
     { label: "Settings…", onSelect: () => setSettingsOpen(true) },
     ...(url && cameras?.length
       ? [
-          { label: editing ? "Done editing" : "Edit layout", onSelect: () => setEditing((now) => !now) },
-          { label: streams ? "Stop streams" : "Start streams", onSelect: () => setStreams((now) => !now) },
+          ...(streams ? [{ label: editing ? "Done editing" : "Edit layout", onSelect: () => setEditing((now) => !now) }] : []),
+          { label: streams ? "Stop streams" : "Start streams", onSelect: () => setStreams(!streams) },
           { label: "Fit to window", kind: "checkbox" as const, checked: wallOptions.fitToWindow, onSelect: () => changeWall({ fitToWindow: !wallOptions.fitToWindow }) },
           // Activity comes from Frigate over the Home Assistant connection.
           ...(settings?.mqtt.enabled
@@ -361,7 +420,7 @@ function App() {
             </button>
           </>
         )}
-        {!editing && url && cameras && cameras.length > 0 && (
+        {!editing && streams && url && cameras && cameras.length > 0 && (
           <button type="button" onClick={() => setEditing(true)}>
             Edit layout
           </button>
@@ -379,7 +438,7 @@ function App() {
 
       {settings && !url && (
         <section className="hero">
-          <Logo />
+          <Owl mood="awake" className="hero-owl" />
           <h1>Ruru</h1>
           <p className="tagline">Eyes on every camera</p>
           <p className="note">Enter your Frigate address to see your cameras.</p>
@@ -389,23 +448,27 @@ function App() {
         </section>
       )}
 
-      {url && discoveryError && (
+      {url && cameras === null && (
+        <Connecting stage="frigate" server={url} error={discoveryError} attempt={attempt} onRetry={() => retry(url)} onSettings={() => setSettingsOpen(true)} />
+      )}
+      {url && cameras && discoveryError && (
         <p className="wall-error" role="alert">
           {discoveryError}
         </p>
       )}
-      {url && cameras && cameras.length === 0 && <p className="wall-empty">Frigate has no cameras yet.</p>}
-      {url && cameras && cameras.length > 0 && !streams && (
-        <p className="wall-paused" role="status">
-          Streams are stopped. Showing snapshots.
-        </p>
+      {url && cameras && cameras.length === 0 && <NoCameras onCheck={() => void discover(url)} />}
+      {url && cameras && cameras.length > 0 && streams && onWall?.length === 0 && !editing && (
+        <EveryCameraHidden count={cameras.length} onShowAll={() => changeLayout(EMPTY_LAYOUT)} onEdit={() => setEditing(true)} />
       )}
-      {url && cameras && cameras.length > 0 && (
+      {url && cameras && cameras.length > 0 && !streams && (
+        <StreamsOff homeAssistant={settings?.mqtt.enabled ?? false} onStart={() => setStreams(true)} />
+      )}
+      {url && cameras && cameras.length > 0 && streams && (
         <Wall
           base={url}
           cameras={cameras}
           layout={layout}
-          live={live && streams}
+          live={live}
           editing={editing}
           lockRatio={wallOptions.lockRatio}
           fitToWindow={wallOptions.fitToWindow}
@@ -418,9 +481,12 @@ function App() {
           reconnects={reconnects}
           onAutomatic={onAutomatic}
           onProblem={onProblem}
+          onPlaying={onPlaying}
           onLayout={changeLayout}
         />
       )}
+
+      {connectingCameras && onWall && <Connecting stage="cameras" cameras={onWall} connected={connected} />}
 
       {menu && <WallMenu x={menu.x} y={menu.y} sections={sections} onClose={closeMenu} />}
       {settingsOpen && settings && (
@@ -443,6 +509,7 @@ function App() {
             if (saved.frigateUrl !== url) {
               setCameras(null);
               setDiscoveryError(null);
+              restartConnecting();
             } else if (url) void discover(url);
           }}
           onClose={() => setSettingsOpen(false)}

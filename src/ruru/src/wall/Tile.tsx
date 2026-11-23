@@ -4,6 +4,7 @@ import { cameraLabel, snapshotUrl, type Camera } from "../app/frigate";
 import { Go2rtcPlayer, isUndecodable, type PlayerState } from "./player";
 import { AUTO_SETTLE_MS, automaticStream, knownWidth, recordWidth, type StreamKind } from "./streams";
 import { objectChip } from "./activity";
+import Owl from "../app/Owl";
 import TileDiagnostics from "./TileDiagnostics";
 
 interface TileProps {
@@ -29,6 +30,8 @@ interface TileProps {
   onAutomatic?: (stream: StreamKind) => void;
   /** Told, while the window is shown, whether the tile has a problem: it can't play, or has been reconnecting for {@link PROBLEM_AFTER_MS}. */
   onProblem?: (problem: boolean) => void;
+  /** Told each time the tile starts playing video. */
+  onPlaying?: () => void;
 }
 
 /** How long a tile reconnects, or stays frozen, before it counts as a problem. */
@@ -141,7 +144,7 @@ type Slots = { front: 0 | 1; streams: [string | null, string | null] };
  * frame shows, so the picture never stops moving; a stream the webview
  * cannot decode gives way to the camera's other stream.
  */
-export default function Tile({ base, camera, choice, live, maximised = false, reconnect = 0, refresh = 0, editing = false, streamInfo = false, activity, onOpen, onHide, onAutomatic, onProblem }: TileProps) {
+export default function Tile({ base, camera, choice, live, maximised = false, reconnect = 0, refresh = 0, editing = false, streamInfo = false, activity, onOpen, onHide, onAutomatic, onProblem, onPlaying }: TileProps) {
   const figure = useRef<HTMLElement>(null);
   const videoA = useRef<HTMLVideoElement>(null);
   const videoB = useRef<HTMLVideoElement>(null);
@@ -237,6 +240,13 @@ export default function Tile({ base, camera, choice, live, maximised = false, re
   useEffect(() => {
     reportProblem.current = onProblem;
   });
+  const reportPlaying = useRef(onPlaying);
+  useEffect(() => {
+    reportPlaying.current = onPlaying;
+  });
+  useEffect(() => {
+    if (playing) reportPlaying.current?.();
+  }, [playing]);
   // While the window is hidden nothing plays, so the last report stands.
   useEffect(() => {
     if (live) reportProblem.current?.(problem);
@@ -250,12 +260,21 @@ export default function Tile({ base, camera, choice, live, maximised = false, re
     }
   };
 
+  // Frigate has no snapshot for a camera that is offline or still starting.
+  const [noSnapshot, setNoSnapshot] = useState(false);
+  const waiting = noSnapshot && !playing && !(stale && frozen);
   const objects = Object.entries(activity?.objects ?? {}).filter(([, count]) => count > 0);
   const alert = activity?.review === "alert";
   const className = ["tile", playing && "is-playing", stale && "is-stale", maximised && "is-maximised", editing && "is-editing", activity?.motion && "has-motion", alert && "is-alert"].filter(Boolean).join(" ");
   return (
     <figure ref={figure} className={className} aria-label={label} data-camera={camera.name} onDoubleClick={editing ? undefined : onOpen}>
-      <img className="tile-snapshot" src={`${snapshotUrl(base, camera.name)}${refresh ? `?t=${refresh}` : ""}`} alt="" draggable={false} />
+      <img className="tile-snapshot" src={`${snapshotUrl(base, camera.name)}${refresh ? `?t=${refresh}` : ""}`} alt="" draggable={false} onLoad={() => setNoSnapshot(false)} onError={() => setNoSnapshot(true)} />
+      {waiting && (
+        <div className="tile-waiting">
+          <Owl mood="dim" className="on-wall" />
+          Waiting for a picture
+        </div>
+      )}
       <canvas ref={freeze} className={`tile-freeze${stale && frozen && !playing ? " is-shown" : ""}`} aria-hidden="true" />
       {([0, 1] as const).map((slot) => (
         <video

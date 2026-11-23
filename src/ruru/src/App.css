@@ -175,8 +175,7 @@ button:disabled {
   opacity: 0.8;
 }
 
-.wall-error,
-.wall-empty {
+.wall-error {
   margin: 3.5rem auto 0;
   padding: 0.5rem 1rem;
   border: 1px solid var(--border);
@@ -189,23 +188,6 @@ button:disabled {
 
 .wall-error {
   color: var(--danger);
-}
-
-/* Floats over the wall while its streams are stopped. */
-.wall-paused {
-  position: fixed;
-  bottom: 1rem;
-  left: 50%;
-  z-index: 40;
-  margin: 0;
-  padding: 0.4rem 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 0.85rem;
-  transform: translateX(-50%);
-  pointer-events: none;
 }
 
 /* A dialog over the window: Settings. */
@@ -360,18 +342,150 @@ button:disabled {
   opacity: 0.6;
 }
 
-.logo-body {
-  fill: var(--accent);
+.hero-owl {
+  width: 9rem;
+  height: auto;
 }
 
-.logo-eye {
-  fill: var(--accent-soft);
+/* The owl in the middle of the wall, with what the wall is doing: looking for
+   cameras, connecting them, stuck, empty or with its streams off. */
+.wall-notice {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 2rem 1.5rem;
+  color: var(--on-wall);
+  text-align: center;
 }
 
-.logo-pupil {
-  fill: var(--text);
+/* Covers the wall while its tiles connect underneath. */
+.wall-notice.is-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: var(--wall);
 }
 
-.logo-beak {
-  fill: var(--text-muted);
+.wall-notice-owl {
+  width: 8.5rem;
+  height: auto;
+}
+
+.wall-notice h2 {
+  margin: 0.75rem 0 0;
+  font-size: 1.5rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+.wall-notice p {
+  max-width: 34rem;
+  margin: 0.25rem 0 0;
+  color: var(--on-wall);
+  font-size: 0.95rem;
+  opacity: 0.75;
+  text-wrap: pretty;
+}
+
+.wall-notice .wall-notice-small {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  opacity: 0.6;
+}
+
+.wall-notice .wall-notice-count {
+  color: var(--motion);
+  font-variant-numeric: tabular-nums;
+  opacity: 1;
+}
+
+.wall-notice-error {
+  max-width: 34rem;
+  margin-top: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 0.4rem;
+  font: 0.75rem/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  opacity: 0.65;
+  overflow-wrap: anywhere;
+}
+
+.wall-notice-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.wall-notice-buttons button {
+  padding: 0.4rem 1rem;
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--on-wall);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.wall-notice-buttons button.primary {
+  border-color: var(--motion);
+  background: var(--motion);
+  color: var(--wall);
+  font-weight: 550;
+}
+
+.wall-notice-buttons button:focus-visible {
+  outline: 2px solid var(--motion);
+  outline-offset: 2px;
+}
+
+/* One dot per camera, lit as its tile starts playing. */
+.wall-notice-dots {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wall-notice-dots li {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 14%);
+  transition: background-color 300ms ease, box-shadow 300ms ease;
+}
+
+.wall-notice-dots li.is-on {
+  background: var(--motion);
+  box-shadow: 0 0 0.5rem color-mix(in srgb, var(--motion) 60%, transparent);
+}
+
+.wall-notice-progress {
+  width: min(16rem, 80%);
+  height: 0.3rem;
+  margin-top: 1rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 14%);
+}
+
+.wall-notice-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--motion);
+  transition: width 300ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wall-notice-dots li,
+  .wall-notice-progress span {
+    transition: none;
+  }
 }

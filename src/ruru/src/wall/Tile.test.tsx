@@ -223,4 +223,16 @@ describe("Tile", () => {
     expect(tile).not.toHaveClass("is-alert");
     expect(screen.queryByRole("list", { name: "Objects in view" })).not.toBeInTheDocument();
   });
+
+  it("shows a quiet owl while it has neither a snapshot nor video", () => {
+    render(<Tile base={base} camera={camera} live />);
+    const snapshot = document.querySelector("img.tile-snapshot") as HTMLImageElement;
+    fire(snapshot, "error");
+    expect(screen.getByRole("figure")).toHaveTextContent("Waiting for a picture");
+    fire(snapshot, "load");
+    expect(screen.getByRole("figure")).not.toHaveTextContent("Waiting for a picture");
+    fire(snapshot, "error");
+    fire(videoFor("cam_sub"), "playing");
+    expect(screen.getByRole("figure")).not.toHaveTextContent("Waiting for a picture");
+  });
 });

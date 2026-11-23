@@ -2,11 +2,12 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach } from "vitest";
 import { emit } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import App from "./App";
+import App, { CONNECTING_MS, RETRY_MS } from "./App";
 import type { Camera } from "./app/frigate";
 import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, type Activity, type SavedLayout, type Settings } from "./app/api";
 import { findUpdate } from "./app/updates";
 import { mockCommands, type CommandHandlers } from "./test/mockCommands";
+import { forgetFailures } from "./wall/player";
 
 // Only the startup check is faked; Settings › Updates checks through the mocked commands.
 vi.mock("./app/updates", async (importOriginal) => ({ ...(await importOriginal<typeof import("./app/updates")>()), findUpdate: vi.fn() }));
@@ -403,20 +404,111 @@ describe("App", () => {
     await waitFor(() => expect(calls.filter((call) => call.cmd === "frigate_cameras")).toHaveLength(2));
   });
 
-  it("says why cameras could not be found", async () => {
+  it("shows that it is connecting to Frigate until Frigate answers", async () => {
+    let answer: (found: Camera[]) => void = () => {};
+    wall({ frigate_cameras: () => new Promise<Camera[]>((resolve) => (answer = resolve)) });
+    render(<App />);
+    const status = await screen.findByRole("status", { name: "Looking for cameras" });
+    expect(status).toHaveTextContent("Asking Frigate at http://frigate:5000");
+    await act(async () => answer(cameras));
+    expect(await screen.findByRole("figure", { name: "Garage" })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Looking for cameras" })).not.toBeInTheDocument();
+  });
+
+  it("says why cameras could not be found and keeps trying until Frigate answers", async () => {
+    vi.useFakeTimers();
+    try {
+      let reachable = false;
+      const calls = wall({
+        frigate_cameras: () => {
+          if (!reachable) throw "Could not reach Frigate at http://frigate:5000: timed out";
+          return cameras;
+        },
+      });
+      render(<App />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      const status = screen.getByRole("status", { name: "Ruru can't reach Frigate" });
+      expect(status).toHaveTextContent("Nothing answered at http://frigate:5000.");
+      expect(status).toHaveTextContent("Could not reach Frigate at http://frigate:5000: timed out");
+      const attempts = () => calls.filter((call) => call.cmd === "frigate_cameras").length;
+      const before = attempts();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RETRY_MS);
+      });
+      expect(attempts()).toBe(before + 1);
+      reachable = true;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RETRY_MS);
+      });
+      expect(screen.getByRole("figure", { name: "Garage" })).toBeInTheDocument();
+      expect(screen.queryByRole("status", { name: "Ruru can't reach Frigate" })).not.toBeInTheDocument();
+      // Once found, Ruru stops asking until the window comes back into focus.
+      const found = attempts();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RETRY_MS * 3);
+      });
+      expect(attempts()).toBe(found);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("tries again or opens Settings from the can't-reach screen", async () => {
+    let reachable = false;
     wall({
       frigate_cameras: () => {
-        throw "Could not reach Frigate at http://frigate:5000: timed out";
+        if (!reachable) throw "timed out";
+        return cameras;
       },
     });
     render(<App />);
+    const status = await screen.findByRole("status", { name: "Ruru can't reach Frigate" });
+    fireEvent.click(within(status).getByRole("button", { name: "Settings" }));
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    reachable = true;
+    fireEvent.click(within(status).getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("figure", { name: "Garage" })).toBeInTheDocument();
+  });
+
+  it("still says why cameras could not be found once the wall is up", async () => {
+    let reachable = true;
+    wall({
+      frigate_cameras: () => {
+        if (!reachable) throw "Could not reach Frigate at http://frigate:5000: timed out";
+        return cameras;
+      },
+    });
+    render(<App />);
+    await screen.findByRole("figure", { name: "Garage" });
+    reachable = false;
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not reach Frigate");
+    expect(screen.getByRole("figure", { name: "Garage" })).toBeInTheDocument();
   });
 
   it("says when Frigate has no cameras", async () => {
     wall({ frigate_cameras: () => [] });
     render(<App />);
-    expect(await screen.findByText("Frigate has no cameras yet.")).toBeInTheDocument();
+    expect(await screen.findByRole("status", { name: "Frigate has no cameras yet" })).toBeInTheDocument();
+  });
+
+  it("says every camera is hidden, and shows them all again", async () => {
+    const calls = wall({ get_settings: () => ({ ...connected, layouts: { [URL_SAVED]: { tiles: [], hidden: ["maingate", "garage"] } } }) });
+    render(<App />);
+    const status = await screen.findByRole("status", { name: "Every camera is hidden" });
+    expect(status).toHaveTextContent("You hid all 2 cameras in Edit layout.");
+    fireEvent.click(within(status).getByRole("button", { name: "Edit layout" }));
+    expect(screen.queryByRole("status", { name: "Every camera is hidden" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show all cameras" }));
+    expect(await screen.findByRole("figure", { name: "Garage" })).toBeInTheDocument();
+    const saved = calls.filter((call) => call.cmd === "save_layout").map((call) => (call.payload as { layout: SavedLayout }).layout);
+    expect(saved[saved.length - 1]).toEqual({ tiles: [], hidden: [] });
   });
 
   it("maximises a double-clicked tile until Escape", async () => {
@@ -553,6 +645,8 @@ describe("App streams", () => {
   beforeEach(() => {
     findUpdateMock.mockReset().mockResolvedValue(null);
     FakeSocket.all = [];
+    // A test that waits out the connecting screen leaves failed streams behind.
+    forgetFailures();
     vi.stubGlobal("WebSocket", FakeSocket);
     vi.stubGlobal("RTCPeerConnection", FakePeer);
     vi.stubGlobal("MediaStream", class {});
@@ -672,12 +766,55 @@ describe("App streams", () => {
     expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate_sub"]);
     await act(() => emit("wall-command", { kind: "streams", on: false }));
     expect(FakeSocket.open()).toEqual([]);
-    expect(screen.getByRole("status")).toHaveTextContent("Streams are stopped");
+    expect(screen.getByRole("status", { name: "Streams are off" })).toBeInTheDocument();
+    expect(screen.queryByRole("figure")).not.toBeInTheDocument();
     await waitFor(() => expect(reports()[reports().length - 1].streams).toBe(false));
     await act(() => emit("wall-command", { kind: "streams", on: true }));
     expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate_sub"]);
-    expect(screen.queryByText(/Streams are stopped/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Streams are off" })).not.toBeInTheDocument();
     await waitFor(() => expect(reports()[reports().length - 1].streams).toBe(true));
+  });
+
+  /** Makes the tile's video for `stream` start playing: jsdom never decodes. */
+  const play = (stream: string) => {
+    const video = document.querySelector<HTMLVideoElement>(`video[data-stream="${stream}"]`);
+    if (!video) throw new Error(`No video plays ${stream}`);
+    Object.defineProperty(video, "readyState", { configurable: true, value: 4 });
+    act(() => {
+      video.dispatchEvent(new Event("playing"));
+    });
+  };
+
+  it("covers the wall while its cameras connect, and shows it once every tile plays", async () => {
+    wall();
+    render(<App />);
+    await screen.findByRole("figure", { name: "Garage" });
+    const connecting = () => screen.queryByRole("status", { name: "Connecting to your cameras" });
+    expect(connecting()).toHaveTextContent("0 of 2 cameras connected");
+    play("garage_sub");
+    expect(connecting()).toHaveTextContent("1 of 2 cameras connected");
+    expect(screen.getByRole("listitem", { name: "Garage: connected" })).toBeInTheDocument();
+    play("maingate_sub");
+    expect(connecting()).not.toBeInTheDocument();
+  });
+
+  it("shows the wall after a while even when a camera never connects", async () => {
+    vi.useFakeTimers();
+    try {
+      wall();
+      render(<App />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      play("garage_sub");
+      expect(screen.getByRole("status", { name: "Connecting to your cameras" })).toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CONNECTING_MS);
+      });
+      expect(screen.queryByRole("status", { name: "Connecting to your cameras" })).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stops and starts every stream from the wall's menu", async () => {
@@ -689,6 +826,27 @@ describe("App streams", () => {
     expect(FakeSocket.open()).toEqual([]);
     fireEvent.contextMenu(screen.getByRole("main"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Start streams" }));
+    expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate_sub"]);
+  });
+
+  it("shows only how to start the streams while they are off, and starts them from there", async () => {
+    wall();
+    render(<App />);
+    await screen.findByRole("figure", { name: "Garage" });
+    fireEvent.click(screen.getByRole("button", { name: "Edit layout" }));
+    fireEvent.contextMenu(screen.getByRole("main"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Stop streams" }));
+    // Editing stops with the streams, and nothing offers it until they start.
+    expect(screen.queryByRole("button", { name: "Edit layout" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
+    fireEvent.contextMenu(screen.getByRole("main"));
+    const menu = screen.getByRole("menu");
+    expect(within(menu).queryByRole("menuitem", { name: /Edit layout|Done editing/ })).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Start streams" }));
+    expect(await screen.findByRole("figure", { name: "Garage" })).toBeInTheDocument();
+    // The cameras connect again from scratch.
+    expect(screen.getByRole("status", { name: "Connecting to your cameras" })).toHaveTextContent("0 of 2");
     expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate_sub"]);
   });
 
