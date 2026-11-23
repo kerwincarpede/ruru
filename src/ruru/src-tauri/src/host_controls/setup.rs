@@ -10,7 +10,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use super::{HostControlsCredentials, HostControlsStatus, agent, system};
+use super::{HostControlsCredentials, HostControlsStatus, agent, reboot, system};
 use crate::{mqtt::client::Broker, settings::MqttSettings};
 
 const DESKTOP_ID: &str = "com.kerwincarpede.ruru";
@@ -53,7 +53,7 @@ fn config_root() -> Result<PathBuf, String> {
         .ok_or_else(|| "Could not locate the user configuration directory.".into())
 }
 
-fn directory() -> Result<PathBuf, String> {
+pub(super) fn directory() -> Result<PathBuf, String> {
     Ok(config_root()?.join(DESKTOP_ID).join("host-controls"))
 }
 
@@ -77,7 +77,7 @@ pub(super) fn read_config() -> Result<Config, String> {
     serde_json::from_slice(&bytes).map_err(|err| err.to_string())
 }
 
-fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
+pub(super) fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
     let temporary = path.with_extension("new");
     match fs::remove_file(&temporary) {
         Ok(()) => {}
@@ -415,7 +415,7 @@ fn supported() -> bool {
         })
 }
 
-fn check_platform() -> Result<(), String> {
+pub(super) fn check_platform() -> Result<(), String> {
     if supported() {
         Ok(())
     } else {
@@ -457,6 +457,19 @@ pub(super) fn status() -> HostControlsStatus {
     } else {
         (false, None)
     };
+    let reboot_enabled = enabled && reboot::setting().is_ok_and(|value| value == Some(true));
+    let (reboot_available, reboot_can_authorise, reboot_message) = if reboot_enabled {
+        match reboot::capability() {
+            Ok(capability) => (
+                connected && capability.ready(),
+                capability.may_authorise(),
+                capability.message().map(str::to_owned),
+            ),
+            Err(error) => (false, false, Some(error)),
+        }
+    } else {
+        (false, false, None)
+    };
     HostControlsStatus {
         supported: supported(),
         enabled,
@@ -467,6 +480,10 @@ pub(super) fn status() -> HostControlsStatus {
                 .any(|name| dir.join(name).exists())
         }),
         message,
+        reboot_enabled,
+        reboot_available,
+        reboot_can_authorise,
+        reboot_message,
     }
 }
 
@@ -589,6 +606,7 @@ pub(super) async fn disable() -> Result<Option<String>, String> {
             "Host controls are off. Broker cleanup is pending. {error}"
         )));
     }
+    reboot::forget()?;
     fs::remove_file(disabled).map_err(|err| err.to_string())?;
     Ok(None)
 }

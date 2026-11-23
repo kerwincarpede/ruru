@@ -1,0 +1,33 @@
+#!/bin/sh
+# Invoked by pkexec after local administrator authentication.
+set -eu
+umask 022
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+[ "$(id -u)" = 0 ] && [ "$#" = 0 ] || exit 1
+uid=${PKEXEC_UID:-}
+case "$uid" in
+    ''|*[!0-9]*) exit 1 ;;
+esac
+[ "$uid" -ge 1000 ] || exit 1
+entry=$(getent passwd "$uid")
+account=${entry%%:*}
+case "$account" in
+    ''|*[!a-zA-Z0-9_.-]*) exit 1 ;;
+esac
+
+rules=/etc/polkit-1/rules.d
+destination="$rules/90-ruru-reboot-$uid.rules"
+temporary=$(mktemp "$rules/.ruru-reboot.XXXXXXXX")
+trap 'rm -f -- "$temporary"' EXIT
+cat > "$temporary" <<RULE
+// Approved locally by an administrator for the Ruru desktop account.
+polkit.addRule(function(action, subject) {
+    if (action.id === "org.freedesktop.login1.reboot" && subject.user === "$account") {
+        return polkit.Result.YES;
+    }
+});
+RULE
+chmod 0644 "$temporary"
+mv -T -- "$temporary" "$destination"

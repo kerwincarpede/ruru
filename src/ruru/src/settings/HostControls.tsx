@@ -1,13 +1,15 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import {
+  authoriseHostReboot,
   disableHostControls,
   enableHostControls,
+  setHostReboot,
   hostControlsStatus,
   testHostControls,
   type HostControlsStatus,
 } from "../app/api";
 
-type Action = "test" | "enable" | "disable";
+type Action = "test" | "enable" | "disable" | "toggle-reboot" | "authorise-reboot";
 
 /** Sets up the independent Ubuntu service with its own MQTT account. */
 export default function HostControls({ mqttEnabled }: { mqttEnabled: boolean }) {
@@ -59,6 +61,12 @@ export default function HostControls({ mqttEnabled }: { mqttEnabled: boolean }) 
           await enableHostControls(credentials, consent);
           setPassword("");
           break;
+        case "toggle-reboot":
+          setStatus(await setHostReboot(!status.rebootEnabled));
+          break;
+        case "authorise-reboot":
+          setStatus(await authoriseHostReboot());
+          break;
         case "disable": {
           const next = await disableHostControls();
           setStatus(next);
@@ -87,12 +95,42 @@ export default function HostControls({ mqttEnabled }: { mqttEnabled: boolean }) 
     <section className="settings-section" aria-labelledby="host-controls-title">
       <h4 id="host-controls-title">Host controls</h4>
       {status.enabled ? (
-        <div className="settings-test">
-          <button type="button" disabled={busy !== undefined} onClick={() => void perform("disable")}>
-            Disable host controls
-          </button>
-          <p role="status">{status.connected ? "Host controls connected" : "Host controls disconnected"}</p>
-        </div>
+        <>
+          <div className="settings-test">
+            <button type="button" disabled={busy !== undefined} onClick={() => void perform("disable")}>
+              Disable host controls
+            </button>
+            <p role="status">{status.connected ? "Host controls connected" : "Host controls disconnected"}</p>
+          </div>
+          <div className="field-check">
+            <input
+              id="host-controls-reboot"
+              type="checkbox"
+              aria-describedby="host-controls-reboot-hint"
+              checked={status.rebootEnabled}
+              disabled={busy !== undefined}
+              onChange={() => void perform("toggle-reboot")}
+            />
+            <label className="field-label" htmlFor="host-controls-reboot">
+              Enable host reboot
+            </label>
+            <span id="host-controls-reboot-hint" className="field-hint">
+              {status.rebootEnabled && status.rebootMessage
+                ? status.rebootMessage
+                : "Adds a Reboot host button to Home Assistant that requests a normal Ubuntu reboot."}
+            </span>
+          </div>
+          {status.rebootEnabled && (
+            <div className="settings-test">
+              {status.rebootCanAuthorise && (
+                <button type="button" disabled={busy !== undefined} onClick={() => void perform("authorise-reboot")}>
+                  {busy === "authorise-reboot" ? "Waiting for approval…" : "Authorise host reboot"}
+                </button>
+              )}
+              <p role="status">{status.rebootAvailable ? "Host reboot enabled" : "Host reboot unavailable"}</p>
+            </div>
+          )}
+        </>
       ) : status.cleanupPending ? (
         <div className="settings-test">
           <button type="button" disabled={busy !== undefined} onClick={() => void perform("disable")}>

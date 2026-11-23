@@ -266,6 +266,10 @@ export interface HostControlsStatus {
   connected: boolean;
   cleanupPending: boolean;
   message: string | null;
+  rebootEnabled: boolean;
+  rebootAvailable: boolean;
+  rebootCanAuthorise: boolean;
+  rebootMessage: string | null;
 }
 
 export function hostControlsStatus(): Promise<HostControlsStatus> {
@@ -282,4 +286,13 @@ export function enableHostControls(credentials: HostControlsCredentials, consent
 
 export function disableHostControls(): Promise<HostControlsStatus> {
   return invoke<HostControlsStatus>("disable_host_controls");
+}
+
+
+export function setHostReboot(enabled: boolean): Promise<HostControlsStatus> {
+  return invoke<HostControlsStatus>("set_host_reboot", { enabled });
+}
+
+export function authoriseHostReboot(): Promise<HostControlsStatus> {
+  return invoke<HostControlsStatus>("authorise_host_reboot");
 }

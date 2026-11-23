@@ -8,6 +8,10 @@ const available: HostControlsStatus = {
   supported: true,
   enabled: false,
   connected: false,
+  rebootEnabled: false,
+  rebootAvailable: false,
+  rebootCanAuthorise: false,
+  rebootMessage: null,
   cleanupPending: false,
   message: null,
 };
@@ -53,5 +57,48 @@ describe("Settings, host controls", () => {
     expect(await screen.findByText("Host controls connected")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Disable host controls" }));
     expect(await screen.findByRole("button", { name: "Enable host controls" })).toBeEnabled();
+  });
+
+  it("opts in to reboot separately and applies local authorisation when required", async () => {
+    let status = { ...available, enabled: true, connected: true };
+    const calls = mockCommands({
+      host_controls_status: () => status,
+      set_host_reboot: ({ enabled }) => {
+        status = {
+          ...status,
+          rebootEnabled: enabled,
+          rebootAvailable: false,
+          rebootCanAuthorise: enabled,
+          rebootMessage: enabled ? "Reboot requires authorisation." : null,
+        };
+        return status;
+      },
+      authorise_host_reboot: () => {
+        status = {
+          ...status,
+          rebootAvailable: true,
+          rebootCanAuthorise: false,
+          rebootMessage: null,
+        };
+        return status;
+      },
+    });
+    render(<HostControls mqttEnabled />);
+    const optIn = await screen.findByRole("checkbox", { name: "Enable host reboot" });
+    expect(optIn).not.toBeChecked();
+    expect(screen.queryByRole("button", { name: "Authorise host reboot" })).toBeNull();
+
+    fireEvent.click(optIn);
+    expect(await screen.findByText("Host reboot unavailable")).toBeVisible();
+    expect(screen.getByText("Reboot requires authorisation.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Authorise host reboot" }));
+    expect(await screen.findByText("Host reboot enabled")).toBeVisible();
+
+    fireEvent.click(optIn);
+    await waitFor(() => expect(optIn).not.toBeChecked());
+    expect(screen.queryByText("Host reboot enabled")).toBeNull();
+    expect(calls).toContainEqual({ cmd: "set_host_reboot", payload: { enabled: true } });
+    expect(calls).toContainEqual({ cmd: "set_host_reboot", payload: { enabled: false } });
+    expect(calls.some(({ cmd }) => cmd === "authorise_host_reboot")).toBe(true);
   });
 });

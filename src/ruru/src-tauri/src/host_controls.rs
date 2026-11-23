@@ -5,6 +5,8 @@ mod agent;
 #[cfg(target_os = "linux")]
 mod mutter;
 #[cfg(target_os = "linux")]
+mod reboot;
+#[cfg(target_os = "linux")]
 mod samples;
 #[cfg(target_os = "linux")]
 mod setup;
@@ -73,6 +75,10 @@ pub struct HostControlsStatus {
     connected: bool,
     cleanup_pending: bool,
     message: Option<String>,
+    reboot_enabled: bool,
+    reboot_available: bool,
+    reboot_can_authorise: bool,
+    reboot_message: Option<String>,
 }
 
 /// Reports host control availability and the independent agent's status.
@@ -147,6 +153,65 @@ pub async fn disable_host_controls(app: tauri::AppHandle) -> Result<HostControls
     {
         let _ = app;
         Err("Host controls are available on Ubuntu.".into())
+    }
+}
+
+/// Changes the separate opt-in for reboot without restarting the wall.
+#[tauri::command]
+pub async fn set_host_reboot(enabled: bool) -> Result<HostControlsStatus, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let _guard = setup::CHANGE.lock().await;
+        let config = tauri::async_runtime::spawn_blocking(move || {
+            setup::check_platform()?;
+            if !setup::enabled() {
+                return Err("Enable host controls before enabling reboot.".into());
+            }
+            if enabled && reboot::setting()? != Some(true) {
+                setup::read_config().map(Some)
+            } else {
+                Ok(None)
+            }
+        })
+        .await
+        .map_err(|err| err.to_string())??;
+        if let Some(config) = config {
+            agent::test_reboot(&config).await?;
+        }
+        tauri::async_runtime::spawn_blocking(move || {
+            reboot::set(enabled)?;
+            Ok(setup::status())
+        })
+        .await
+        .map_err(|err| err.to_string())?
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = enabled;
+        Err("Host reboot is available on Ubuntu.".into())
+    }
+}
+
+/// Offers local administrator approval for the normal logind reboot permission.
+#[tauri::command]
+pub async fn authorise_host_reboot() -> Result<HostControlsStatus, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let _guard = setup::CHANGE.lock().await;
+        tauri::async_runtime::spawn_blocking(|| {
+            setup::check_platform()?;
+            if !setup::enabled() {
+                return Err("Enable host controls before authorising reboot.".into());
+            }
+            reboot::authorise()?;
+            Ok(setup::status())
+        })
+        .await
+        .map_err(|err| err.to_string())?
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err("Host reboot is available on Ubuntu.".into())
     }
 }
 

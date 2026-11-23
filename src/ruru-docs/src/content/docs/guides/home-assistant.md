@@ -114,6 +114,27 @@ Substitute the discovery prefix and device ID from Ruru’s MQTT setup and `sett
 
 Home Assistant needs to read the agent’s discovery, availability and state messages and publish to `ruru/<device id>/agent/command/+`. Keep all command messages non-retained. For the **Ruru** and **Display** switches, the payloads are `ON` and `OFF` and the command names are `ruru` and `display`. The agent rejects retained commands and broker redeliveries.
 
+### Reboot the Ubuntu host
+
+**Enable host reboot** is a separate setting under **Settings → Home Assistant → Host controls**. Turn it on after host controls connect. Before enabling it, add these permissions to the broker ACL:
+
+- Let the agent read `ruru/<device id>/agent/command/reboot` and write `<discovery prefix>/button/<device id>/reboot/config`. The agent’s existing state permissions cover `agent/reboot/availability` and `agent/reboot/attributes`.
+- Let Home Assistant read that discovery and availability data and publish `PRESS` to `ruru/<device id>/agent/command/reboot` as a non-retained message.
+
+Ruru checks these permissions as you enable reboot. **Reboot host** appears on the same Home Assistant device and is available when the agent is connected and Ubuntu allows a normal reboot.
+
+If the Settings page offers **Authorise host reboot**, choose it with a local administrator present. The agent runs as your desktop account. Its user service can need permission even when the desktop can reboot. If no approval prompt appears, open a terminal in the local desktop and run the following command as the desktop account. It needs the Ubuntu `pkexec` package.
+
+```sh
+pkexec /usr/share/ruru/host-controls/authorize-reboot
+```
+
+Approval grants only the standard Ubuntu reboot action to that account. It leaves approvals for rebooting with other users signed in and bypassing inhibitors under your existing system policy. Ruru requests a normal reboot and respects inhibitors. If a request fails, see **Reboot host** attributes or the host agent journal for the error.
+
+The button becomes unavailable during reboot. It returns when you sign in and the agent reconnects. Ruru starts at graphical sign-in even if it was stopped in Home Assistant before the reboot. Set up automatic sign-in in Ubuntu if the wall should return without local input.
+
+Untick **Enable host reboot** to stop accepting MQTT reboot commands and remove **Reboot host** when the broker is reachable. Keep the reboot ACL in place while Ruru finishes cleanup. The local administrator’s approval is saved separately so Ruru can reuse it. To revoke it, an administrator can delete `/etc/polkit-1/rules.d/90-ruru-reboot-<desktop UID>.rules`. The desktop account’s UID is shown by `id -u`. This also applies if you remove the package.
+
 ## Streams
 
 Turn the **Streams** switch off to stop every tile's stream, such as overnight when nobody is watching. The wall shows a sleeping Ruru owl that says the streams are off and how to turn them back on, and Ruru stops pulling video and snapshots from Frigate, which saves network, CPU and power. Turn it on to start them all again. Pair it with the **Display** switch to turn the wall off at night without shutting the computer down.

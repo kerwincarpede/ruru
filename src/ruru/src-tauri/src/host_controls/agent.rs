@@ -15,7 +15,7 @@ use rumqttc::v5::{
 use serde_json::{Value, json};
 use tauri::async_runtime::{self, JoinHandle};
 
-use super::{setup, system};
+use super::{reboot, setup, system};
 use crate::mqtt::{
     client::{self, Broker},
     discovery::{self, Device, Message, on_off},
@@ -23,6 +23,7 @@ use crate::mqtt::{
 };
 
 const QOS: QoS = QoS::AtLeastOnce;
+const REBOOT_RETRY: Duration = Duration::from_secs(5);
 
 struct Wire<'a> {
     topics: &'a Topics,
@@ -38,9 +39,13 @@ impl Wire<'_> {
         Message::retained(self.topic(suffix), payload)
     }
 
-    fn command(&self, publish: &Publish) -> Option<Action> {
+    fn command(&self, publish: &Publish, reboot_enabled: bool) -> Option<Action> {
         if publish.retain || publish.dup {
             return None;
+        }
+        if publish.topic.as_ref() == self.topic("command/reboot").as_bytes() {
+            return (reboot_enabled && publish.payload.as_ref() == b"PRESS")
+                .then_some(Action::Reboot);
         }
         let on = match publish.payload.as_ref() {
             b"ON" => true,
@@ -64,12 +69,16 @@ impl Wire<'_> {
         }
     }
 
-    fn filters(&self) -> Vec<Filter> {
-        vec![
+    fn filters(&self, reboot_enabled: bool) -> Vec<Filter> {
+        let mut filters = vec![
             self.filter("command/ruru"),
             self.filter("command/display"),
             Filter::new(self.topics.home_assistant_status(), QOS),
-        ]
+        ];
+        if reboot_enabled {
+            filters.push(self.filter("command/reboot"));
+        }
+        filters
     }
 
     fn availability(&self, local: &str) -> Value {
@@ -144,6 +153,46 @@ impl Wire<'_> {
         self.switches().into_iter().chain(self.sensors()).collect()
     }
 
+    fn reboot_discovery(&self) -> Message {
+        let mut config = discovery::base(self.topics, self.device, "reboot", "Reboot host");
+        config.remove("availability_topic");
+        config.insert(
+            "availability".into(),
+            self.availability("reboot/availability"),
+        );
+        config.insert("availability_mode".into(), "all".into());
+        config.insert("command_topic".into(), self.topic("command/reboot").into());
+        config.insert(
+            "json_attributes_topic".into(),
+            self.topic("reboot/attributes").into(),
+        );
+        config.insert("payload_press".into(), "PRESS".into());
+        config.insert("retain".into(), false.into());
+        config.insert("qos".into(), 1.into());
+        Message::retained(
+            self.topics.discovery("button", "reboot"),
+            Value::Object(config).to_string(),
+        )
+    }
+
+    fn reboot_cleanup(&self) -> Vec<Message> {
+        vec![
+            Message::retained(self.topics.discovery("button", "reboot"), ""),
+            self.message("reboot/availability", ""),
+            self.message("reboot/attributes", ""),
+        ]
+    }
+
+    fn configs(&self, reboot_setting: Option<bool>) -> Vec<Message> {
+        let mut messages = self.discovery();
+        match reboot_setting {
+            Some(true) => messages.push(self.reboot_discovery()),
+            Some(false) => messages.extend(self.reboot_cleanup()),
+            None => {}
+        }
+        messages
+    }
+
     fn cleanup(&self) -> Vec<Message> {
         let mut messages = self.discovery();
         for message in &mut messages {
@@ -163,6 +212,7 @@ impl Wire<'_> {
 enum Action {
     Wall(bool),
     Display(bool),
+    Reboot,
 }
 
 fn connection(
@@ -259,9 +309,33 @@ pub(super) async fn test(config: &setup::Config) -> Result<(), String> {
         None,
     )?;
     client
-        .try_subscribe_many(wire.filters())
+        .try_subscribe_many(wire.filters(false))
         .map_err(|err| err.to_string())?;
     bounded(subscribed(&mut events, |_| {})).await?;
+    disconnect(&client, &mut events).await;
+    Ok(())
+}
+
+pub(super) async fn test_reboot(config: &setup::Config) -> Result<(), String> {
+    let topics = Topics::new(&config.device_id, &config.discovery_prefix);
+    let device = device();
+    let wire = Wire {
+        topics: &topics,
+        device: &device,
+    };
+    let (client, mut events) = connection(
+        &config.broker(),
+        format!("ruru-reboot-test-{}", crate::settings::new_device_id()),
+        None,
+    )?;
+    client
+        .try_subscribe_many([wire.filter("command/reboot")])
+        .map_err(|err| err.to_string())?;
+    bounded(subscribed(&mut events, |_| {})).await?;
+    let messages = wire.reboot_cleanup();
+    let count = messages.len();
+    send(&client, messages)?;
+    acknowledged(&mut events, count, |_| {}).await?;
     disconnect(&client, &mut events).await;
     Ok(())
 }
@@ -278,7 +352,10 @@ pub(super) async fn cleanup(config: &setup::Config) -> Result<(), String> {
         format!("ruru-host-cleanup-{}", crate::settings::new_device_id()),
         None,
     )?;
-    let cleanup = wire.cleanup();
+    let mut cleanup = wire.cleanup();
+    if reboot::setting()?.is_some() {
+        cleanup.extend(wire.reboot_cleanup());
+    }
     let expected = cleanup.len();
     send(&client, cleanup)?;
     acknowledged(&mut events, expected, |_| {}).await?;
@@ -354,6 +431,8 @@ async fn session(
     attempt: &mut u32,
     state: &mut State,
 ) -> Result<(), String> {
+    let reboot_setting = reboot::setting()?;
+    let reboot_enabled = reboot_setting == Some(true);
     let will = LastWill::new(wire.topic("availability"), "offline", QOS, true, None);
     let (client, mut events) = connection(
         broker,
@@ -361,21 +440,21 @@ async fn session(
         Some(will),
     )?;
     client
-        .try_subscribe_many(wire.filters())
+        .try_subscribe_many(wire.filters(reboot_enabled))
         .map_err(|err| err.to_string())?;
     // Drop waiting commands and republish state for a new clean session.
     state.reconnect();
     bounded(subscribed(&mut events, |event| {
-        state.enqueue_event(wire, event)
+        state.enqueue_event(wire, event, reboot_enabled)
     }))
     .await?;
-    let configs = wire.discovery();
+    let configs = wire.configs(reboot_setting);
     let config_count = configs.len();
     send(&client, configs)?;
-    let state_count = state.report(wire, &client).await?;
+    let state_count = state.report(wire, &client, reboot_enabled).await?;
     send(&client, vec![wire.message("availability", "online")])?;
     acknowledged(&mut events, config_count + state_count + 1, |event| {
-        state.enqueue_event(wire, event);
+        state.enqueue_event(wire, event, reboot_enabled);
     })
     .await?;
     state.start_next(wire, &client)?;
@@ -393,7 +472,7 @@ async fn session(
             tokio::select! {
                 event = &mut next => break event?,
                 _ = ticker.tick() => {
-                    state.report(wire, &client).await?;
+                    state.report(wire, &client, reboot_enabled).await?;
                     state.start_next(wire, &client)?;
                     setup::write_status(true, state.error());
                 }
@@ -403,11 +482,11 @@ async fn session(
             if publish.topic.as_ref() == wire.topics.home_assistant_status().as_bytes()
                 && publish.payload.as_ref() == b"online"
             {
-                send(&client, wire.discovery())?;
+                send(&client, wire.configs(reboot_setting))?;
                 send(&client, vec![wire.message("availability", "online")])?;
                 state.published.clear();
-                state.report(wire, &client).await?;
-            } else if let Some(action) = wire.command(&publish) {
+                state.report(wire, &client, reboot_enabled).await?;
+            } else if let Some(action) = wire.command(&publish, reboot_enabled) {
                 state.enqueue(action);
                 state.start_next(wire, &client)?;
             }
@@ -422,6 +501,9 @@ struct State {
     published: BTreeMap<String, String>,
     wall_error: Diagnostics,
     display_error: Diagnostics,
+    reboot_error: Option<String>,
+    reboot_last_attempt: Option<Instant>,
+    reboot_accepted: bool,
     cpu: super::samples::Cpu,
 }
 
@@ -452,7 +534,10 @@ impl Diagnostics {
 
 impl State {
     fn error(&self) -> Option<&str> {
-        self.wall_error.message().or(self.display_error.message())
+        self.wall_error
+            .message()
+            .or(self.display_error.message())
+            .or(self.reboot_error.as_deref())
     }
 
     fn reconnect(&mut self) {
@@ -460,15 +545,30 @@ impl State {
         self.published.clear();
     }
 
-    fn enqueue_event(&mut self, wire: &Wire<'_>, event: Event) {
+    fn enqueue_event(&mut self, wire: &Wire<'_>, event: Event, reboot_enabled: bool) {
         if let Event::Incoming(Packet::Publish(publish)) = event
-            && let Some(action) = wire.command(&publish)
+            && let Some(action) = wire.command(&publish, reboot_enabled)
         {
             self.enqueue(action);
         }
     }
 
+    fn reboot_busy(&self, now: Instant) -> bool {
+        self.reboot_accepted
+            || self
+                .pending
+                .as_ref()
+                .is_some_and(|(action, _)| *action == Action::Reboot)
+            || self.queued.contains(&Action::Reboot)
+            || self
+                .reboot_last_attempt
+                .is_some_and(|last| now.duration_since(last) < REBOOT_RETRY)
+    }
+
     fn enqueue(&mut self, action: Action) {
+        if action == Action::Reboot && self.reboot_busy(Instant::now()) {
+            return;
+        }
         if self.queued.len() < 8 {
             self.queued.push_back(action);
         }
@@ -480,6 +580,7 @@ impl State {
                 let result = match action {
                     Action::Wall(on) => system::change_wall(on),
                     Action::Display(on) => super::mutter::set(on),
+                    Action::Reboot => reboot::request(),
                 };
                 if let Err(err) = &result {
                     eprintln!("Ruru host controls: {err}");
@@ -504,6 +605,10 @@ impl State {
         let entity = match action {
             Action::Wall(_) => "ruru",
             Action::Display(_) => "display",
+            Action::Reboot => {
+                self.reboot_last_attempt = Some(Instant::now());
+                "reboot"
+            }
         };
         let message = wire.message(&format!("{entity}/availability"), "offline");
         send(client, vec![message.clone()])?;
@@ -516,6 +621,11 @@ impl State {
         let (status, wanted) = match action {
             Action::Wall(on) => (&mut self.wall_error, on),
             Action::Display(on) => (&mut self.display_error, on),
+            Action::Reboot => {
+                self.reboot_accepted = result.is_ok();
+                self.reboot_error = result.err();
+                return;
+            }
         };
         status.command = result.err().map(|error| (wanted, error));
     }
@@ -533,14 +643,20 @@ impl State {
         Ok(())
     }
 
-    async fn report(&mut self, wire: &Wire<'_>, client: &AsyncClient) -> Result<usize, String> {
+    async fn report(
+        &mut self,
+        wire: &Wire<'_>,
+        client: &AsyncClient,
+        reboot_enabled: bool,
+    ) -> Result<usize, String> {
         self.finish_completed().await?;
         let display = if matches!(self.pending.as_ref(), Some((Action::Display(_), _))) {
             None
         } else {
             Some(super::mutter::state())
         };
-        let messages = self.observe(wire, system::wall(), display, Instant::now());
+        let capability = reboot_enabled.then(reboot::capability);
+        let messages = self.observe(wire, system::wall(), display, capability, Instant::now());
         let count = messages.len();
         send(client, messages)?;
         Ok(count)
@@ -551,6 +667,7 @@ impl State {
         wire: &Wire<'_>,
         wall: Result<system::Wall, String>,
         display: Option<Result<bool, String>>,
+        reboot: Option<Result<reboot::Capability, String>>,
         now: Instant,
     ) -> Vec<Message> {
         let pending = self.pending.as_ref().map(|(action, _)| action);
@@ -615,6 +732,24 @@ impl State {
                 json!({ "error": error }).to_string(),
             ));
         }
+        if let Some(capability) = reboot {
+            let ready = !self.reboot_busy(now)
+                && capability
+                    .as_ref()
+                    .is_ok_and(|permission| permission.ready());
+            let capability_error = match &capability {
+                Ok(permission) => permission.message(),
+                Err(error) => Some(error.as_str()),
+            };
+            messages.push(wire.message(
+                "reboot/availability",
+                if ready { "online" } else { "offline" },
+            ));
+            messages.push(wire.message(
+                "reboot/attributes",
+                json!({ "error": self.reboot_error.as_deref().or(capability_error) }).to_string(),
+            ));
+        }
         messages.retain(|message| self.published.get(&message.topic) != Some(&message.payload));
         for message in &messages {
             self.published
@@ -641,32 +776,28 @@ mod tests {
             ("command/display", Action::Display(true)),
         ] {
             let mut publish = Publish::new(wire.topic(suffix), QOS, b"ON".to_vec(), None);
-            assert_eq!(wire.command(&publish), Some(expected));
+            assert_eq!(wire.command(&publish, false), Some(expected));
             publish.retain = true;
-            assert_eq!(wire.command(&publish), None);
+            assert_eq!(wire.command(&publish, false), None);
             publish.retain = false;
             publish.dup = true;
-            assert_eq!(wire.command(&publish), None);
+            assert_eq!(wire.command(&publish, false), None);
             let filter = wire.filter(suffix);
             assert!(filter.preserve_retain);
             assert_eq!(filter.retain_forward_rule, RetainForwardRule::Never);
         }
         assert_eq!(
-            wire.command(&Publish::new(
-                wire.topic("command/ruru"),
-                QOS,
-                b"on".to_vec(),
-                None
-            )),
+            wire.command(
+                &Publish::new(wire.topic("command/ruru"), QOS, b"on".to_vec(), None),
+                false
+            ),
             None
         );
         assert_eq!(
-            wire.command(&Publish::new(
-                "ruru/other/agent/command/ruru",
-                QOS,
-                b"ON".to_vec(),
-                None
-            )),
+            wire.command(
+                &Publish::new("ruru/other/agent/command/ruru", QOS, b"ON".to_vec(), None),
+                false
+            ),
             None
         );
     }
@@ -740,7 +871,7 @@ mod tests {
             device: &device,
         };
         let mut state = State::default();
-        let mut collect = |event| state.enqueue_event(&wire, event);
+        let mut collect = |event| state.enqueue_event(&wire, event, false);
         let mut count = 0;
         let ack = |pkid| {
             Event::Incoming(Packet::PubAck(PubAck {
@@ -788,7 +919,13 @@ mod tests {
             let mut state = State::default();
             let now = Instant::now();
             let (complete, work) = tokio::sync::oneshot::channel();
-            state.observe(&wire, wall(system::Phase::Stopped), Some(Ok(true)), now);
+            state.observe(
+                &wire,
+                wall(system::Phase::Stopped),
+                Some(Ok(true)),
+                None,
+                now,
+            );
             state.enqueue(Action::Wall(true));
             state.enqueue(Action::Wall(false));
             state
@@ -821,7 +958,13 @@ mod tests {
             })
             .await
             .unwrap();
-            let confirmed = state.observe(&wire, wall(system::Phase::Stopped), Some(Ok(true)), now);
+            let confirmed = state.observe(
+                &wire,
+                wall(system::Phase::Stopped),
+                Some(Ok(true)),
+                None,
+                now,
+            );
             assert_eq!(
                 payload(&wire, &confirmed, "ruru/availability"),
                 Some("online")
@@ -853,19 +996,37 @@ mod tests {
         };
         let mut state = State::default();
         let now = Instant::now();
-        let first = state.observe(&wire, wall(system::Phase::Stopped), Some(Ok(true)), now);
+        let first = state.observe(
+            &wire,
+            wall(system::Phase::Stopped),
+            Some(Ok(true)),
+            None,
+            now,
+        );
         assert_eq!(payload(&wire, &first, "ruru/state"), Some("OFF"));
         assert_eq!(payload(&wire, &first, "display/state"), Some("ON"));
         assert!(
             state
-                .observe(&wire, wall(system::Phase::Stopped), Some(Ok(true)), now)
+                .observe(
+                    &wire,
+                    wall(system::Phase::Stopped),
+                    Some(Ok(true)),
+                    None,
+                    now
+                )
                 .is_empty()
         );
         state.enqueue(Action::Wall(true));
         state.reconnect();
         assert!(state.queued.is_empty());
         assert_eq!(
-            state.observe(&wire, wall(system::Phase::Stopped), Some(Ok(true)), now),
+            state.observe(
+                &wire,
+                wall(system::Phase::Stopped),
+                Some(Ok(true)),
+                None,
+                now
+            ),
             first
         );
     }
@@ -882,5 +1043,95 @@ mod tests {
         assert_eq!(diagnostics.message(), Some("start failed"));
         diagnostics.observed(Some(true), None);
         assert_eq!(diagnostics.message(), None);
+    }
+
+    #[test]
+    fn reboot_rejects_retained_redelivered_and_unexpected_payloads() {
+        let topics = Topics::new("wall", "homeassistant");
+        let device = device();
+        let wire = Wire {
+            topics: &topics,
+            device: &device,
+        };
+        let command_topic = wire.topic("command/reboot");
+        let press =
+            |payload: &[u8]| Publish::new(command_topic.clone(), QOS, payload.to_vec(), None);
+        let mut message = press(b"PRESS");
+        assert_eq!(wire.command(&message, true), Some(Action::Reboot));
+        assert_eq!(wire.command(&message, false), None);
+        assert_eq!(wire.command(&press(b"ON"), true), None);
+        assert_eq!(wire.command(&press(b"press"), true), None);
+        message.retain = true;
+        assert_eq!(wire.command(&message, true), None);
+        message.retain = false;
+        message.dup = true;
+        assert_eq!(wire.command(&message, true), None);
+        let filter = wire.filters(true).pop().unwrap();
+        assert_eq!(filter.path, command_topic);
+        assert!(filter.preserve_retain);
+        assert_eq!(filter.retain_forward_rule, RetainForwardRule::Never);
+        assert!(
+            wire.filters(false)
+                .iter()
+                .all(|filter| filter.path != command_topic)
+        );
+    }
+
+    #[test]
+    fn reboot_suppresses_queued_and_recent_duplicates_and_stays_busy_after_acceptance() {
+        let now = Instant::now();
+        let mut state = State::default();
+        assert!(!state.reboot_busy(now));
+        state.enqueue(Action::Reboot);
+        state.enqueue(Action::Reboot);
+        assert_eq!(state.queued, [Action::Reboot]);
+        assert!(state.reboot_busy(now));
+        state.reconnect();
+        state.reboot_last_attempt = Some(now);
+        assert!(state.reboot_busy(now + Duration::from_secs(1)));
+        assert!(!state.reboot_busy(now + REBOOT_RETRY));
+        state.complete(Action::Reboot, Ok(()));
+        // Clearing the publish and command queues during reconnect does not
+        // make a successful reboot request eligible to run again.
+        state.reconnect();
+        assert!(state.reboot_busy(now + REBOOT_RETRY));
+    }
+
+    #[test]
+    fn reboot_discovery_combines_connection_and_permission_and_cleans_up_after_disconnect() {
+        let topics = Topics::new("wall", "homeassistant");
+        let device = device();
+        let wire = Wire {
+            topics: &topics,
+            device: &device,
+        };
+        let button_topic = topics.discovery("button", "reboot");
+        let discovery = wire.configs(Some(true));
+        assert_eq!(wire.configs(Some(true)), discovery);
+        let button = discovery
+            .iter()
+            .find(|message| message.topic == button_topic)
+            .unwrap();
+        let config: Value = serde_json::from_str(&button.payload).unwrap();
+        assert_eq!(config["availability_mode"], "all");
+        assert_eq!(
+            config["availability"][0]["topic"],
+            "ruru/wall/agent/availability"
+        );
+        assert_eq!(
+            config["availability"][1]["topic"],
+            "ruru/wall/agent/reboot/availability"
+        );
+        assert_eq!(config["command_topic"], "ruru/wall/agent/command/reboot");
+        assert_eq!(config["retain"], false);
+        assert!(
+            wire.configs(None)
+                .iter()
+                .all(|message| message.topic != button_topic)
+        );
+        let disabled = wire.configs(Some(false));
+        assert!(disabled.iter().any(|message| message.topic == button_topic
+            && message.retain
+            && message.payload.is_empty()));
     }
 }

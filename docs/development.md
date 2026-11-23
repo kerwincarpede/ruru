@@ -117,6 +117,9 @@ Checks measures coverage while it runs the tests. `npm run test:coverage` fails 
 
 On Windows, Tauri embeds the Common Controls 6 manifest only in the app, so the test executables would fail to start. `build.rs` turns that off and has the linker embed `windows-app-manifest.xml`, the same manifest, in every binary instead.
 
+
+The `.deb` also packages the standard reboot approval helper and its polkit action. Installation grants no reboot permission. To exercise approval and reboot, use a disposable Ubuntu GNOME Wayland host, a test broker and synthetic Frigate video. Confirm the boot ID changes and verify the agent reconnects and one managed Ruru process starts at graphical sign-in. Check the desktop policy and an inhibitor before sending a Home Assistant reboot request.
+
 ### Packaging
 
 Ordinary pull requests link the native app with `tauri build --no-bundle` and produce no installers. [`.github/scripts/packaging_route.sh`](../.github/scripts/packaging_route.sh) switches a pull request to full packaging when it changes a packaging input:
