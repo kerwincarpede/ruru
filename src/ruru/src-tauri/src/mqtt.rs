@@ -420,6 +420,35 @@ impl Session {
     }
 }
 
+/// Display commands waiting to run, one at a time in the order they came.
+/// Only the latest wanted state is kept: a command that has not started yet
+/// is overtaken by a newer one, so the screen and the switch end up as the
+/// last command asked.
+#[derive(Debug, Default)]
+struct DisplayQueue {
+    /// The latest command not started yet.
+    wanted: Option<(Method, bool)>,
+    /// A worker is running commands now.
+    running: bool,
+}
+
+impl DisplayQueue {
+    /// Queues a command. True when no worker is running, so the caller
+    /// starts one.
+    fn push(&mut self, method: Method, on: bool) -> bool {
+        self.wanted = Some((method, on));
+        !std::mem::replace(&mut self.running, true)
+    }
+
+    /// The next command for the worker, or `None` once there is none, which
+    /// stops the worker.
+    fn next(&mut self) -> Option<(Method, bool)> {
+        let next = self.wanted.take();
+        self.running = next.is_some();
+        next
+    }
+}
+
 /// The running connection.
 struct Link {
     client: AsyncClient,
@@ -445,6 +474,8 @@ impl Link {
 #[derive(Default)]
 struct Inner {
     wall: Wall,
+    /// Display commands from Home Assistant, kept across connections.
+    display: DisplayQueue,
     /// Bumped on every restart, so a connection that was replaced stops
     /// touching the state.
     generation: u64,
@@ -497,6 +528,17 @@ impl Inner {
                 self.last_check = None;
                 true
             }
+        }
+    }
+
+    /// Records that the display was turned on, or off, and tells Home
+    /// Assistant on the current connection.
+    fn display_done(&mut self, on: bool) {
+        self.wall.display_off = !on;
+        let generation = self.generation;
+        if let Some((link, wall)) = self.link(generation) {
+            let messages = link.session.display(wall);
+            link.send(messages);
         }
     }
 
@@ -792,10 +834,11 @@ fn take_command(app: &AppHandle, generation: u64, name: &str, payload: &[u8]) {
         }
         Ok(Command::Display { on }) => match display {
             Some(method) => {
-                let app = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    set_display(app, generation, method, on).await
-                });
+                let start = app.state::<MqttState>().lock().display.push(method, on);
+                if start {
+                    let app = app.clone();
+                    tauri::async_runtime::spawn(async move { run_display_commands(app).await });
+                }
             }
             None => eprintln!("Ruru: the display can't be turned off or on here"),
         },
@@ -803,30 +846,26 @@ fn take_command(app: &AppHandle, generation: u64, name: &str, payload: &[u8]) {
     }
 }
 
-/// Turns the screen on, or off, and tells Home Assistant once it is done. A
-/// failure leaves the switch as it was.
-async fn set_display(app: AppHandle, generation: u64, method: Method, on: bool) {
-    let done = tauri::async_runtime::spawn_blocking(move || display::set(method, on)).await;
-    match done {
-        Ok(Ok(())) => {}
-        Ok(Err(err)) => {
-            eprintln!(
+/// Runs the queued display commands one after another until none is left,
+/// so two commands never run at once and finish out of order.
+async fn run_display_commands(app: AppHandle) {
+    loop {
+        let next = app.state::<MqttState>().lock().display.next();
+        let Some((method, on)) = next else {
+            return;
+        };
+        let done = tauri::async_runtime::spawn_blocking(move || display::set(method, on)).await;
+        let state = app.state::<MqttState>();
+        let mut inner = state.lock();
+        match done {
+            Ok(Ok(())) => inner.display_done(on),
+            // A failure leaves the switch as it was.
+            Ok(Err(err)) => eprintln!(
                 "Ruru: the display could not be turned {}: {err}",
                 discovery::on_off(on).to_ascii_lowercase()
-            );
-            return;
+            ),
+            Err(err) => eprintln!("Ruru: the display could not be turned off or on: {err}"),
         }
-        Err(err) => {
-            eprintln!("Ruru: the display could not be turned off or on: {err}");
-            return;
-        }
-    }
-    let state = app.state::<MqttState>();
-    let mut inner = state.lock();
-    inner.wall.display_off = !on;
-    if let Some((link, wall)) = inner.link(generation) {
-        let messages = link.session.display(wall);
-        link.send(messages);
     }
 }
 
@@ -1225,6 +1264,26 @@ mod tests {
         // removed rather than offered, and has no state.
         assert!(messages[8].payload.is_empty());
         assert!(!topics(&messages).contains(&"ruru/0123456789ab/display"));
+    }
+
+    #[test]
+    fn display_commands_run_one_at_a_time_and_the_latest_wins() {
+        let mut queue = DisplayQueue::default();
+        assert!(queue.push(Method::X11, false), "the first starts a worker");
+        assert_eq!(queue.next(), Some((Method::X11, false)));
+        // OFF is running; ON and OFF and ON come in before it finishes.
+        assert!(!queue.push(Method::X11, true), "one worker at a time");
+        assert!(!queue.push(Method::X11, false));
+        assert!(!queue.push(Method::X11, true));
+        let mut inner = Inner::default();
+        inner.display_done(false);
+        assert!(inner.wall.display_off);
+        // Only the last command runs next, so its state is what stays.
+        assert_eq!(queue.next(), Some((Method::X11, true)));
+        inner.display_done(true);
+        assert!(!inner.wall.display_off);
+        assert_eq!(queue.next(), None);
+        assert!(queue.push(Method::X11, false), "an idle queue starts again");
     }
 
     #[test]
