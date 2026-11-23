@@ -239,9 +239,13 @@ pub fn display_config(topics: &Topics, device: &Device) -> Message {
 }
 
 /// Removes the Display switch from Home Assistant, where Ruru can't turn
-/// the screen off, in case an earlier run offered it.
-pub fn display_removal(topics: &Topics) -> Message {
-    Message::retained(topics.discovery("switch", DISPLAY), "")
+/// the screen off, in case an earlier run offered it: its config and its
+/// retained state.
+pub fn display_removal(topics: &Topics) -> Vec<Message> {
+    vec![
+        Message::retained(topics.discovery("switch", DISPLAY), ""),
+        Message::retained(topics.display(), ""),
+    ]
 }
 
 /// The retained message the Display switch reads.
@@ -531,8 +535,11 @@ mod tests {
             fixture(include_str!("fixtures/discovery-display.json"))
         );
         let removal = display_removal(&topics());
-        assert_eq!(removal.topic, config.topic);
-        assert!(removal.retain && removal.payload.is_empty());
+        assert_eq!(
+            removal.iter().map(|m| m.topic.as_str()).collect::<Vec<_>>(),
+            [config.topic.as_str(), "ruru/0123456789ab/display"]
+        );
+        assert!(removal.iter().all(|m| m.retain && m.payload.is_empty()));
         let off = display_state(&topics(), false);
         assert_eq!(off.topic, "ruru/0123456789ab/display");
         assert!(off.retain);

@@ -271,10 +271,10 @@ impl Session {
         }];
         messages.extend(discovery::device_configs(&self.topics, &self.device));
         messages.extend(discovery::control_configs(&self.topics, &self.device));
-        messages.push(match self.display {
-            Some(_) => discovery::display_config(&self.topics, &self.device),
-            None => discovery::display_removal(&self.topics),
-        });
+        match self.display {
+            Some(_) => messages.push(discovery::display_config(&self.topics, &self.device)),
+            None => messages.extend(discovery::display_removal(&self.topics)),
+        }
         messages.extend(self.cameras_changed(wall, true));
         messages.push(discovery::state(&self.topics, &self.device, &wall.state));
         messages.push(discovery::update_state(
@@ -1245,6 +1245,7 @@ mod tests {
                 "homeassistant/switch/0123456789ab/full_screen/config",
                 "homeassistant/update/0123456789ab/update/config",
                 "homeassistant/switch/0123456789ab/display/config",
+                "ruru/0123456789ab/display",
                 "homeassistant/select/0123456789ab/maximise/config",
                 "homeassistant/binary_sensor/0123456789ab/front_door_problem/config",
                 "ruru/0123456789ab/problem/front_door",
@@ -1257,13 +1258,14 @@ mod tests {
             ]
         );
         assert_eq!(messages[0].payload, "online");
-        assert_eq!(messages[11].payload, "OFF");
-        assert_eq!(messages[14].payload, "ON");
+        assert_eq!(messages[12].payload, "OFF");
+        assert_eq!(messages[15].payload, "ON");
         assert!(messages.iter().all(|message| message.retain));
         // Without a way to turn the screen off, the Display switch is
-        // removed rather than offered, and has no state.
+        // removed rather than offered, and its state an earlier run left
+        // is cleared too.
         assert!(messages[8].payload.is_empty());
-        assert!(!topics(&messages).contains(&"ruru/0123456789ab/display"));
+        assert!(messages[9].payload.is_empty());
     }
 
     #[test]
