@@ -12,6 +12,7 @@ This covers UI text, `docs/`, the README and PR titles.
 ## Keep the docs true
 
 - A change users can see updates the README in the same PR if it changes what the README says.
+- It also updates the matching page on the [docs site](https://kerwincarpede.github.io/ruru/), in `src/ruru-docs/src/content/docs/`.
 - A change to how something is built, run or released updates `docs/development.md`.
 - Describe what Ruru does today. Check every claim against the code, and leave out plans and history.
 

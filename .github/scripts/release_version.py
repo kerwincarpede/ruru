@@ -41,9 +41,13 @@ def bump(version, kind, message=""):
     }[kind]
 
 
+# Kept in step with release.yml's paths-ignore.
+DOCS_PREFIXES = ("docs/", "src/ruru-docs/", ".github/workflows/docs.yml")
+
+
 def code_change(paths):
     return any(
-        not (p.startswith("docs/") or p.endswith(".md"))
+        not (p.startswith(DOCS_PREFIXES) or p.endswith(".md"))
         for p in paths
     )
 

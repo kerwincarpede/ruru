@@ -9,6 +9,8 @@ Point it at your Frigate server, and every camera is live on one screen, laid ou
 
 <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 
+**[Read the Ruru guide →](https://kerwincarpede.github.io/ruru/)**
+
 </div>
 
 ---
@@ -112,6 +114,17 @@ Nothing leaves your computer except requests to the Frigate server you point it 
 ## Inspiration
 
 Ruru is inspired by [CCTV Viewer](https://github.com/iEvgeny/cctv-viewer), a simple Qt app for watching many RTSP streams at once. Ruru takes the same idea and builds it around Frigate, so your cameras are found for you.
+
+## Documentation
+
+| | |
+| --- | --- |
+| 📘 [Get started](https://kerwincarpede.github.io/ruru/get-started/) | Install Ruru and connect it to Frigate |
+| 🧱 [The wall](https://kerwincarpede.github.io/ruru/wall/) | Watch, arrange and choose streams |
+| 🍓 [Raspberry Pi 5](https://kerwincarpede.github.io/ruru/guides/raspberry-pi/) | Run the wall on the Pi that runs Frigate |
+| ⌨️ [Keyboard shortcuts](https://kerwincarpede.github.io/ruru/reference/keyboard-shortcuts/) | Every key, on every platform |
+| 🛟 [Troubleshooting](https://kerwincarpede.github.io/ruru/reference/troubleshooting/) | Fixes for the most common problems |
+| 🛠️ [Developing Ruru](docs/development.md) | Build from source, run the checks, and contribute |
 
 ## Contributing
 

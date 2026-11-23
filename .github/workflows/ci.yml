@@ -8,6 +8,9 @@ on:
     paths:
       - '**'
       - '!docs/**'
+      # The docs site is built by docs.yml.
+      - '!src/ruru-docs/**'
+      - '!.github/workflows/docs.yml'
       - '!**/*.md'
       # Native resources include licenses and other shipped Markdown.
       - 'src/ruru/src-tauri/**/*.md'
