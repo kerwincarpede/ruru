@@ -220,9 +220,6 @@ function App() {
         case "streams":
           setStreams(command.on);
           break;
-        case "reconnect":
-          setReconnects((now) => ({ ...now, [command.camera]: (now[command.camera] ?? 0) + 1 }));
-          break;
       }
     }).then((unlisten) => {
       if (current) stop = unlisten;

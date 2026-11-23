@@ -22,11 +22,17 @@ pub struct AppInfo {
 /// the version that is actually running. Not `pub`: a public command at the
 /// crate root clashes with the macros `#[tauri::command]` exports (E0255).
 #[tauri::command]
-fn app_info() -> AppInfo {
+fn app_info(app: tauri::AppHandle) -> AppInfo {
     AppInfo {
         name: "Ruru".into(),
-        version: env!("CARGO_PKG_VERSION").into(),
+        version: app_version(app.package_info()),
     }
+}
+
+/// The version this build is: `tauri.conf.json`'s, which a release stamps
+/// and the updater compares. `Cargo.toml`'s stays at its placeholder.
+pub fn app_version(package: &tauri::PackageInfo) -> String {
+    package.version.to_string()
 }
 
 /// Starts the app. Kept thin: each feature lives in its own module and only
@@ -78,19 +84,31 @@ pub fn run() {
 mod tests {
     use super::*;
 
+    fn package(version: &str) -> tauri::PackageInfo {
+        tauri::PackageInfo {
+            name: "Ruru".into(),
+            version: version.parse().unwrap(),
+            authors: "",
+            description: "",
+            crate_name: "ruru",
+        }
+    }
+
     #[test]
-    fn app_info_names_ruru_and_its_crate_version() {
-        let info = app_info();
-        assert_eq!(info.name, "Ruru");
-        assert_eq!(info.version, env!("CARGO_PKG_VERSION"));
+    fn the_version_is_the_one_a_release_stamps_not_the_crate_s() {
+        assert_eq!(app_version(&package("0.7.3")), "0.7.3");
+        assert_eq!(app_version(&package("1.0.0-rc.1")), "1.0.0-rc.1");
     }
 
     #[test]
     fn app_info_serialises_as_the_page_expects() {
-        let json = serde_json::to_value(app_info()).unwrap();
+        let info = AppInfo {
+            name: "Ruru".into(),
+            version: app_version(&package("0.7.3")),
+        };
         assert_eq!(
-            json,
-            serde_json::json!({ "name": "Ruru", "version": env!("CARGO_PKG_VERSION") })
+            serde_json::to_value(info).unwrap(),
+            serde_json::json!({ "name": "Ruru", "version": "0.7.3" })
         );
     }
 }

@@ -55,7 +55,8 @@ const MAX_PREFIX: usize = 100;
 const MAX_LOGIN: usize = 1024;
 /// The problem sensors' discovery component and object id suffix.
 const PROBLEM: (&str, &str) = ("binary_sensor", discovery::PROBLEM_SUFFIX);
-/// The Reconnect buttons' discovery component and object id suffix.
+/// The discovery component and object id suffix of the Reconnect buttons
+/// earlier versions offered, removed whenever the broker still holds one.
 const RECONNECT: (&str, &str) = ("button", discovery::RECONNECT_SUFFIX);
 /// How often the update entity checks for a newer version while connected.
 const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
@@ -230,12 +231,11 @@ struct Session {
     /// Connected to the broker now. Nothing is queued while it is not:
     /// everything is published again on connecting.
     connected: bool,
-    /// The cameras whose problem sensor and Reconnect button have been
-    /// announced.
+    /// The cameras whose problem sensor has been announced.
     announced: BTreeSet<String>,
-    /// The problem sensors and Reconnect buttons the broker holds a config
-    /// for, from this or an earlier run, as (component, object id).
-    on_broker: BTreeSet<(String, String)>,
+    /// The problem sensors the broker holds a config for, from this or an
+    /// earlier run, by object id.
+    on_broker: BTreeSet<String>,
     /// The cameras the Maximise select offers, in order, once announced.
     options: Option<Vec<String>>,
     /// How this computer turns its screen off, if it can: only then is the
@@ -258,7 +258,7 @@ impl Session {
 
     /// Everything Home Assistant needs on connecting, or when it restarts:
     /// online, the device's sensors and controls, each camera's problem
-    /// sensor and Reconnect button, removals for cameras that are gone, the
+    /// sensor, removals for cameras that are gone, the
     /// Display switch or its removal, and the current state.
     fn announce(&mut self, wall: &Wall) -> Vec<Message> {
         if !self.connected {
@@ -286,9 +286,9 @@ impl Session {
         messages
     }
 
-    /// The Maximise select when its cameras changed, the problem sensors and
-    /// Reconnect buttons for cameras that are new, with their state, and
-    /// removals for cameras that are gone. With `all`, every camera counts
+    /// The Maximise select when its cameras changed, the problem sensors for
+    /// cameras that are new, with their state, and removals for cameras that
+    /// are gone. With `all`, every camera counts
     /// as new.
     fn cameras_changed(&mut self, wall: &Wall, all: bool) -> Vec<Message> {
         if !self.connected {
@@ -306,11 +306,7 @@ impl Session {
         }
         for camera in self.announced.difference(&current) {
             messages.extend(discovery::camera_removal(&self.topics, camera));
-            messages.push(discovery::reconnect_removal(&self.topics, camera));
-            self.on_broker
-                .remove(&(PROBLEM.0.to_string(), discovery::problem_object(camera)));
-            self.on_broker
-                .remove(&(RECONNECT.0.to_string(), discovery::reconnect_object(camera)));
+            self.on_broker.remove(&discovery::problem_object(camera));
         }
         for camera in &wall.cameras {
             if all || !self.announced.contains(camera) {
@@ -320,11 +316,6 @@ impl Session {
                     camera,
                     wall.problem(camera),
                 ));
-                messages.push(discovery::reconnect_config(
-                    &self.topics,
-                    &self.device,
-                    camera,
-                ));
             }
         }
         self.announced = current;
@@ -332,56 +323,52 @@ impl Session {
     }
 
     /// Notes a discovery config the broker sent, and removes it if it is a
-    /// problem sensor or Reconnect button for a camera no longer on the wall.
+    /// problem sensor for a camera no longer on the wall, or a Reconnect
+    /// button an earlier version offered.
     fn config_seen(&mut self, topic: &str, payload: &[u8], wall: &Wall) -> Vec<Message> {
-        let Some((component, object)) =
-            [PROBLEM, RECONNECT]
-                .into_iter()
-                .find_map(|(component, suffix)| {
-                    self.topics
-                        .config_object(topic, component)
-                        .filter(|object| object.ends_with(suffix))
-                        .map(|object| (component, object))
-                })
+        let (component, suffix) = RECONNECT;
+        if let Some(object) = self
+            .topics
+            .config_object(topic, component)
+            .filter(|object| object.ends_with(suffix))
+        {
+            if !self.connected || payload.is_empty() {
+                return Vec::new();
+            }
+            return vec![discovery::retired_reconnect(&self.topics, object)];
+        }
+        let (component, suffix) = PROBLEM;
+        let Some(object) = self
+            .topics
+            .config_object(topic, component)
+            .filter(|object| object.ends_with(suffix))
         else {
             return Vec::new();
         };
-        let key = (component.to_string(), object.to_string());
         if payload.is_empty() {
-            self.on_broker.remove(&key);
+            self.on_broker.remove(object);
         } else {
-            self.on_broker.insert(key);
+            self.on_broker.insert(object.to_string());
         }
         self.prune(wall)
     }
 
-    /// Removes problem sensors and Reconnect buttons the broker still holds
-    /// for cameras that are not on the wall, such as one hidden while Ruru
-    /// was disconnected.
+    /// Removes problem sensors the broker still holds for cameras that are
+    /// not on the wall, such as one hidden while Ruru was disconnected.
     fn prune(&mut self, wall: &Wall) -> Vec<Message> {
         if !self.connected || !wall.reported {
             return Vec::new();
         }
-        let wanted: BTreeSet<(String, String)> = wall
+        let wanted: BTreeSet<String> = wall
             .cameras
             .iter()
-            .flat_map(|camera| {
-                [
-                    (PROBLEM.0.to_string(), discovery::problem_object(camera)),
-                    (RECONNECT.0.to_string(), discovery::reconnect_object(camera)),
-                ]
-            })
+            .map(|camera| discovery::problem_object(camera))
             .collect();
-        let stale: Vec<(String, String)> = self.on_broker.difference(&wanted).cloned().collect();
+        let stale: Vec<String> = self.on_broker.difference(&wanted).cloned().collect();
         let mut messages = Vec::new();
-        for key in stale {
-            let (component, object) = &key;
-            if component == PROBLEM.0 {
-                messages.extend(discovery::stale_problem(&self.topics, object));
-            } else {
-                messages.push(discovery::stale_reconnect(&self.topics, object));
-            }
-            self.on_broker.remove(&key);
+        for object in stale {
+            messages.extend(discovery::stale_problem(&self.topics, &object));
+            self.on_broker.remove(&object);
         }
         messages
     }
@@ -699,7 +686,11 @@ async fn run(
         if inner.generation != generation {
             return;
         }
-        let session = Session::new(topics, Device::this_install(), display);
+        let session = Session::new(
+            topics,
+            Device::this_install(crate::app_version(app.package_info())),
+            display,
+        );
         inner.link = Some(Link {
             client: client.clone(),
             session,
@@ -724,8 +715,8 @@ async fn run(
                 if let Err(err) = client.try_subscribe(home_assistant.clone(), QoS::AtLeastOnce) {
                     eprintln!("Ruru: could not follow Home Assistant's status: {err}");
                 }
-                // The retained configs show sensors and buttons left from
-                // earlier runs.
+                // The retained configs show problem sensors left from earlier
+                // runs, and Reconnect buttons from earlier versions.
                 for configs in [&problem_configs, &reconnect_configs] {
                     if let Err(err) = client.try_subscribe(configs.clone(), QoS::AtLeastOnce) {
                         eprintln!("Ruru: could not read the device's discovery configs: {err}");
@@ -1253,17 +1244,15 @@ mod tests {
                 "homeassistant/select/0123456789ab/maximise/config",
                 "homeassistant/binary_sensor/0123456789ab/front_door_problem/config",
                 "ruru/0123456789ab/problem/front_door",
-                "homeassistant/button/0123456789ab/front_door_reconnect/config",
                 "homeassistant/binary_sensor/0123456789ab/garage_problem/config",
                 "ruru/0123456789ab/problem/garage",
-                "homeassistant/button/0123456789ab/garage_reconnect/config",
                 "ruru/0123456789ab/state",
                 "ruru/0123456789ab/update",
             ]
         );
         assert_eq!(messages[0].payload, "online");
         assert_eq!(messages[13].payload, "OFF");
-        assert_eq!(messages[16].payload, "ON");
+        assert_eq!(messages[15].payload, "ON");
         assert!(messages.iter().all(|message| message.retain));
         // Without a way to turn the screen off, the Display switch is
         // removed rather than offered, and its state an earlier run left
@@ -1339,15 +1328,13 @@ mod tests {
                 "homeassistant/select/0123456789ab/maximise/config",
                 "homeassistant/binary_sensor/0123456789ab/front_door_problem/config",
                 "ruru/0123456789ab/problem/front_door",
-                "homeassistant/button/0123456789ab/front_door_reconnect/config",
                 "homeassistant/binary_sensor/0123456789ab/yard_problem/config",
                 "ruru/0123456789ab/problem/yard",
-                "homeassistant/button/0123456789ab/yard_reconnect/config",
             ]
         );
         assert!(messages[0].payload.contains(r#"["none","garage","yard"]"#));
-        // The hidden camera loses its config, its retained state and its button.
-        assert!(messages[1..4].iter().all(|m| m.payload.is_empty()));
+        // The hidden camera loses its config and its retained state.
+        assert!(messages[1..3].iter().all(|m| m.payload.is_empty()));
         // A camera Home Assistant has not been told about gets no problem state.
         assert!(session.problem("front_door", true).is_empty());
         assert_eq!(session.problem("yard", true)[0].payload, "ON");
@@ -1384,23 +1371,38 @@ mod tests {
     }
 
     #[test]
-    fn reconnect_buttons_left_from_an_earlier_run_are_removed_too() {
+    fn reconnect_buttons_from_earlier_versions_are_removed() {
         let mut session = session();
         let shown = wall(&["front_door"]);
-        session.announce(&shown);
-        let stale = "homeassistant/button/0123456789ab/garage_reconnect/config";
-        let messages = session.config_seen(stale, b"{}", &shown);
-        assert_eq!(topics(&messages), [stale]);
-        assert!(messages[0].retain && messages[0].payload.is_empty());
-        // The camera's own button and the Restore button stay.
-        let front = "homeassistant/button/0123456789ab/front_door_reconnect/config";
-        assert!(session.config_seen(front, b"{}", &shown).is_empty());
+        let messages = session.announce(&shown);
+        assert!(
+            !topics(&messages)
+                .iter()
+                .any(|t| t.ends_with("_reconnect/config"))
+        );
+        // Every one is removed, even for a camera on the wall, and before
+        // the page has reported its cameras.
+        for config in [
+            "homeassistant/button/0123456789ab/front_door_reconnect/config",
+            "homeassistant/button/0123456789ab/garage_reconnect/config",
+        ] {
+            for wall in [&shown, &Wall::default()] {
+                let messages = session.config_seen(config, b"{}", wall);
+                assert_eq!(topics(&messages), [config]);
+                assert!(messages[0].retain && messages[0].payload.is_empty());
+            }
+            // Its echoed removal needs nothing more.
+            assert!(session.config_seen(config, b"", &shown).is_empty());
+        }
+        // The Restore button and other devices' buttons stay.
         let restore = "homeassistant/button/0123456789ab/restore/config";
         assert!(session.config_seen(restore, b"{}", &shown).is_empty());
-        // Hiding the camera removes its button without pruning it twice.
-        let messages = session.cameras_changed(&wall(&[]), false);
-        assert!(topics(&messages).contains(&front));
-        assert!(session.prune(&wall(&[])).is_empty());
+        let other = "homeassistant/button/ffffffffffff/garage_reconnect/config";
+        assert!(session.config_seen(other, b"{}", &shown).is_empty());
+        // Nothing is sent while disconnected; connecting again reads it again.
+        session.connected = false;
+        let front = "homeassistant/button/0123456789ab/front_door_reconnect/config";
+        assert!(session.config_seen(front, b"{}", &shown).is_empty());
     }
 
     #[test]
