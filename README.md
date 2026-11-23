@@ -107,9 +107,10 @@ Ruru is a [Tauri](https://tauri.app/) desktop app: a Rust backend and a React + 
 
 - **Discovery:** the Rust backend reads your cameras and their streams from Frigate's HTTP API (`/api/version`, `/api/config` and `/api/go2rtc/streams`) when Ruru starts and whenever its window comes back into focus.
 - **Playback:** each tile opens a WebRTC connection to the camera's stream on Frigate's go2rtc restreamer, the same path Frigate's own live view uses, and falls back to MSE. It shows the camera's latest snapshot until the video starts, reconnects on its own, and stops while the window is hidden. Video goes from Frigate to the tile without passing through Ruru's backend.
-- **Layout and settings:** the Frigate address, full screen, the wall options, the update channel, and each server's tile positions and sizes are saved in `settings.json` in Ruru's config folder on your computer.
+- **Home Assistant:** when you turn it on in **Settings → Home Assistant**, Ruru connects to the MQTT broker that Home Assistant uses and shows up there as a device, with its version, the maximised camera, whether it is full screen and shown, and a problem sensor for each camera on the wall.
+- **Layout and settings:** the Frigate address, full screen, the wall options, the update channel, the Home Assistant connection, and each server's tile positions and sizes are saved in `settings.json` in Ruru's config folder on your computer. The broker password goes in your computer's keychain, or in `settings.json` when there is no keychain Ruru can use.
 
-Nothing leaves your computer except requests to the Frigate server you point it at, and a check of Ruru's GitHub releases for updates. No analytics, no telemetry, no cloud account.
+Nothing leaves your computer except requests to the Frigate server you point it at, a check of Ruru's GitHub releases for updates, and, only if you turn it on, the connection to your MQTT broker. No analytics, no telemetry, no cloud account.
 
 ## Inspiration
 
@@ -122,6 +123,7 @@ Ruru is inspired by [CCTV Viewer](https://github.com/iEvgeny/cctv-viewer), a sim
 | 📘 [Get started](https://kerwincarpede.github.io/ruru/get-started/) | Install Ruru and connect it to Frigate |
 | 🧱 [The wall](https://kerwincarpede.github.io/ruru/wall/) | Watch, arrange and choose streams |
 | 🍓 [Raspberry Pi 5](https://kerwincarpede.github.io/ruru/guides/raspberry-pi/) | Run the wall on the Pi that runs Frigate |
+| 🏠 [Home Assistant](https://kerwincarpede.github.io/ruru/guides/home-assistant/) | Show the wall in Home Assistant as a device |
 | ⌨️ [Keyboard shortcuts](https://kerwincarpede.github.io/ruru/reference/keyboard-shortcuts/) | Every key, on every platform |
 | 🛟 [Troubleshooting](https://kerwincarpede.github.io/ruru/reference/troubleshooting/) | Fixes for the most common problems |
 | 🛠️ [Developing Ruru](docs/development.md) | Build from source, run the checks, and contribute |

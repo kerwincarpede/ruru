@@ -4,7 +4,7 @@ import { emit } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { Camera } from "./app/frigate";
-import { DEFAULT_WALL_OPTIONS, type SavedLayout, type Settings } from "./app/api";
+import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, type SavedLayout, type Settings } from "./app/api";
 import { findUpdate } from "./app/updates";
 import { mockCommands, type CommandHandlers } from "./test/mockCommands";
 
@@ -14,7 +14,7 @@ vi.mock("./app/updates", async (importOriginal) => ({ ...(await importOriginal<t
 const findUpdateMock = vi.mocked(findUpdate);
 
 const URL_SAVED = "http://frigate:5000";
-const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", layouts: {} };
+const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
 const connected: Settings = { ...empty, frigateUrl: URL_SAVED };
 const camera = (name: string): Camera => ({ name, enabled: true, mainStream: name, subStream: `${name}_sub` });
 const cameras = [camera("maingate"), camera("garage")];
@@ -34,6 +34,8 @@ function wall(handlers: CommandHandlers = {}) {
     save_layout: () => null,
     save_wall_options: () => null,
     set_full_screen: () => null,
+    report_wall_state: () => null,
+    report_tile_problem: () => null,
     ...handlers,
   });
 }
@@ -496,6 +498,45 @@ describe("App streams", () => {
     // Restoring did not reconnect the other tiles.
     expect(FakeSocket.all.filter((socket) => socket.url.includes("maingate_sub"))).toEqual(maingate);
     expect(maingate).toHaveLength(1);
+  });
+
+  it("tells Home Assistant the cameras on the wall, the maximised one, full screen and whether the window is shown", async () => {
+    const calls = wall({ get_settings: () => ({ ...connected, layouts: { [URL_SAVED]: { tiles: [], hidden: ["garage"] } } }), frigate_cameras: () => [...cameras, camera("yard")] });
+    render(<App />);
+    const reports = () => calls.filter((call) => call.cmd === "report_wall_state").map((call) => (call.payload as { report: unknown }).report);
+    const last = () => reports()[reports().length - 1];
+    await waitFor(() => expect(reports()).toEqual([{ maximised: null, fullScreen: false, windowShown: true, cameras: ["maingate", "yard"] }]));
+    fireEvent.doubleClick(screen.getByRole("figure", { name: "Yard" }));
+    await waitFor(() => expect(last()).toEqual({ maximised: "yard", fullScreen: false, windowShown: true, cameras: ["maingate", "yard"] }));
+    fireEvent.keyDown(window, { key: "F11" });
+    await waitFor(() => expect(last()).toMatchObject({ fullScreen: true }));
+    setVisibility("hidden");
+    await waitFor(() => expect(last()).toMatchObject({ windowShown: false }));
+    setVisibility("visible");
+  });
+
+  it("tells Home Assistant when a tile can't play its camera", async () => {
+    const porch: Camera = { name: "porch", enabled: true, mainStream: "porch", subStream: "porch" };
+    const calls = wall({ frigate_cameras: () => [porch] });
+    render(<App />);
+    await screen.findByRole("figure", { name: "Porch" });
+    const video = () => {
+      const element = document.querySelector<HTMLVideoElement>('video[data-stream="porch"]');
+      if (!element) throw new Error("No video plays porch");
+      Object.defineProperty(element, "error", { configurable: true, value: { code: 3 } });
+      return element;
+    };
+    act(() => {
+      video().dispatchEvent(new Event("error"));
+    });
+    // A decode failure after the first retry gives up on the stream.
+    await waitFor(() => {
+      act(() => {
+        video().dispatchEvent(new Event("error"));
+      });
+      expect(screen.getByRole("figure", { name: "Porch" })).toHaveTextContent("Can't play this stream");
+    }, { timeout: 3000 });
+    await waitFor(() => expect(calls).toContainEqual({ cmd: "report_tile_problem", payload: { camera: "porch", problem: true } }));
   });
 
   it("reconnects a tile from its right-click menu", async () => {

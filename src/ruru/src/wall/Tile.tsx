@@ -23,7 +23,12 @@ interface TileProps {
   onHide?: () => void;
   /** Told what Automatic plays on this tile whenever that changes. */
   onAutomatic?: (stream: StreamKind) => void;
+  /** Told, while the window is shown, whether the tile has a problem: it can't play, or has been reconnecting for {@link PROBLEM_AFTER_MS}. */
+  onProblem?: (problem: boolean) => void;
 }
+
+/** How long a tile reconnects, or stays frozen, before it counts as a problem. */
+export const PROBLEM_AFTER_MS = 30_000;
 
 /** A player state with a picture on screen. */
 const showing = (state: PlayerState) => state === "playing" || state === "stalled";
@@ -106,6 +111,24 @@ function useClock(active: boolean) {
   return [now, tick] as const;
 }
 
+/**
+ * Whether a tile has a problem: at once when it has `failed`, and once it
+ * has been in `trouble` (reconnecting or frozen) for {@link PROBLEM_AFTER_MS}.
+ * Each spell of trouble starts the wait again.
+ */
+function useProblem(failed: boolean, trouble: boolean): boolean {
+  const [spell, setSpell] = useState({ trouble: false, count: 0 });
+  if (spell.trouble !== trouble) setSpell({ trouble, count: spell.count + (trouble ? 1 : 0) });
+  const [late, setLate] = useState(0);
+  useEffect(() => {
+    if (!trouble) return;
+    const count = spell.count;
+    const timer = setTimeout(() => setLate(count), PROBLEM_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [trouble, spell.count]);
+  return failed || (trouble && spell.count > 0 && late === spell.count);
+}
+
 type Slots = { front: 0 | 1; streams: [string | null, string | null] };
 
 /**
@@ -114,7 +137,7 @@ type Slots = { front: 0 | 1; streams: [string | null, string | null] };
  * frame shows, so the picture never stops moving; a stream the webview
  * cannot decode gives way to the camera's other stream.
  */
-export default function Tile({ base, camera, choice, live, maximised = false, reconnect = 0, refresh = 0, editing = false, streamInfo = false, onOpen, onHide, onAutomatic }: TileProps) {
+export default function Tile({ base, camera, choice, live, maximised = false, reconnect = 0, refresh = 0, editing = false, streamInfo = false, onOpen, onHide, onAutomatic, onProblem }: TileProps) {
   const figure = useRef<HTMLElement>(null);
   const videoA = useRef<HTMLVideoElement>(null);
   const videoB = useRef<HTMLVideoElement>(null);
@@ -199,6 +222,21 @@ export default function Tile({ base, camera, choice, live, maximised = false, re
   if (failed) status = "Can't play this stream";
   else if (stale) status = `${frontState === "stalled" ? "Frozen" : "Reconnecting"} · ${age} s old`;
   else if (live && frontState === "retrying") status = "Reconnecting…";
+
+  // Trouble lasts from a freeze or a dropped stream until a frame plays again,
+  // through the reconnect attempts in between.
+  const [troubled, setTroubled] = useState(false);
+  const troubleNow = live && frontState !== "playing" && (troubled || frontState === "stalled" || frontState === "retrying");
+  if (troubled !== troubleNow) setTroubled(troubleNow);
+  const problem = useProblem(failed, troubleNow && !failed);
+  const reportProblem = useRef(onProblem);
+  useEffect(() => {
+    reportProblem.current = onProblem;
+  });
+  // While the window is hidden nothing plays, so the last report stands.
+  useEffect(() => {
+    if (live) reportProblem.current?.(problem);
+  }, [live, problem]);
 
   const onSize = (slot: 0 | 1) => () => {
     const video = videos[slot].current;

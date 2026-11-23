@@ -3,6 +3,7 @@ use tauri::Manager;
 
 mod frigate;
 mod menu;
+mod mqtt;
 mod settings;
 mod update;
 mod webview;
@@ -36,6 +37,7 @@ pub fn run() {
         .manage(update::PendingUpdate::default())
         .setup(|app| {
             let full_screen = settings::manage(app);
+            mqtt::manage(app);
             menu::install(app)?;
             if let Some(window) = app.get_webview_window("main") {
                 webview::enable_webrtc(&window)?;
@@ -59,6 +61,10 @@ pub fn run() {
             settings::set_update_channel,
             frigate::test_frigate,
             frigate::frigate_cameras,
+            mqtt::test_mqtt,
+            mqtt::save_mqtt,
+            mqtt::report_wall_state,
+            mqtt::report_tile_problem,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Ruru");

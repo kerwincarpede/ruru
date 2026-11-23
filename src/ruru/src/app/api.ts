@@ -42,12 +42,43 @@ export const DEFAULT_WALL_OPTIONS: WallOptions = { lockRatio: true, fitToWindow:
 /** Mirrors `UpdateChannel` in src-tauri/src/settings.rs: which releases Ruru updates to. */
 export type UpdateChannel = "stable" | "edge";
 
+/** Mirrors `PasswordStorage` in src-tauri/src/settings.rs: where the broker password is kept. */
+export type PasswordStorage = "none" | "keychain" | "file";
+
+/** Mirrors `MqttSettings` in src-tauri/src/settings.rs: the Home Assistant connection. The password never reaches the page. */
+export interface MqttSettings {
+  enabled: boolean;
+  host: string;
+  port: number;
+  tls: boolean;
+  username: string;
+  discoveryPrefix: string;
+  frigatePrefix: string;
+  /** This install's id in MQTT topics; empty until the connection is first saved. */
+  deviceId: string;
+  passwordStorage: PasswordStorage;
+}
+
+/** The Home Assistant connection before any is saved, as Rust defaults it. */
+export const DEFAULT_MQTT_SETTINGS: MqttSettings = {
+  enabled: false,
+  host: "",
+  port: 1883,
+  tls: false,
+  username: "",
+  discoveryPrefix: "homeassistant",
+  frigatePrefix: "frigate",
+  deviceId: "",
+  passwordStorage: "none",
+};
+
 /** Mirrors `Settings` in src-tauri/src/settings.rs. */
 export interface Settings {
   frigateUrl: string | null;
   fullScreen: boolean;
   wall: WallOptions;
   updateChannel: UpdateChannel;
+  mqtt: MqttSettings;
   layouts: Record<string, SavedLayout>;
 }
 
@@ -114,4 +145,40 @@ export function testFrigate(url: string): Promise<FrigateStatus> {
 /** The cameras on the Frigate server at `url`, in Frigate's order. */
 export function frigateCameras(url: string): Promise<Camera[]> {
   return invoke<Camera[]>("frigate_cameras", { url });
+}
+
+/** Mirrors `MqttInput` in src-tauri/src/mqtt.rs: the Home Assistant connection as the page sends it. */
+export type MqttInput = Omit<MqttSettings, "deviceId" | "passwordStorage">;
+
+/** Connects to the broker once with `input`, for Test connection. A null `password` uses the saved one. */
+export function testMqtt(input: MqttInput, password: string | null): Promise<void> {
+  return invoke<void>("test_mqtt", { input, password });
+}
+
+/**
+ * Saves the Home Assistant connection and connects with it, or disconnects
+ * when it is off, and returns the new settings. A null `password` keeps the
+ * saved one; an empty username removes it.
+ */
+export function saveMqtt(input: MqttInput, password: string | null): Promise<Settings> {
+  return invoke<Settings>("save_mqtt", { input, password });
+}
+
+/** Mirrors `WallReport` in src-tauri/src/mqtt.rs: what Home Assistant hears about the wall. */
+export interface WallReport {
+  maximised: string | null;
+  fullScreen: boolean;
+  windowShown: boolean;
+  /** Every camera on the Frigate server, in Frigate's order. */
+  cameras: string[];
+}
+
+/** Tells the backend the wall's state, for Home Assistant. */
+export function reportWallState(report: WallReport): Promise<void> {
+  return invoke<void>("report_wall_state", { report });
+}
+
+/** Tells the backend whether a tile has a problem, for Home Assistant. */
+export function reportTileProblem(camera: string, problem: boolean): Promise<void> {
+  return invoke<void>("report_tile_problem", { camera, problem });
 }

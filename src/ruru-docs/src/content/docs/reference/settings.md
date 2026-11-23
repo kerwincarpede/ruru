@@ -16,6 +16,20 @@ Open **Settings** from the gear at the top right, with `Ctrl+,` (`⌘ ,` on macO
 
 Choose **Save** to use the address. See [Connect to Frigate](/ruru/get-started/connect/).
 
+## Home Assistant
+
+| Setting | What it does |
+| --- | --- |
+| **Connect to Home Assistant** | Connects Ruru to the MQTT broker below. Off until you turn it on. |
+| **Broker** and **Port** | The MQTT broker Home Assistant uses, such as `homeassistant.local`, on port 1883 (8883 with TLS). |
+| **Use TLS** | Connects over TLS and checks the broker's certificate against the ones your computer trusts. |
+| **Username** and **Password** | The broker login. Leave the password empty to keep the saved one. To remove the saved password, clear the username and save. |
+| **Discovery prefix** | Where Home Assistant looks for new devices. Usually `homeassistant`. |
+| **Frigate prefix** | The topic prefix set in Frigate's `mqtt` settings. Usually `frigate`. |
+| **Test connection** | Connects to the broker once, and says whether it worked. |
+
+Choose **Save** to connect, or to disconnect when **Connect to Home Assistant** is off. See [Home Assistant](/ruru/guides/home-assistant/).
+
 ## Updates
 
 | Setting | What it does |
@@ -42,5 +56,7 @@ Ruru saves everything in `settings.json` in its config folder:
 | Windows | `%APPDATA%\com.kerwincarpede.ruru\` |
 | macOS | `~/Library/Application Support/com.kerwincarpede.ruru/` |
 | Linux | `~/.config/com.kerwincarpede.ruru/` |
+
+The MQTT broker password is kept in your computer's keychain: the macOS Keychain, Windows Credential Manager, or the Secret Service (such as GNOME Keyring) on Linux. When there is no keychain Ruru can use, the password goes in `settings.json`, and **Settings → Home Assistant** says so.
 
 To start again from **Connect to Frigate**, quit Ruru and delete `settings.json`.

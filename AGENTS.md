@@ -6,7 +6,7 @@ Ruru is a Tauri 2 desktop app that shows every Frigate camera live on one screen
 
 - **Every merge to `main` ships.** Nothing lands with a failing check. Merge only what is ready for users.
 - **Three platforms, every time.** Code must build and behave on Windows, macOS and Linux (X11 and Wayland). Platform code sits behind `#[cfg(...)]` with a fallback for the others.
-- **Nothing new leaves the computer silently.** Ruru talks only to the user's Frigate server and checks GitHub releases for updates (on the Edge channel, through GitHub's releases API at `api.github.com`). No analytics, no telemetry, no cloud account. Any new network request is added to this rule in the same PR.
+- **Nothing new leaves the computer silently.** Ruru talks only to the user's Frigate server, checks GitHub releases for updates (on the Edge channel, through GitHub's releases API at `api.github.com`), and, only once the user turns it on in **Settings → Home Assistant**, connects to the MQTT broker they enter. No analytics, no telemetry, no cloud account. Any new network request is added to this rule in the same PR.
 - **Never show the user's real cameras.** Screenshots, recordings and other evidence never show video or snapshots from the user's own cameras. Capture them against a stand-in Frigate that serves synthetic test-pattern streams.
 - **Never touch the signing setup.** Leave the updater key, the macOS certificate and their secrets alone, and never regenerate them. Losing them strands every installed copy.
 - **Keep startup thin.** `lib.rs` `run()` only wires modules together; logic lives in modules with their own tests.

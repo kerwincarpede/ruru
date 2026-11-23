@@ -1,10 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import SettingsDialog from "./SettingsDialog";
-import { DEFAULT_WALL_OPTIONS, type Settings } from "../app/api";
+import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, type Settings } from "../app/api";
 import { mockCommands } from "../test/mockCommands";
 
-const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", layouts: {} };
+const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
 
 const info = { name: "Ruru", version: "0.3.0" };
 
@@ -13,7 +13,8 @@ function open(settings = empty) {
   const onChannelSaved = vi.fn();
   const onUpdate = vi.fn();
   const onClose = vi.fn();
-  const props = { info, onSaved, onChannelSaved, onUpdate, onClose };
+  const onMqttSaved = vi.fn();
+  const props = { info, onSaved, onChannelSaved, onMqttSaved, onUpdate, onClose };
   const { rerender } = render(<SettingsDialog settings={settings} {...props} />);
   // The window passes the saved settings back in, as App does.
   onChannelSaved.mockImplementation((saved: Settings) => rerender(<SettingsDialog settings={saved} {...props} />));

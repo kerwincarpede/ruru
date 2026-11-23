@@ -1,0 +1,21 @@
+{
+  "name": "Front door problem",
+  "unique_id": "ruru_0123456789ab_front_door_problem",
+  "availability_topic": "ruru/0123456789ab/availability",
+  "state_topic": "ruru/0123456789ab/problem/front_door",
+  "device_class": "problem",
+  "payload_on": "ON",
+  "payload_off": "OFF",
+  "device": {
+    "identifiers": ["ruru_0123456789ab"],
+    "name": "Ruru on wall",
+    "manufacturer": "Ruru",
+    "model": "Ruru camera wall",
+    "sw_version": "1.2.3"
+  },
+  "origin": {
+    "name": "Ruru",
+    "sw_version": "1.2.3",
+    "support_url": "https://kerwincarpede.github.io/ruru/"
+  }
+}
