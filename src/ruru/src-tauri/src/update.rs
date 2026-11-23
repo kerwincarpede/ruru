@@ -10,7 +10,8 @@
 //! moved from Edge back to Stable keeps its version until Stable passes it.
 //!
 //! A debug build run with `RURU_FAKE_UPDATE` set offers a fake update
-//! instead, so the prompt can be seen without a newer release.
+//! instead, so the prompt and Home Assistant's update entity can be seen
+//! without a newer release.
 
 use std::{
     sync::{Mutex, MutexGuard},
@@ -19,7 +20,7 @@ use std::{
 
 use semver::Version;
 use serde::Deserialize;
-use tauri::{AppHandle, State, Url};
+use tauri::{AppHandle, Manager, Url};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 use crate::settings::{self, SharedSettings, UpdateChannel};
@@ -125,33 +126,64 @@ async fn endpoint(channel: UpdateChannel) -> Result<String, String> {
 }
 
 /// The update the last check found, and the channel it came from, kept until
-/// it is installed or a later check replaces it.
-#[derive(Default)]
-pub struct PendingUpdate(Mutex<Option<(UpdateChannel, Update)>>);
+/// it is installed or a later check replaces it. The page's checks and Home
+/// Assistant's share it.
+pub struct Pending<T>(Mutex<Option<(UpdateChannel, T)>>);
 
-impl PendingUpdate {
-    fn lock(&self) -> MutexGuard<'_, Option<(UpdateChannel, Update)>> {
+impl<T> Default for Pending<T> {
+    fn default() -> Self {
+        Self(Mutex::new(None))
+    }
+}
+
+impl<T> Pending<T> {
+    fn lock(&self) -> MutexGuard<'_, Option<(UpdateChannel, T)>> {
         // A panic while holding the lock leaves the update as it was.
         self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
+
+    /// Keeps what a check of `channel` found, or forgets the last one.
+    fn keep(&self, channel: UpdateChannel, found: Option<T>) {
+        *self.lock() = found.map(|update| (channel, update));
+    }
+
+    /// Takes the update to install. Refused when there is none, or when the
+    /// channel is no longer `channel`, the one saved now.
+    fn take(&self, channel: UpdateChannel) -> Result<T, String> {
+        let found = self.lock().take();
+        let Some((checked, update)) = found else {
+            return Err("There is no update to install. Check for updates again.".into());
+        };
+        if checked != channel {
+            return Err("The update channel changed. Check for updates again.".into());
+        }
+        Ok(update)
+    }
+
+    /// Puts back an update whose download failed, so it can be tried again.
+    fn put_back(&self, channel: UpdateChannel, update: T) {
+        let mut pending = self.lock();
+        if pending.is_none() {
+            *pending = Some((channel, update));
+        }
+    }
 }
+
+/// The pending update as the app manages it.
+pub type PendingUpdate = Pending<Update>;
 
 /// The channel saved in Settings.
 fn saved_channel(state: &SharedSettings) -> UpdateChannel {
     settings::lock(state).current().update_channel
 }
 
-/// Checks the saved channel for a version newer than this copy. Returns its
-/// version, or `None` when this copy is up to date.
-#[tauri::command]
-pub async fn check_update(
-    app: AppHandle,
-    settings: State<'_, SharedSettings>,
-    pending: State<'_, PendingUpdate>,
-) -> Result<Option<String>, String> {
-    let channel = saved_channel(&settings);
+/// Checks the saved channel for a version newer than this copy and keeps it
+/// as the pending update. Returns its version, or `None` when this copy is up
+/// to date.
+pub async fn check(app: &AppHandle) -> Result<Option<String>, String> {
+    let channel = saved_channel(&app.state::<SharedSettings>());
     let failed = |err: tauri_plugin_updater::Error| format!("Could not check for updates: {err}");
     let url = Url::parse(&endpoint(channel).await?).map_err(|err| err.to_string())?;
     let update = app
@@ -164,30 +196,162 @@ pub async fn check_update(
         .await
         .map_err(failed)?;
     let version = update.as_ref().map(|update| update.version.clone());
-    *pending.lock() = update.map(|update| (channel, update));
+    app.state::<PendingUpdate>().keep(channel, update);
     Ok(version)
+}
+
+/// Takes the pending update, if the channel has not changed since it was
+/// found, and downloads it, returning the channel too. A failed download
+/// keeps it pending.
+async fn download(app: &AppHandle) -> Result<(UpdateChannel, Update, Vec<u8>), String> {
+    let channel = saved_channel(&app.state::<SharedSettings>());
+    let pending = app.state::<PendingUpdate>();
+    let update = pending.take(channel)?;
+    match update.download(|_, _| {}, || {}).await {
+        Ok(bytes) => Ok((channel, update, bytes)),
+        Err(err) => {
+            pending.put_back(channel, update);
+            Err(format!("The update could not be downloaded: {err}"))
+        }
+    }
+}
+
+/// Checks the saved channel for a version newer than this copy. Returns its
+/// version, or `None` when this copy is up to date.
+#[tauri::command]
+pub async fn check_update(app: AppHandle) -> Result<Option<String>, String> {
+    check(&app).await
 }
 
 /// Downloads and installs the update the last check found, then restarts
 /// Ruru on it. Refused when the channel changed since that check.
 #[tauri::command]
-pub async fn install_update(
-    app: AppHandle,
-    settings: State<'_, SharedSettings>,
-    pending: State<'_, PendingUpdate>,
-) -> Result<(), String> {
-    let found = pending.lock().take();
-    let Some((channel, update)) = found else {
-        return Err("There is no update to install. Check for updates again.".into());
-    };
-    if channel != saved_channel(&settings) {
-        return Err("The update channel changed. Check for updates again.".into());
-    }
+pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    let (_, update, bytes) = download(&app).await?;
     update
-        .download_and_install(|_, _| {}, || {})
-        .await
+        .install(bytes)
         .map_err(|err| format!("The update could not be installed: {err}"))?;
     app.restart()
+}
+
+/// The update Home Assistant's update entity offers: the fake update's
+/// version in a debug build run with `RURU_FAKE_UPDATE`, or what a check of
+/// the saved channel finds.
+pub async fn check_for_home_assistant(app: &AppHandle) -> Result<Option<String>, String> {
+    match fake_update() {
+        Some(version) => Ok(Some(version)),
+        None => check(app).await,
+    }
+}
+
+/// How an install that Home Assistant asked for ended, when Ruru is still
+/// running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Installed {
+    /// The fake update: full screen is saved, and nothing else changes.
+    Faked,
+    /// Installed; Ruru is restarting on the new version.
+    Restarting,
+}
+
+/// What finishing an install needs from the app, so tests can stand in for it.
+trait Relaunch {
+    /// Saves whether the next launch starts full screen, returning what was
+    /// saved before.
+    fn save_full_screen(&mut self, full_screen: bool) -> Result<bool, String>;
+    /// Installs the downloaded update.
+    fn install(&mut self, bytes: Vec<u8>) -> Result<(), String>;
+    /// Starts Ruru again on the installed version.
+    fn restart(&mut self);
+    /// Keeps the update pending after its install failed, so it can be
+    /// tried again.
+    fn keep_pending(&mut self);
+}
+
+/// Installs a downloaded update so that Ruru comes back full screen: full
+/// screen is saved first, because some installers end Ruru themselves, and
+/// put back if the install fails. A failed install, such as a cancelled
+/// password prompt, leaves the update pending.
+fn relaunch_full_screen(steps: &mut impl Relaunch, bytes: Vec<u8>) -> Result<Installed, String> {
+    let before = match steps.save_full_screen(true) {
+        Ok(before) => before,
+        Err(err) => {
+            steps.keep_pending();
+            return Err(err);
+        }
+    };
+    if let Err(err) = steps.install(bytes) {
+        steps.keep_pending();
+        if !before && let Err(undo) = steps.save_full_screen(false) {
+            eprintln!("Ruru: full screen could not be put back: {undo}");
+        }
+        return Err(err);
+    }
+    steps.restart();
+    Ok(Installed::Restarting)
+}
+
+/// The fake update's install: full screen is saved as a real one would save
+/// it, and Ruru keeps running.
+fn fake_install(steps: &mut impl Relaunch) -> Result<Installed, String> {
+    steps.save_full_screen(true)?;
+    Ok(Installed::Faked)
+}
+
+/// The running app, finishing an install.
+struct AppRelaunch<'a> {
+    app: &'a AppHandle,
+    /// The update being installed, and the channel it came from.
+    update: Option<(UpdateChannel, Update)>,
+}
+
+impl Relaunch for AppRelaunch<'_> {
+    fn save_full_screen(&mut self, full_screen: bool) -> Result<bool, String> {
+        let state = self.app.state::<SharedSettings>();
+        let mut store = settings::lock(&state);
+        let before = store.current().full_screen;
+        store
+            .set_full_screen(full_screen)
+            .map_err(|err| err.to_string())?;
+        Ok(before)
+    }
+
+    fn install(&mut self, bytes: Vec<u8>) -> Result<(), String> {
+        let (_, update) = self
+            .update
+            .as_ref()
+            .ok_or("There is no update to install. Check for updates again.")?;
+        update
+            .install(bytes)
+            .map_err(|err| format!("The update could not be installed: {err}"))
+    }
+
+    fn restart(&mut self) {
+        self.app.restart()
+    }
+
+    fn keep_pending(&mut self) {
+        if let Some((channel, update)) = self.update.take() {
+            self.app.state::<PendingUpdate>().put_back(channel, update);
+        }
+    }
+}
+
+/// Installs the pending update because Home Assistant asked, and restarts
+/// Ruru full screen on it. In a debug build run with `RURU_FAKE_UPDATE`, only
+/// saves full screen.
+pub async fn install_for_home_assistant(app: &AppHandle) -> Result<Installed, String> {
+    if fake_update().is_some() {
+        return fake_install(&mut AppRelaunch { app, update: None });
+    }
+    let (channel, update, bytes) = download(app).await?;
+    relaunch_full_screen(
+        &mut AppRelaunch {
+            app,
+            update: Some((channel, update)),
+        },
+        bytes,
+    )
 }
 
 /// The environment variable that fakes an update in a debug build.
@@ -313,6 +477,126 @@ mod tests {
             Some("0.2.0")
         );
         assert_eq!(fake_update_from(env("RURU_FAKE_UPDATE", "1"), false), None);
+    }
+
+    #[test]
+    fn a_pending_update_is_taken_once_and_only_on_its_channel() {
+        let pending = Pending::default();
+        assert!(
+            pending
+                .take(UpdateChannel::Stable)
+                .unwrap_err()
+                .contains("no update")
+        );
+        pending.keep(UpdateChannel::Stable, Some("1.0.0"));
+        assert_eq!(pending.take(UpdateChannel::Stable), Ok("1.0.0"));
+        assert!(pending.take(UpdateChannel::Stable).is_err());
+        pending.keep(UpdateChannel::Edge, Some("1.1.0"));
+        assert!(
+            pending
+                .take(UpdateChannel::Stable)
+                .unwrap_err()
+                .contains("channel changed")
+        );
+        // A check that finds nothing forgets the last update.
+        pending.keep(UpdateChannel::Stable, Some("1.0.0"));
+        pending.keep(UpdateChannel::Stable, None);
+        assert!(pending.take(UpdateChannel::Stable).is_err());
+    }
+
+    #[test]
+    fn a_failed_download_keeps_the_update_unless_a_new_check_replaced_it() {
+        let pending = Pending::default();
+        pending.put_back(UpdateChannel::Stable, "1.0.0");
+        assert_eq!(pending.take(UpdateChannel::Stable), Ok("1.0.0"));
+        pending.keep(UpdateChannel::Edge, Some("1.1.0"));
+        pending.put_back(UpdateChannel::Stable, "1.0.0");
+        assert_eq!(pending.take(UpdateChannel::Edge), Ok("1.1.0"));
+    }
+
+    /// Records what an install did, in order.
+    #[derive(Default)]
+    struct Steps {
+        full_screen: bool,
+        fail_install: bool,
+        done: Vec<String>,
+    }
+
+    impl Relaunch for Steps {
+        fn save_full_screen(&mut self, full_screen: bool) -> Result<bool, String> {
+            self.done.push(format!("full screen {full_screen}"));
+            Ok(std::mem::replace(&mut self.full_screen, full_screen))
+        }
+
+        fn install(&mut self, bytes: Vec<u8>) -> Result<(), String> {
+            self.done.push(format!("install {}", bytes.len()));
+            if self.fail_install {
+                Err("broken".into())
+            } else {
+                Ok(())
+            }
+        }
+
+        fn restart(&mut self) {
+            self.done.push("restart".into());
+        }
+
+        fn keep_pending(&mut self) {
+            self.done.push("keep pending".into());
+        }
+    }
+
+    #[test]
+    fn a_real_install_saves_full_screen_then_installs_and_restarts() {
+        let mut steps = Steps::default();
+        assert_eq!(
+            relaunch_full_screen(&mut steps, vec![0; 3]),
+            Ok(Installed::Restarting)
+        );
+        assert_eq!(steps.done, ["full screen true", "install 3", "restart"]);
+        assert!(steps.full_screen);
+    }
+
+    #[test]
+    fn a_failed_install_keeps_the_update_puts_full_screen_back_and_does_not_restart() {
+        let mut steps = Steps {
+            fail_install: true,
+            ..Steps::default()
+        };
+        assert_eq!(
+            relaunch_full_screen(&mut steps, Vec::new()),
+            Err("broken".into())
+        );
+        assert_eq!(
+            steps.done,
+            [
+                "full screen true",
+                "install 0",
+                "keep pending",
+                "full screen false"
+            ]
+        );
+        assert!(!steps.full_screen);
+        // Full screen that was already saved stays saved.
+        let mut steps = Steps {
+            full_screen: true,
+            fail_install: true,
+            ..Steps::default()
+        };
+        assert!(relaunch_full_screen(&mut steps, Vec::new()).is_err());
+        assert_eq!(
+            steps.done,
+            ["full screen true", "install 0", "keep pending"]
+        );
+        assert!(steps.full_screen);
+    }
+
+    #[test]
+    fn a_fake_install_only_saves_full_screen() {
+        let mut steps = Steps::default();
+        assert_eq!(fake_install(&mut steps), Ok(Installed::Faked));
+        assert_eq!(steps.done, ["full screen true"]);
+        assert!(steps.full_screen);
     }
 
     #[test]

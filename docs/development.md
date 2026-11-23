@@ -65,7 +65,7 @@ To see the update prompt without a newer release, set `RURU_FAKE_UPDATE` in a de
 RURU_FAKE_UPDATE=1 npm run tauri dev
 ```
 
-Choosing **Install and restart** on a fake update only closes the prompt. Release builds ignore the variable.
+Choosing **Install and restart** on a fake update only closes the prompt. With **Settings → Home Assistant** on, the device's **Update** entity offers the same version, and **Install** there saves `full_screen: true` in `settings.json` without restarting, so the relaunch setting can be checked without a newer release. Release builds ignore the variable.
 
 To build an installer for your platform:
 

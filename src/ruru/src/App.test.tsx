@@ -589,6 +589,38 @@ describe("App streams", () => {
     await waitFor(() => expect(calls).toContainEqual({ cmd: "report_tile_problem", payload: { camera: "porch", problem: true } }));
   });
 
+  it("maximises, restores and reconnects tiles when Home Assistant asks", async () => {
+    const calls = wall();
+    render(<App />);
+    await screen.findByRole("figure", { name: "Garage" });
+    const reports = () => calls.filter((call) => call.cmd === "report_wall_state").map((call) => (call.payload as { report: { maximised: string | null } }).report);
+    await act(() => emit("wall-command", { kind: "maximise", camera: "garage" }));
+    expect(FakeSocket.open().sort()).toEqual(["garage", "maingate_sub"]);
+    // Home Assistant hears the camera it maximised.
+    await waitFor(() => expect(reports()[reports().length - 1].maximised).toBe("garage"));
+    await act(() => emit("wall-command", { kind: "restore" }));
+    expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate_sub"]);
+    await waitFor(() => expect(reports()[reports().length - 1].maximised).toBeNull());
+    await act(() => emit("wall-command", { kind: "reconnect", camera: "maingate" }));
+    expect(FakeSocket.all.filter((socket) => socket.url.includes("maingate_sub")).map((socket) => socket.closed)).toEqual([true, false]);
+  });
+
+  it("turns full screen on and off when Home Assistant asks", async () => {
+    const calls = wall();
+    render(<App />);
+    await screen.findByRole("figure", { name: "Garage" });
+    const changes = () => calls.filter((call) => call.cmd === "set_full_screen").map((call) => call.payload);
+    await act(() => emit("wall-command", { kind: "fullScreen", on: true }));
+    await waitFor(() => expect(changes()).toEqual([{ fullScreen: true }]));
+    // Asking for the state the window is already in changes nothing.
+    await act(() => emit("wall-command", { kind: "fullScreen", on: true }));
+    fireEvent.contextMenu(screen.getByRole("main"));
+    expect(screen.getByRole("menuitem", { name: "Exit full screen" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await act(() => emit("wall-command", { kind: "fullScreen", on: false }));
+    await waitFor(() => expect(changes()).toEqual([{ fullScreen: true }, { fullScreen: false }]));
+  });
+
   it("reconnects a tile from its right-click menu", async () => {
     wall();
     render(<App />);

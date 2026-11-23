@@ -4,7 +4,7 @@ import { appInfo, type AppInfo } from "./app/api";
 import { cameraLabel, type Camera } from "./app/frigate";
 import { isMac, shortcutFor } from "./app/keys";
 import Logo from "./app/Logo";
-import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, cameraActivity, frigateCameras, getSettings, onCameraActivity, onFullScreenChanged, onOpenSettings, reportTileProblem, reportWallState, saveLayout, saveWallOptions, setFullScreen, type Activity, type SavedLayout, type Settings, type WallOptions } from "./app/api";
+import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, cameraActivity, frigateCameras, getSettings, onCameraActivity, onFullScreenChanged, onOpenSettings, onWallCommand, reportTileProblem, reportWallState, saveLayout, saveWallOptions, setFullScreen, type Activity, type SavedLayout, type Settings, type WallOptions } from "./app/api";
 import UpdatePrompt from "./app/UpdatePrompt";
 import { findUpdate, versionLabel, type AvailableUpdate } from "./app/updates";
 import SettingsDialog from "./settings/SettingsDialog";
@@ -115,12 +115,12 @@ function App() {
   useEffect(() => {
     fullScreenRef.current = settings?.fullScreen ?? false;
   }, [settings]);
-  const toggleFullScreen = useCallback(() => {
-    const next = !fullScreenRef.current;
+  const changeFullScreen = useCallback((next: boolean) => {
     fullScreenRef.current = next;
     setSettings((current) => ({ ...(current ?? NO_SETTINGS), fullScreen: next }));
     void setFullScreen(next).catch(() => {});
   }, []);
+  const toggleFullScreen = useCallback(() => changeFullScreen(!fullScreenRef.current), [changeFullScreen]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -175,6 +175,37 @@ function App() {
       stop?.();
     };
   }, []);
+
+  // Home Assistant's controls: the backend checks each command, naming only
+  // cameras on the wall, before it arrives here.
+  useEffect(() => {
+    let current = true;
+    let stop: (() => void) | null = null;
+    void onWallCommand((command) => {
+      if (!current) return;
+      switch (command.kind) {
+        case "maximise":
+          setMaximised(command.camera);
+          break;
+        case "restore":
+          setMaximised(null);
+          break;
+        case "fullScreen":
+          if (command.on !== fullScreenRef.current) changeFullScreen(command.on);
+          break;
+        case "reconnect":
+          setReconnects((now) => ({ ...now, [command.camera]: (now[command.camera] ?? 0) + 1 }));
+          break;
+      }
+    }).then((unlisten) => {
+      if (current) stop = unlisten;
+      else unlisten();
+    });
+    return () => {
+      current = false;
+      stop?.();
+    };
+  }, [changeFullScreen]);
 
   // The toolbar shows while the pointer moves, then fades away.
   const wake = () => {

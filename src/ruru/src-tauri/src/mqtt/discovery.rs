@@ -1,13 +1,18 @@
 //! Home Assistant MQTT discovery: the retained configs that make one install
-//! a device with its state sensors and a problem sensor per camera, and the
-//! state those sensors read.
+//! a device with its state sensors, a problem sensor and Reconnect button per
+//! camera, the wall's controls and an update entity, and the state they read.
 
 use serde_json::{Value, json};
 
+use super::commands::{
+    FULL_SCREEN, INSTALL, INSTALL_PAYLOAD, MAXIMISE, NONE, PRESS, RECONNECT, RESTORE,
+};
 use super::topics::{Topics, object_id};
 
 /// Where Home Assistant links the device's "Visit" button.
 const SUPPORT_URL: &str = "https://kerwincarpede.github.io/ruru/";
+/// Where the update entity links its release notes.
+const RELEASES_URL: &str = "https://github.com/kerwincarpede/ruru/releases";
 
 /// One message to publish.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,6 +182,100 @@ pub fn device_configs(topics: &Topics, device: &Device) -> Vec<Message> {
 /// What ends the discovery object id of every problem sensor.
 pub const PROBLEM_SUFFIX: &str = "_problem";
 
+/// The wall's controls that do not depend on the cameras: the Restore button,
+/// the Full screen switch and the update entity.
+pub fn control_configs(topics: &Topics, device: &Device) -> Vec<Message> {
+    let mut restore = base(topics, device, RESTORE, "Restore");
+    restore.insert("command_topic".into(), topics.command(RESTORE).into());
+    restore.insert("payload_press".into(), PRESS.into());
+    restore.insert("icon".into(), "mdi:view-grid".into());
+    let mut update = base(topics, device, "update", "Update");
+    update.insert("state_topic".into(), topics.update().into());
+    update.insert("command_topic".into(), topics.command(INSTALL).into());
+    update.insert("payload_install".into(), INSTALL_PAYLOAD.into());
+    vec![
+        Message::retained(
+            topics.discovery("button", RESTORE),
+            Value::Object(restore).to_string(),
+        ),
+        state_entity(
+            topics,
+            device,
+            "switch",
+            FULL_SCREEN,
+            "Full screen",
+            json!({
+                "command_topic": topics.command(FULL_SCREEN),
+                "payload_on": "ON",
+                "payload_off": "OFF",
+                "state_on": "ON",
+                "state_off": "OFF",
+                "icon": "mdi:fullscreen",
+            }),
+        ),
+        Message::retained(
+            topics.discovery("update", "update"),
+            Value::Object(update).to_string(),
+        ),
+    ]
+}
+
+/// The select that maximises a camera: `none`, then each camera on the wall
+/// in its order. It reads the maximised camera from the state topic.
+pub fn maximise_config(topics: &Topics, device: &Device, cameras: &[String]) -> Message {
+    let mut config = base(topics, device, MAXIMISE, "Maximise");
+    let options: Vec<&str> = std::iter::once(NONE)
+        .chain(cameras.iter().map(String::as_str))
+        .collect();
+    config.insert("state_topic".into(), topics.state().into());
+    config.insert("value_template".into(), "{{ value_json.maximised }}".into());
+    config.insert("command_topic".into(), topics.command(MAXIMISE).into());
+    config.insert("options".into(), options.into());
+    config.insert("icon".into(), "mdi:arrow-expand-all".into());
+    Message::retained(
+        topics.discovery("select", MAXIMISE),
+        Value::Object(config).to_string(),
+    )
+}
+
+/// What ends the discovery object id of every Reconnect button.
+pub const RECONNECT_SUFFIX: &str = "_reconnect";
+
+/// The discovery object of a camera's Reconnect button.
+pub fn reconnect_object(camera: &str) -> String {
+    format!("{}{RECONNECT_SUFFIX}", object_id(camera))
+}
+
+/// The button that reconnects one camera's tile. It sends the camera's
+/// name on the shared reconnect topic.
+pub fn reconnect_config(topics: &Topics, device: &Device, camera: &str) -> Message {
+    let object = reconnect_object(camera);
+    let mut config = base(
+        topics,
+        device,
+        &object,
+        &format!("Reconnect {}", camera_label(camera)),
+    );
+    config.insert("command_topic".into(), topics.command(RECONNECT).into());
+    config.insert("payload_press".into(), camera.into());
+    config.insert("icon".into(), "mdi:refresh".into());
+    Message::retained(
+        topics.discovery("button", &object),
+        Value::Object(config).to_string(),
+    )
+}
+
+/// Removes a camera's Reconnect button from Home Assistant.
+pub fn reconnect_removal(topics: &Topics, camera: &str) -> Message {
+    stale_reconnect(topics, &reconnect_object(camera))
+}
+
+/// Removes a Reconnect button known only by its object id, such as one left
+/// on the broker by an earlier run.
+pub fn stale_reconnect(topics: &Topics, object: &str) -> Message {
+    Message::retained(topics.discovery("button", object), "")
+}
+
 /// The discovery object of a camera's problem sensor.
 pub fn problem_object(camera: &str) -> String {
     format!("{}{PROBLEM_SUFFIX}", object_id(camera))
@@ -252,6 +351,33 @@ pub fn state(topics: &Topics, device: &Device, wall: &WallState) -> Message {
         "window_shown": on_off(wall.window_shown),
     });
     Message::retained(topics.state(), payload.to_string())
+}
+
+/// What the update entity shows.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UpdateInfo {
+    /// The newer version the last check found, if any.
+    pub latest: Option<String>,
+    /// Installing it now, as Home Assistant asked.
+    pub installing: bool,
+}
+
+/// The retained message the update entity reads. Without a newer version,
+/// the latest is the version running.
+pub fn update_state(topics: &Topics, device: &Device, update: &UpdateInfo) -> Message {
+    let latest = update.latest.as_deref().unwrap_or(&device.version);
+    let release_url = match &update.latest {
+        Some(version) => format!("{RELEASES_URL}/tag/v{version}"),
+        None => RELEASES_URL.to_string(),
+    };
+    let payload = json!({
+        "installed_version": device.version,
+        "latest_version": latest,
+        "title": "Ruru",
+        "release_url": release_url,
+        "in_progress": update.installing,
+    });
+    Message::retained(topics.update(), payload.to_string())
 }
 
 /// The retained message for a camera's problem sensor.
@@ -334,6 +460,95 @@ mod tests {
             ]
         );
         assert!(removal.iter().all(|m| m.retain && m.payload.is_empty()));
+    }
+
+    #[test]
+    fn the_wall_has_restore_full_screen_and_update_controls() {
+        let configs = control_configs(&topics(), &device());
+        let topics: Vec<&str> = configs.iter().map(|m| m.topic.as_str()).collect();
+        assert_eq!(
+            topics,
+            [
+                "homeassistant/button/0123456789ab/restore/config",
+                "homeassistant/switch/0123456789ab/full_screen/config",
+                "homeassistant/update/0123456789ab/update/config",
+            ]
+        );
+        assert!(configs.iter().all(|m| m.retain));
+        assert_eq!(
+            payload(&configs[0]),
+            fixture(include_str!("fixtures/discovery-restore.json"))
+        );
+        assert_eq!(
+            payload(&configs[1]),
+            fixture(include_str!("fixtures/discovery-full-screen-switch.json"))
+        );
+        assert_eq!(
+            payload(&configs[2]),
+            fixture(include_str!("fixtures/discovery-update.json"))
+        );
+    }
+
+    #[test]
+    fn the_maximise_select_offers_none_and_each_camera() {
+        let config = maximise_config(
+            &topics(),
+            &device(),
+            &["front_door".into(), "garage".into()],
+        );
+        assert_eq!(
+            config.topic,
+            "homeassistant/select/0123456789ab/maximise/config"
+        );
+        assert!(config.retain);
+        assert_eq!(
+            payload(&config),
+            fixture(include_str!("fixtures/discovery-maximise.json"))
+        );
+        let empty = maximise_config(&topics(), &device(), &[]);
+        assert_eq!(payload(&empty)["options"], json!(["none"]));
+    }
+
+    #[test]
+    fn each_camera_has_a_reconnect_button() {
+        let config = reconnect_config(&topics(), &device(), "front_door");
+        assert_eq!(
+            config.topic,
+            "homeassistant/button/0123456789ab/front_door_reconnect/config"
+        );
+        assert_eq!(
+            payload(&config),
+            fixture(include_str!("fixtures/discovery-reconnect.json"))
+        );
+        let removal = reconnect_removal(&topics(), "front_door");
+        assert_eq!(removal.topic, config.topic);
+        assert!(removal.retain && removal.payload.is_empty());
+    }
+
+    #[test]
+    fn the_update_entity_reads_the_installed_and_latest_versions() {
+        let topics = topics();
+        let pending = UpdateInfo {
+            latest: Some("1.3.0".into()),
+            installing: true,
+        };
+        let message = update_state(&topics, &device(), &pending);
+        assert_eq!(message.topic, "ruru/0123456789ab/update");
+        assert!(message.retain);
+        assert_eq!(
+            payload(&message),
+            json!({
+                "installed_version": "1.2.3",
+                "latest_version": "1.3.0",
+                "title": "Ruru",
+                "release_url": "https://github.com/kerwincarpede/ruru/releases/tag/v1.3.0",
+                "in_progress": true,
+            })
+        );
+        let current = payload(&update_state(&topics, &device(), &UpdateInfo::default()));
+        assert_eq!(current["latest_version"], "1.2.3");
+        assert_eq!(current["in_progress"], false);
+        assert_eq!(current["release_url"], RELEASES_URL);
     }
 
     #[test]
