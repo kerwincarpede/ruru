@@ -1,11 +1,12 @@
 //! Home Assistant MQTT discovery: the retained configs that make one install
 //! a device with its state sensors, a problem sensor and Reconnect button per
-//! camera, the wall's controls and an update entity, and the state they read.
+//! camera, the wall's controls, an update entity and, where Ruru can turn the
+//! screen off, a Display switch, and the state they read.
 
 use serde_json::{Value, json};
 
 use super::commands::{
-    FULL_SCREEN, INSTALL, INSTALL_PAYLOAD, MAXIMISE, NONE, PRESS, RECONNECT, RESTORE,
+    DISPLAY, FULL_SCREEN, INSTALL, INSTALL_PAYLOAD, MAXIMISE, NONE, PRESS, RECONNECT, RESTORE,
 };
 use super::topics::{Topics, object_id};
 
@@ -218,6 +219,38 @@ pub fn control_configs(topics: &Topics, device: &Device) -> Vec<Message> {
             Value::Object(update).to_string(),
         ),
     ]
+}
+
+/// The switch that turns the display off and on. Offered only where Ruru
+/// can do it; it reads the display topic.
+pub fn display_config(topics: &Topics, device: &Device) -> Message {
+    let mut config = base(topics, device, DISPLAY, "Display");
+    config.insert("state_topic".into(), topics.display().into());
+    config.insert("command_topic".into(), topics.command(DISPLAY).into());
+    config.insert("payload_on".into(), "ON".into());
+    config.insert("payload_off".into(), "OFF".into());
+    config.insert("state_on".into(), "ON".into());
+    config.insert("state_off".into(), "OFF".into());
+    config.insert("icon".into(), "mdi:monitor-shimmer".into());
+    Message::retained(
+        topics.discovery("switch", DISPLAY),
+        Value::Object(config).to_string(),
+    )
+}
+
+/// Removes the Display switch from Home Assistant, where Ruru can't turn
+/// the screen off, in case an earlier run offered it: its config and its
+/// retained state.
+pub fn display_removal(topics: &Topics) -> Vec<Message> {
+    vec![
+        Message::retained(topics.discovery("switch", DISPLAY), ""),
+        Message::retained(topics.display(), ""),
+    ]
+}
+
+/// The retained message the Display switch reads.
+pub fn display_state(topics: &Topics, on: bool) -> Message {
+    Message::retained(topics.display(), on_off(on))
 }
 
 /// The select that maximises a camera: `none`, then each camera on the wall
@@ -487,6 +520,31 @@ mod tests {
             payload(&configs[2]),
             fixture(include_str!("fixtures/discovery-update.json"))
         );
+    }
+
+    #[test]
+    fn the_display_switch_reads_and_sets_the_display() {
+        let config = display_config(&topics(), &device());
+        assert_eq!(
+            config.topic,
+            "homeassistant/switch/0123456789ab/display/config"
+        );
+        assert!(config.retain);
+        assert_eq!(
+            payload(&config),
+            fixture(include_str!("fixtures/discovery-display.json"))
+        );
+        let removal = display_removal(&topics());
+        assert_eq!(
+            removal.iter().map(|m| m.topic.as_str()).collect::<Vec<_>>(),
+            [config.topic.as_str(), "ruru/0123456789ab/display"]
+        );
+        assert!(removal.iter().all(|m| m.retain && m.payload.is_empty()));
+        let off = display_state(&topics(), false);
+        assert_eq!(off.topic, "ruru/0123456789ab/display");
+        assert!(off.retain);
+        assert_eq!(off.payload, "OFF");
+        assert_eq!(display_state(&topics(), true).payload, "ON");
     }
 
     #[test]

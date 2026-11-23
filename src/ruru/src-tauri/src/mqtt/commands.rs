@@ -1,6 +1,6 @@
 //! The commands Home Assistant sends on Ruru's command topics: maximise a
-//! camera, restore the wall, turn full screen on or off, reconnect a tile and
-//! install the pending update. Each one is checked before it is carried out,
+//! camera, restore the wall, turn full screen on or off, reconnect a tile,
+//! install the pending update and turn the display off or on. Each one is checked before it is carried out,
 //! since anything on the broker can publish to these topics.
 
 use serde::Serialize;
@@ -19,6 +19,8 @@ pub const FULL_SCREEN: &str = "full_screen";
 pub const RECONNECT: &str = "reconnect";
 /// The update entity's Install.
 pub const INSTALL: &str = "install";
+/// The switch that turns the display off and on.
+pub const DISPLAY: &str = "display";
 
 /// What the Maximise select offers for no camera.
 pub const NONE: &str = "none";
@@ -52,6 +54,10 @@ pub enum Command {
     Wall(WallCommand),
     /// Install the pending update and restart full screen.
     Install,
+    /// Turn the display on, or off.
+    Display {
+        on: bool,
+    },
 }
 
 /// Why a command was ignored.
@@ -63,7 +69,7 @@ pub enum Refused {
     Unreadable,
     /// The camera is not on the wall.
     NotOnWall(String),
-    /// The full screen switch sent something other than `ON` or `OFF`.
+    /// A switch sent something other than `ON` or `OFF`.
     NotOnOrOff(String),
 }
 
@@ -73,7 +79,7 @@ impl std::fmt::Display for Refused {
             Self::Unknown(name) => write!(f, "there is no {name:?} command"),
             Self::Unreadable => f.write_str("the payload is not short text"),
             Self::NotOnWall(camera) => write!(f, "{camera:?} is not on the wall"),
-            Self::NotOnOrOff(payload) => write!(f, "full screen takes ON or OFF, not {payload:?}"),
+            Self::NotOnOrOff(payload) => write!(f, "a switch takes ON or OFF, not {payload:?}"),
         }
     }
 }
@@ -94,21 +100,23 @@ pub fn parse(name: &str, payload: &[u8], cameras: &[String]) -> Result<Command, 
             Err(Refused::NotOnWall(camera.to_string()))
         }
     };
+    let on_or_off = || match payload.to_ascii_uppercase().as_str() {
+        "ON" => Ok(true),
+        "OFF" => Ok(false),
+        _ => Err(Refused::NotOnOrOff(payload.to_string())),
+    };
     let command = match name {
         MAXIMISE if payload.eq_ignore_ascii_case(NONE) => WallCommand::Restore,
         MAXIMISE => WallCommand::Maximise {
             camera: on_wall(payload)?,
         },
         RESTORE => WallCommand::Restore,
-        FULL_SCREEN => match payload.to_ascii_uppercase().as_str() {
-            "ON" => WallCommand::FullScreen { on: true },
-            "OFF" => WallCommand::FullScreen { on: false },
-            _ => return Err(Refused::NotOnOrOff(payload.to_string())),
-        },
+        FULL_SCREEN => WallCommand::FullScreen { on: on_or_off()? },
         RECONNECT => WallCommand::Reconnect {
             camera: on_wall(payload)?,
         },
         INSTALL => return Ok(Command::Install),
+        DISPLAY => return Ok(Command::Display { on: on_or_off()? }),
         other => return Err(Refused::Unknown(other.to_string())),
     };
     Ok(Command::Wall(command))
@@ -177,6 +185,16 @@ mod tests {
         assert_eq!(
             wall("full_screen", "toggle"),
             Err(Refused::NotOnOrOff("toggle".into()))
+        );
+    }
+
+    #[test]
+    fn the_switch_turns_the_display_off_and_on() {
+        assert_eq!(wall("display", "OFF"), Ok(Command::Display { on: false }));
+        assert_eq!(wall("display", " on"), Ok(Command::Display { on: true }));
+        assert_eq!(
+            wall("display", "PRESS"),
+            Err(Refused::NotOnOrOff("PRESS".into()))
         );
     }
 

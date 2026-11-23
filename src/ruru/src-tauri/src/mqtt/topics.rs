@@ -67,6 +67,12 @@ impl Topics {
         self.own("update")
     }
 
+    /// `ON` or `OFF`, as Ruru last turned the display, read by the Display
+    /// switch.
+    pub fn display(&self) -> String {
+        self.own("display")
+    }
+
     /// Where Home Assistant sends command `name`, such as `maximise`.
     pub fn command(&self, name: &str) -> String {
         self.own(&format!("command/{name}"))
@@ -142,6 +148,7 @@ mod tests {
         );
         assert_eq!(topics.home_assistant_status(), "homeassistant/status");
         assert_eq!(topics.update(), "ruru/0123456789ab/update");
+        assert_eq!(topics.display(), "ruru/0123456789ab/display");
         assert_eq!(
             topics.command("maximise"),
             "ruru/0123456789ab/command/maximise"

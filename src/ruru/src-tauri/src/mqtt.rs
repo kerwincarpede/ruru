@@ -8,7 +8,8 @@
 //! switch: each command is checked here and handed to the page, which
 //! carries it out. The device's update entity offers the update a check of
 //! the saved channel finds, every six hours while connected, and installs it
-//! when asked, restarting Ruru full screen.
+//! when asked, restarting Ruru full screen. Where this computer can turn its
+//! screen off, the device also has a Display switch, carried out here.
 //!
 //! The page reports the wall's state and each tile's problems; this module
 //! keeps the latest and publishes it whenever it changes or the connection
@@ -34,6 +35,7 @@ use rumqttc::{AsyncClient, Event, LastWill, Packet, QoS};
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager, State, async_runtime::JoinHandle};
 
+use crate::display::{self, Method};
 use crate::settings::{
     self, MAX_TILES, MqttSettings, Settings, SettingsError, SharedSettings, valid_camera_name,
 };
@@ -210,6 +212,8 @@ struct Wall {
     /// for a camera not in `cameras` is really stale.
     reported: bool,
     update: UpdateInfo,
+    /// Ruru turned the display off and has not turned it back on.
+    display_off: bool,
 }
 
 impl Wall {
@@ -234,10 +238,13 @@ struct Session {
     on_broker: BTreeSet<(String, String)>,
     /// The cameras the Maximise select offers, in order, once announced.
     options: Option<Vec<String>>,
+    /// How this computer turns its screen off, if it can: only then is the
+    /// Display switch offered.
+    display: Option<Method>,
 }
 
 impl Session {
-    fn new(topics: Topics, device: Device) -> Self {
+    fn new(topics: Topics, device: Device, display: Option<Method>) -> Self {
         Self {
             topics,
             device,
@@ -245,13 +252,14 @@ impl Session {
             announced: BTreeSet::new(),
             on_broker: BTreeSet::new(),
             options: None,
+            display,
         }
     }
 
     /// Everything Home Assistant needs on connecting, or when it restarts:
     /// online, the device's sensors and controls, each camera's problem
-    /// sensor and Reconnect button, removals for cameras that are gone, and
-    /// the current state.
+    /// sensor and Reconnect button, removals for cameras that are gone, the
+    /// Display switch or its removal, and the current state.
     fn announce(&mut self, wall: &Wall) -> Vec<Message> {
         if !self.connected {
             return Vec::new();
@@ -263,6 +271,10 @@ impl Session {
         }];
         messages.extend(discovery::device_configs(&self.topics, &self.device));
         messages.extend(discovery::control_configs(&self.topics, &self.device));
+        match self.display {
+            Some(_) => messages.push(discovery::display_config(&self.topics, &self.device)),
+            None => messages.extend(discovery::display_removal(&self.topics)),
+        }
         messages.extend(self.cameras_changed(wall, true));
         messages.push(discovery::state(&self.topics, &self.device, &wall.state));
         messages.push(discovery::update_state(
@@ -270,6 +282,7 @@ impl Session {
             &self.device,
             &wall.update,
         ));
+        messages.extend(self.display(wall));
         messages
     }
 
@@ -384,6 +397,14 @@ impl Session {
         )]
     }
 
+    /// The Display switch's state, where it is offered.
+    fn display(&self, wall: &Wall) -> Vec<Message> {
+        if !self.connected || self.display.is_none() {
+            return Vec::new();
+        }
+        vec![discovery::display_state(&self.topics, !wall.display_off)]
+    }
+
     fn state(&self, wall: &Wall) -> Vec<Message> {
         if !self.connected {
             return Vec::new();
@@ -396,6 +417,35 @@ impl Session {
             return Vec::new();
         }
         vec![discovery::problem(&self.topics, camera, problem)]
+    }
+}
+
+/// Display commands waiting to run, one at a time in the order they came.
+/// Only the latest wanted state is kept: a command that has not started yet
+/// is overtaken by a newer one, so the screen and the switch end up as the
+/// last command asked.
+#[derive(Debug, Default)]
+struct DisplayQueue {
+    /// The latest command not started yet.
+    wanted: Option<(Method, bool)>,
+    /// A worker is running commands now.
+    running: bool,
+}
+
+impl DisplayQueue {
+    /// Queues a command. True when no worker is running, so the caller
+    /// starts one.
+    fn push(&mut self, method: Method, on: bool) -> bool {
+        self.wanted = Some((method, on));
+        !std::mem::replace(&mut self.running, true)
+    }
+
+    /// The next command for the worker, or `None` once there is none, which
+    /// stops the worker.
+    fn next(&mut self) -> Option<(Method, bool)> {
+        let next = self.wanted.take();
+        self.running = next.is_some();
+        next
     }
 }
 
@@ -424,6 +474,8 @@ impl Link {
 #[derive(Default)]
 struct Inner {
     wall: Wall,
+    /// Display commands from Home Assistant, kept across connections.
+    display: DisplayQueue,
     /// Bumped on every restart, so a connection that was replaced stops
     /// touching the state.
     generation: u64,
@@ -476,6 +528,17 @@ impl Inner {
                 self.last_check = None;
                 true
             }
+        }
+    }
+
+    /// Records that the display was turned on, or off, and tells Home
+    /// Assistant on the current connection.
+    fn display_done(&mut self, on: bool) {
+        self.wall.display_off = !on;
+        let generation = self.generation;
+        if let Some((link, wall)) = self.link(generation) {
+            let messages = link.session.display(wall);
+            link.send(messages);
         }
     }
 
@@ -619,13 +682,24 @@ async fn run(
     let problem_configs = topics.configs(PROBLEM.0);
     let reconnect_configs = topics.configs(RECONNECT.0);
     let own = topics.clone();
+    let display = match tauri::async_runtime::spawn_blocking(display::support).await {
+        Ok(Ok(method)) => Some(method),
+        Ok(Err(reason)) => {
+            eprintln!("Ruru: Home Assistant gets no Display switch: {reason}");
+            None
+        }
+        Err(err) => {
+            eprintln!("Ruru: could not tell whether the display can be turned off: {err}");
+            None
+        }
+    };
     {
         let state = app.state::<MqttState>();
         let mut inner = state.lock();
         if inner.generation != generation {
             return;
         }
-        let session = Session::new(topics, Device::this_install());
+        let session = Session::new(topics, Device::this_install(), display);
         inner.link = Some(Link {
             client: client.clone(),
             session,
@@ -736,15 +810,17 @@ fn take_activity(app: &AppHandle, generation: u64, update: activity::Update) {
 }
 
 /// Carries out one command from Home Assistant, if it is valid: a change to
-/// the wall goes to the page, and Install starts installing the update.
+/// the wall goes to the page, Install starts installing the update, and the
+/// Display switch turns the screen off or on where it is offered.
 fn take_command(app: &AppHandle, generation: u64, name: &str, payload: &[u8]) {
-    let parsed = {
+    let (parsed, display) = {
         let state = app.state::<MqttState>();
         let inner = state.lock();
         if !inner.current(generation) {
             return;
         }
-        commands::parse(name, payload, &inner.wall.cameras)
+        let display = inner.link.as_ref().and_then(|link| link.session.display);
+        (commands::parse(name, payload, &inner.wall.cameras), display)
     };
     match parsed {
         Ok(Command::Wall(command)) => {
@@ -756,7 +832,40 @@ fn take_command(app: &AppHandle, generation: u64, name: &str, payload: &[u8]) {
             let app = app.clone();
             tauri::async_runtime::spawn(async move { install_from_home_assistant(app).await });
         }
+        Ok(Command::Display { on }) => match display {
+            Some(method) => {
+                let start = app.state::<MqttState>().lock().display.push(method, on);
+                if start {
+                    let app = app.clone();
+                    tauri::async_runtime::spawn(async move { run_display_commands(app).await });
+                }
+            }
+            None => eprintln!("Ruru: the display can't be turned off or on here"),
+        },
         Err(err) => eprintln!("Ruru: a Home Assistant command was ignored: {err}"),
+    }
+}
+
+/// Runs the queued display commands one after another until none is left,
+/// so two commands never run at once and finish out of order.
+async fn run_display_commands(app: AppHandle) {
+    loop {
+        let next = app.state::<MqttState>().lock().display.next();
+        let Some((method, on)) = next else {
+            return;
+        };
+        let done = tauri::async_runtime::spawn_blocking(move || display::set(method, on)).await;
+        let state = app.state::<MqttState>();
+        let mut inner = state.lock();
+        match done {
+            Ok(Ok(())) => inner.display_done(on),
+            // A failure leaves the switch as it was.
+            Ok(Err(err)) => eprintln!(
+                "Ruru: the display could not be turned {}: {err}",
+                discovery::on_off(on).to_ascii_lowercase()
+            ),
+            Err(err) => eprintln!("Ruru: the display could not be turned off or on: {err}"),
+        }
     }
 }
 
@@ -1001,12 +1110,17 @@ mod tests {
     }
 
     fn session() -> Session {
+        session_with(None)
+    }
+
+    fn session_with(display: Option<Method>) -> Session {
         let mut session = Session::new(
             Topics::new("0123456789ab", "homeassistant"),
             Device {
                 name: "Ruru".into(),
                 version: "1.2.3".into(),
             },
+            display,
         );
         session.connected = true;
         session
@@ -1130,6 +1244,8 @@ mod tests {
                 "homeassistant/button/0123456789ab/restore/config",
                 "homeassistant/switch/0123456789ab/full_screen/config",
                 "homeassistant/update/0123456789ab/update/config",
+                "homeassistant/switch/0123456789ab/display/config",
+                "ruru/0123456789ab/display",
                 "homeassistant/select/0123456789ab/maximise/config",
                 "homeassistant/binary_sensor/0123456789ab/front_door_problem/config",
                 "ruru/0123456789ab/problem/front_door",
@@ -1142,9 +1258,58 @@ mod tests {
             ]
         );
         assert_eq!(messages[0].payload, "online");
-        assert_eq!(messages[10].payload, "OFF");
-        assert_eq!(messages[13].payload, "ON");
+        assert_eq!(messages[12].payload, "OFF");
+        assert_eq!(messages[15].payload, "ON");
         assert!(messages.iter().all(|message| message.retain));
+        // Without a way to turn the screen off, the Display switch is
+        // removed rather than offered, and its state an earlier run left
+        // is cleared too.
+        assert!(messages[8].payload.is_empty());
+        assert!(messages[9].payload.is_empty());
+    }
+
+    #[test]
+    fn display_commands_run_one_at_a_time_and_the_latest_wins() {
+        let mut queue = DisplayQueue::default();
+        assert!(queue.push(Method::X11, false), "the first starts a worker");
+        assert_eq!(queue.next(), Some((Method::X11, false)));
+        // OFF is running; ON and OFF and ON come in before it finishes.
+        assert!(!queue.push(Method::X11, true), "one worker at a time");
+        assert!(!queue.push(Method::X11, false));
+        assert!(!queue.push(Method::X11, true));
+        let mut inner = Inner::default();
+        inner.display_done(false);
+        assert!(inner.wall.display_off);
+        // Only the last command runs next, so its state is what stays.
+        assert_eq!(queue.next(), Some((Method::X11, true)));
+        inner.display_done(true);
+        assert!(!inner.wall.display_off);
+        assert_eq!(queue.next(), None);
+        assert!(queue.push(Method::X11, false), "an idle queue starts again");
+    }
+
+    #[test]
+    fn the_display_switch_is_offered_where_the_screen_can_be_turned_off() {
+        let mut session = session_with(Some(Method::X11));
+        let mut wall = wall(&[]);
+        let messages = session.announce(&wall);
+        let config = messages
+            .iter()
+            .find(|message| message.topic == "homeassistant/switch/0123456789ab/display/config")
+            .unwrap();
+        assert!(!config.payload.is_empty());
+        let state = messages.last().unwrap();
+        assert_eq!(state.topic, "ruru/0123456789ab/display");
+        assert_eq!(state.payload, "ON");
+        wall.display_off = true;
+        assert_eq!(
+            topics(&session.display(&wall)),
+            ["ruru/0123456789ab/display"]
+        );
+        assert_eq!(session.display(&wall)[0].payload, "OFF");
+        assert!(session_with(None).display(&wall).is_empty());
+        session.connected = false;
+        assert!(session.display(&wall).is_empty());
     }
 
     #[test]

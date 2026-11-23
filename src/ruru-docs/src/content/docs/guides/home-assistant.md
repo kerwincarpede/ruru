@@ -1,6 +1,6 @@
 ---
 title: Home Assistant
-description: Show the wall in Home Assistant as a device, with its state, a problem sensor for each camera and controls for the wall and updates, and show Frigate's activity on the tiles.
+description: Show the wall in Home Assistant as a device, with its state, a problem sensor for each camera and controls for the wall, the display and updates, and show Frigate's activity on the tiles.
 sidebar:
   order: 2
 ---
@@ -43,6 +43,7 @@ It also has controls:
 | **Full screen** | A switch that turns full screen on and off. |
 | A **Reconnect** button for each camera, such as **Reconnect Front door** | Drops the tile's stream and connects it again. |
 | **Update** | Shows when a newer version is out on your update channel, and installs it. |
+| **Display** | A switch that turns the screen off and on. Only where Ruru can do it: see [Display](#display). |
 
 Every entity shows as unavailable while Ruru is not connected, such as when the computer is off. Problem sensors and Reconnect buttons follow the cameras on the wall: hiding a camera removes them, and showing it adds them back. **Maximise** offers only the cameras on the wall.
 
@@ -53,6 +54,21 @@ While connected, Ruru checks the update channel picked in **Settings → Updates
 On Linux, a `.deb` or `.rpm` install may ask for your password on the computer running Ruru before it can finish. The AppImage updates without asking.
 
 If the connection drops, Ruru connects again on its own, waiting a little longer after each failure, up to a minute.
+
+## Display
+
+The **Display** switch turns the computer's screen off and on, such as from an automation that turns the wall off at night or on when someone comes home. Ruru offers it only where it works:
+
+| Platform | How Ruru does it | What it needs |
+| --- | --- | --- |
+| Windows | The system's monitor power message. | Nothing. |
+| macOS | `pmset displaysleepnow` to turn it off, `caffeinate -u` to turn it on. | Nothing. |
+| Linux with X11 | `xset dpms force off` and `xset dpms force on`. | `xset`, from the `x11-xserver-utils` package on Debian and Raspberry Pi OS, and an X server with DPMS. |
+| Linux with Wayland | `wlopm --off '*'` and `wlopm --on '*'`. | `wlopm`, from the `wlopm` package, and a wlroots compositor that can turn its outputs off, such as labwc or Sway. |
+
+Ruru checks when it connects. Where the tool is missing, or the compositor can't turn its outputs off, such as GNOME or KDE on Wayland, the switch is not offered and Ruru says why in its log. Install the tool, then restart Ruru or save **Settings → Home Assistant** again, to get the switch. Whether cage can turn its outputs off is not yet verified.
+
+The switch shows what Ruru last did. Touching the mouse or keyboard may wake the screen without the switch knowing, so it can show off while the screen is on. Turn it on, or off and on again, to match.
 
 ## Activity on the tiles
 
@@ -76,6 +92,7 @@ Ruru publishes under `ruru/<device id>/`, where the device id is made once for e
 | `ruru/<device id>/state` | JSON with `version`, `maximised`, `full_screen` and `window_shown`. |
 | `ruru/<device id>/problem/<camera>` | `ON` or `OFF`. |
 | `ruru/<device id>/update` | JSON with `installed_version`, `latest_version`, `title`, `release_url` and `in_progress`, for the update entity. |
+| `ruru/<device id>/display` | `ON` or `OFF`, as Ruru last turned the screen. Only where the **Display** switch is offered. |
 
 Home Assistant sends commands to `ruru/<device id>/command/<command>`:
 
@@ -86,6 +103,7 @@ Home Assistant sends commands to `ruru/<device id>/command/<command>`:
 | `full_screen` | `ON` or `OFF`. |
 | `reconnect` | A camera's name. |
 | `install` | Anything. |
+| `display` | `ON` or `OFF`. |
 
 Ruru ignores retained commands, unknown commands, and cameras that are not on the wall.
 
