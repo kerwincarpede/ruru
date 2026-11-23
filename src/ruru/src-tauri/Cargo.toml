@@ -25,6 +25,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The in-app updater, for the Stable and Edge channels.
 tauri-plugin-updater = "2"
+# Keeps one copy running: opening Ruru again brings back the running copy, so
+# two never share a Home Assistant device or fight over the broker.
+tauri-plugin-single-instance = "2"
 # Comparing release versions to find the newest Edge build.
 semver = "1"
 # Reading the camera list from Frigate's HTTP API, over rustls with the ring
