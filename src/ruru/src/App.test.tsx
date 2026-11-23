@@ -4,7 +4,7 @@ import { emit } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { Camera } from "./app/frigate";
-import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, type SavedLayout, type Settings } from "./app/api";
+import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, type Activity, type SavedLayout, type Settings } from "./app/api";
 import { findUpdate } from "./app/updates";
 import { mockCommands, type CommandHandlers } from "./test/mockCommands";
 
@@ -304,6 +304,17 @@ describe("App", () => {
     await act(() => emit("camera-activity", {}));
     expect(garage).not.toHaveClass("has-motion");
     expect(within(garage).queryByRole("list", { name: "Objects in view" })).not.toBeInTheDocument();
+  });
+
+  it("keeps an activity event that arrives before the answer to camera_activity", async () => {
+    let answer: (activity: Activity) => void = () => {};
+    wall({ camera_activity: () => new Promise<Activity>((resolve) => (answer = resolve)) });
+    render(<App />);
+    const garage = await screen.findByRole("figure", { name: "Garage" });
+    await act(() => emit("camera-activity", {}));
+    await act(async () => answer({ garage: { motion: true, objects: {}, review: "alert" } }));
+    expect(garage).not.toHaveClass("is-alert");
+    expect(garage).not.toHaveClass("has-motion");
   });
 
   it("offers Show activity while Home Assistant is on, and hides the activity when it is off", async () => {

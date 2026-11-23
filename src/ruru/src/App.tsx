@@ -151,18 +151,21 @@ function App() {
   }, [toggleFullScreen]);
 
   // Frigate's activity arrives over the Home Assistant connection. What the
-  // backend heard before the page started listening is asked for once.
+  // backend heard before the page started listening is asked for once; an
+  // event that arrives first is newer, so the answer is then ignored.
   useEffect(() => {
     let current = true;
+    let heard = false;
     let stop: (() => void) | null = null;
     void onCameraActivity((next) => {
+      heard = true;
       if (current) setActivity(next);
     }).then((unlisten) => {
       if (!current) return unlisten();
       stop = unlisten;
       cameraActivity()
         .then((now) => {
-          if (current) setActivity(now);
+          if (current && !heard) setActivity(now);
         })
         // Without an answer the tiles wait for the next change.
         .catch(() => {});
