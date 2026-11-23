@@ -1,0 +1,117 @@
+/*
+ * Ruru site tokens, shared by the landing page and the Starlight docs.
+ *
+ * The accent, text and surface colours come from the app's light and dark
+ * tokens in src/ruru/src/App.css. The wall colours, hairlines and glows are
+ * only on the site.
+ *
+ * Dark is the main look, like a wall display at night. Both pages set
+ * data-theme on <html> before the first paint (Starlight's ThemeProvider, or
+ * the same script on the landing page), so Starlight's light/dark switch
+ * drives both. Without JavaScript, the system setting picks the theme.
+ */
+
+:root {
+	color-scheme: dark;
+
+	--ru-font-sans: 'Instrument Sans Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+	--ru-font-mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+	--ru-bg: #0f1115;
+	--ru-surface: #1e2128;
+	--ru-panel: #15171c;
+	--ru-border: #2c3039;
+	--ru-text: #ece9e3;
+	--ru-muted: #a19c92;
+	--ru-accent: #e0a458;
+	--ru-accent-high: #f3c88d;
+	--ru-accent-soft: rgb(224 164 88 / 14%);
+	--ru-accent-pill: rgb(224 164 88 / 12%);
+	--ru-accent-edge: rgb(224 164 88 / 32%);
+	--ru-on-accent: #15171c;
+	--ru-live: #4ade80;
+	--ru-warn: #f2b631;
+	--ru-cta: linear-gradient(180deg, #f0bd77, #d18f3f);
+	--ru-on-cta: #15171c;
+	--ru-glow: rgb(224 164 88 / 30%);
+	--ru-glass: rgb(255 255 255 / 3.5%);
+	--ru-hair: rgb(255 255 255 / 8%);
+	--ru-hair-strong: rgb(255 255 255 / 16%);
+	--ru-fill: rgb(255 255 255 / 6%);
+	--ru-nav: rgb(15 17 21 / 72%);
+	--ru-code-bg: #0b0c0f;
+	--ru-docs-surface: #191b21;
+	--ru-wall: #08090b;
+	--ru-on-wall: #ece9e3;
+	--ru-chrome: rgb(30 33 40 / 82%);
+	--ru-moon: rgb(243 230 200 / 10%);
+}
+
+:root[data-theme='light'] {
+	color-scheme: light;
+
+	--ru-bg: #f6f4ef;
+	--ru-surface: #ffffff;
+	--ru-panel: #fbfaf7;
+	--ru-border: #e3ded4;
+	--ru-text: #1f1d1a;
+	--ru-muted: #6b665d;
+	--ru-accent: #9a6020;
+	--ru-accent-high: #7a4a14;
+	--ru-accent-soft: rgb(181 118 44 / 13%);
+	--ru-accent-pill: rgb(181 118 44 / 10%);
+	--ru-accent-edge: rgb(181 118 44 / 32%);
+	--ru-on-accent: #ffffff;
+	--ru-live: #15803d;
+	--ru-warn: #a16207;
+	--ru-cta: linear-gradient(180deg, #c4823a, #a5671f);
+	--ru-on-cta: #ffffff;
+	--ru-glow: rgb(181 118 44 / 24%);
+	--ru-glass: rgb(255 255 255 / 70%);
+	--ru-hair: rgb(31 29 26 / 9%);
+	--ru-hair-strong: rgb(31 29 26 / 16%);
+	--ru-fill: rgb(31 29 26 / 5%);
+	--ru-nav: rgb(246 244 239 / 78%);
+	--ru-code-bg: #f1eee7;
+	--ru-docs-surface: #efebe3;
+	--ru-wall: #0d0e11;
+	--ru-on-wall: #f4f2ee;
+	--ru-chrome: rgb(30 33 40 / 78%);
+	--ru-moon: rgb(181 118 44 / 10%);
+}
+
+/* No script ran: follow the system setting. Keep in step with the light block. */
+@media (prefers-color-scheme: light) {
+	:root:not([data-theme]) {
+		color-scheme: light;
+
+		--ru-bg: #f6f4ef;
+		--ru-surface: #ffffff;
+		--ru-panel: #fbfaf7;
+		--ru-border: #e3ded4;
+		--ru-text: #1f1d1a;
+		--ru-muted: #6b665d;
+		--ru-accent: #9a6020;
+		--ru-accent-high: #7a4a14;
+		--ru-accent-soft: rgb(181 118 44 / 13%);
+		--ru-accent-pill: rgb(181 118 44 / 10%);
+		--ru-accent-edge: rgb(181 118 44 / 32%);
+		--ru-on-accent: #ffffff;
+		--ru-live: #15803d;
+		--ru-warn: #a16207;
+		--ru-cta: linear-gradient(180deg, #c4823a, #a5671f);
+		--ru-on-cta: #ffffff;
+		--ru-glow: rgb(181 118 44 / 24%);
+		--ru-glass: rgb(255 255 255 / 70%);
+		--ru-hair: rgb(31 29 26 / 9%);
+		--ru-hair-strong: rgb(31 29 26 / 16%);
+		--ru-fill: rgb(31 29 26 / 5%);
+		--ru-nav: rgb(246 244 239 / 78%);
+		--ru-code-bg: #f1eee7;
+		--ru-docs-surface: #efebe3;
+		--ru-wall: #0d0e11;
+		--ru-on-wall: #f4f2ee;
+		--ru-chrome: rgb(30 33 40 / 78%);
+		--ru-moon: rgb(181 118 44 / 10%);
+	}
+}

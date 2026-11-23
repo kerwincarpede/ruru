@@ -1,0 +1,297 @@
+---
+// The landing page's own layout: head, theme, header and footer. Docs and
+// reference pages keep Starlight's layout.
+import '@fontsource-variable/instrument-sans';
+import '@fontsource-variable/geist-mono';
+import '../../styles/tokens.css';
+import Logo from '../Logo.astro';
+
+interface Props {
+	title: string;
+	description: string;
+}
+
+const { title, description } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const canonical = new URL(Astro.url.pathname, Astro.site);
+
+const guide = [
+	['Get started', `${base}/get-started/`],
+	['The wall', `${base}/wall/`],
+	['Raspberry Pi 5', `${base}/guides/raspberry-pi/`],
+	['Reference', `${base}/reference/`],
+	['Contribute', `${base}/contribute/`],
+	['GitHub', 'https://github.com/kerwincarpede/ruru'],
+];
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>{title}</title>
+		<meta name="description" content={description} />
+		<link rel="canonical" href={canonical} />
+		<link rel="icon" href={`${base}/favicon.svg`} type="image/svg+xml" />
+		<meta property="og:title" content={title} />
+		<meta property="og:description" content={description} />
+		<meta property="og:type" content="website" />
+		<meta property="og:url" content={canonical} />
+		<meta name="color-scheme" content="dark light" />
+		{/* Before the first paint, as Starlight's ThemeProvider does: the theme
+		    picked on a docs page wins, otherwise the system setting. */}
+		<script is:inline>
+			(() => {
+				const stored = () => {
+					try {
+						return localStorage.getItem('starlight-theme');
+					} catch {
+						return null;
+					}
+				};
+				const light = window.matchMedia('(prefers-color-scheme: light)');
+				const apply = () => {
+					const theme = stored() || (light.matches ? 'light' : 'dark');
+					document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+				};
+				apply();
+				light.addEventListener('change', apply);
+			})();
+		</script>
+	</head>
+	<body>
+		<a class="ru-skip" href="#main">Skip to content</a>
+
+		<header class="ru-head" data-head>
+			<a href={`${base}/`} class="ru-brand"><Logo id="ru-logo-header" size={26} /> Ruru</a>
+			<nav aria-label="Main" class="ru-nav">
+				<a href="#features">Features</a>
+				<a href={`${base}/get-started/`}>Docs</a>
+				<a href={`${base}/reference/`}>Reference</a>
+				<a href="https://github.com/kerwincarpede/ruru">GitHub</a>
+			</nav>
+			<a class="ru-btn ru-btn--small" href="#download">Download</a>
+		</header>
+
+		<main id="main">
+			<slot />
+		</main>
+
+		<footer class="ru-foot">
+			<p><Logo id="ru-logo-footer" size={22} /> MIT licensed. Named after the ruru, the New Zealand owl that keeps watch through the night.</p>
+			<nav aria-label="Guide">
+				{guide.map(([label, href]) => <a href={href}>{label}</a>)}
+			</nav>
+		</footer>
+	</body>
+</html>
+
+<script>
+	// The header gains its glass once the page has scrolled.
+	const head = document.querySelector<HTMLElement>('[data-head]');
+	const onScroll = () => head?.classList.toggle('is-stuck', window.scrollY > 24);
+	window.addEventListener('scroll', onScroll, { passive: true });
+	onScroll();
+</script>
+
+<style is:global>
+	html {
+		background: var(--ru-bg);
+		scroll-behavior: smooth;
+	}
+	body {
+		margin: 0;
+		background: var(--ru-bg);
+		color: var(--ru-text);
+		font-family: var(--ru-font-sans);
+		font-size: 16px;
+		line-height: 1.55;
+		-webkit-font-smoothing: antialiased;
+		overflow-x: clip;
+	}
+	a {
+		color: inherit;
+	}
+	:focus-visible {
+		outline: 2px solid var(--ru-accent);
+		outline-offset: 3px;
+		border-radius: 4px;
+	}
+	code,
+	kbd {
+		font-family: var(--ru-font-mono);
+	}
+
+	/* Buttons, shared by the header, hero and downloads */
+	.ru-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 10px;
+		min-height: 50px;
+		padding: 0 24px;
+		border-radius: 999px;
+		background: var(--ru-cta);
+		color: var(--ru-on-cta);
+		font-weight: 650;
+		font-size: 16px;
+		text-decoration: none;
+		box-sizing: border-box;
+		box-shadow: inset 0 1px 0 rgb(255 255 255 / 30%), 0 8px 28px var(--ru-glow);
+		transition: transform 0.25s ease, filter 0.25s ease;
+	}
+	.ru-btn:hover {
+		transform: translateY(-1px);
+		filter: brightness(1.06);
+	}
+	.ru-btn--ghost {
+		background: transparent;
+		color: var(--ru-text);
+		box-shadow: inset 0 0 0 1px var(--ru-hair-strong);
+	}
+	.ru-btn--ghost:hover {
+		box-shadow: inset 0 0 0 1px var(--ru-text);
+	}
+	.ru-btn--small {
+		min-height: 38px;
+		padding: 0 16px;
+		font-size: 14px;
+	}
+
+	/* Section headings: the second line is quieter */
+	.ru-h2 {
+		margin: 0 auto;
+		text-align: center;
+		font-size: clamp(34px, 5vw, 60px);
+		line-height: 1.04;
+		letter-spacing: -0.04em;
+		font-weight: 600;
+		text-wrap: balance;
+	}
+	.ru-h2 > span {
+		display: block;
+	}
+	.ru-h2 > span + span {
+		color: var(--ru-muted);
+	}
+	.ru-lede {
+		margin: 22px auto 0;
+		max-width: 580px;
+		text-align: center;
+		font-size: clamp(17px, 1.6vw, 20px);
+		color: var(--ru-muted);
+		text-wrap: balance;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		html {
+			scroll-behavior: auto;
+		}
+		.ru-btn {
+			transition: none;
+		}
+		.ru-btn:hover {
+			transform: none;
+		}
+	}
+</style>
+
+<style>
+	.ru-skip {
+		position: absolute;
+		left: 16px;
+		top: -60px;
+		z-index: 50;
+		padding: 10px 14px;
+		border-radius: 8px;
+		background: var(--ru-text);
+		color: var(--ru-bg);
+	}
+	.ru-skip:focus {
+		top: 12px;
+	}
+
+	.ru-head {
+		position: sticky;
+		top: 0;
+		z-index: 20;
+		display: flex;
+		align-items: center;
+		gap: 28px;
+		padding: 14px clamp(16px, 4vw, 40px);
+		border-bottom: 1px solid transparent;
+		transition: background-color 0.25s ease, border-color 0.25s ease;
+	}
+	.ru-head.is-stuck {
+		background: var(--ru-nav);
+		-webkit-backdrop-filter: blur(14px);
+		backdrop-filter: blur(14px);
+		border-bottom-color: var(--ru-hair);
+	}
+	.ru-brand {
+		display: inline-flex;
+		align-items: center;
+		gap: 10px;
+		font-weight: 650;
+		font-size: 18px;
+		letter-spacing: -0.01em;
+		text-decoration: none;
+	}
+	.ru-nav {
+		display: flex;
+		gap: 24px;
+		margin-right: auto;
+		font-size: 15px;
+	}
+	.ru-nav a {
+		color: var(--ru-muted);
+		text-decoration: none;
+	}
+	.ru-nav a:hover {
+		color: var(--ru-text);
+	}
+	@media (max-width: 640px) {
+		.ru-nav {
+			display: none;
+		}
+		.ru-brand {
+			margin-right: auto;
+		}
+	}
+
+	.ru-foot {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 20px 40px;
+		justify-content: space-between;
+		align-items: center;
+		max-width: 1180px;
+		margin: 0 auto;
+		padding: 40px clamp(16px, 4vw, 40px) 56px;
+		border-top: 1px solid var(--ru-hair);
+		color: var(--ru-muted);
+		font-size: 14px;
+	}
+	.ru-foot p {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin: 0;
+		max-width: 520px;
+	}
+	.ru-foot :global(svg) {
+		flex: none;
+	}
+	.ru-foot nav {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px 20px;
+	}
+	.ru-foot nav a {
+		text-decoration: none;
+	}
+	.ru-foot nav a:hover {
+		color: var(--ru-text);
+	}
+</style>

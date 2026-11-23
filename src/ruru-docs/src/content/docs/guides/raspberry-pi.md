@@ -1,8 +1,16 @@
-# Running Ruru on a Raspberry Pi 5
+---
+title: Raspberry Pi 5
+description: Run the Ruru wall on the same Raspberry Pi 5 that runs Frigate.
+sidebar:
+  order: 1
+---
 
 This page covers running the Ruru wall on the same Raspberry Pi 5 that runs Frigate, so one small computer records the cameras and shows them on a monitor.
 
-Status: not yet verified end to end. Steps marked **not yet verified** have not been tried on a Pi 5 running Frigate. [What still needs checking](#what-still-needs-checking) lists them. Linux playback has known problems that apply here too, see [Linux playback](issues/linux-playback.md).
+:::caution[Not yet verified end to end]
+Steps marked **not yet verified** have not been tried on a Pi 5 running Frigate.
+[What still needs checking](#what-still-needs-checking) lists them. Linux playback has known problems that apply here too, see [Linux playback](https://github.com/kerwincarpede/ruru/blob/main/docs/issues/linux-playback.md).
+:::
 
 ## The starting point
 

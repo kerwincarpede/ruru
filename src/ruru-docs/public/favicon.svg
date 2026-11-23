@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2f3a"/>
+      <stop offset="1" stop-color="#14171d"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c98a3e"/>
+      <stop offset="1" stop-color="#8a5523"/>
+    </linearGradient>
+  </defs>
+  <!-- Tile -->
+  <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#tile)"/>
+  <!-- Moon behind the owl -->
+  <circle cx="760" cy="250" r="96" fill="#f3e6c8" opacity="0.18"/>
+  <!-- Body with ear tufts -->
+  <path d="M262 214 L380 318 Q512 270 644 318 L762 214 L770 500 Q790 846 512 880 Q234 846 254 500 Z" fill="url(#body)"/>
+  <!-- Chest feathers -->
+  <path d="M512 610 Q420 640 400 760 Q512 840 624 760 Q604 640 512 610 Z" fill="#f1dfc4" opacity="0.35"/>
+  <!-- Facial discs -->
+  <circle cx="400" cy="474" r="128" fill="#f1dfc4"/>
+  <circle cx="624" cy="474" r="128" fill="#f1dfc4"/>
+  <!-- Eyes -->
+  <circle cx="400" cy="474" r="80" fill="#f2b631"/>
+  <circle cx="624" cy="474" r="80" fill="#f2b631"/>
+  <circle cx="400" cy="474" r="44" fill="#14171d"/>
+  <circle cx="624" cy="474" r="44" fill="#14171d"/>
+  <circle cx="418" cy="456" r="13" fill="#ffffff"/>
+  <circle cx="642" cy="456" r="13" fill="#ffffff"/>
+  <!-- Beak -->
+  <path d="M478 560 L546 560 L512 632 Z" fill="#3a2a1a"/>
+</svg>

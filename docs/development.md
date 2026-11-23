@@ -13,11 +13,12 @@ Ruru is built with Rust and [Tauri 2](https://tauri.app/), with a React + TypeSc
 | `src/ruru/src-tauri/icons/` | App icons, generated from `icons/source/app-icon.svg` (see the README there) |
 | `.github/workflows/release.yml` | Edge releases for code pushes to `main` |
 | `.github/workflows/promote.yml` | Makes a chosen Edge release Stable |
+| `.github/workflows/docs.yml` | Builds the docs site and publishes it to GitHub Pages |
+| `src/ruru-docs/` | The [docs site](https://kerwincarpede.github.io/ruru/), in [Starlight](https://starlight.astro.build/) |
 | `AGENTS.md` | The rules every change follows, and which standard to read for which task |
 | `docs/standards/` | The Rust, frontend, writing and PR standards |
 | `docs/issues/` | Known problems being investigated, such as [Linux playback](issues/linux-playback.md) |
 | `docs/investigations/` | Measurements behind a fix, such as [Linux streaming glitches](investigations/linux-streaming-glitches.md) |
-| `docs/raspberry-pi.md` | [Running Ruru on a Raspberry Pi 5](raspberry-pi.md) beside Frigate |
 
 ## Prerequisites
 
@@ -97,7 +98,7 @@ python3 -m unittest discover .github/scripts
 
 ## CI
 
-[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every pull request except those that change only docs (`docs/` or Markdown), and never publishes anything. Release builds call it through `workflow_call` with a `version` and a draft `release_id`.
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every pull request except those that change only docs (the site, `docs/` or Markdown), and never publishes anything. Release builds call it through `workflow_call` with a `version` and a draft `release_id`.
 
 | Job | Runs on | What it does |
 | --- | --- | --- |
@@ -129,6 +130,19 @@ gh workflow run ci.yml --ref my-branch -f package=true
 Linux dependencies are downloaded by [`.github/scripts/install_linux_deps.py`](../.github/scripts/install_linux_deps.py) from the Ubuntu archive (ports on arm64), with a 120-second limit for index updates and 180 seconds for package downloads per attempt. A failure tries a second mirror (the runner's original ports source on arm64). Downloads finish before installation, so a timeout never interrupts dpkg.
 
 Release builds run the Build jobs in the `release` environment, which holds the updater signing key and the macOS signing certificate. They stamp the release version into `tauri.conf.json`, sign the macOS app with the "Ruru Self-Signed Code Signing" certificate and check that its signature is tied to that certificate, and upload the installers to the draft release. Other builds get none of those secrets.
+
+## Docs site
+
+The user guide at [kerwincarpede.github.io/ruru](https://kerwincarpede.github.io/ruru/) is a [Starlight](https://starlight.astro.build/) site in `src/ruru-docs/`, a workspace of the root `package.json`. Its pages are Markdown in `src/ruru-docs/src/content/docs/`, and the sidebar groups them by folder (`astro.config.mjs`). The landing page, `src/pages/index.astro`, is its own Astro page. Its wall of tiles plays CSS test patterns, never camera video. Both share the colours in `src/styles/tokens.css`, taken from the app's.
+
+Run it from `src/ruru-docs/` (Astro needs Node 22.23.4 or later):
+
+```sh
+npm run dev      # http://localhost:4321/ruru/
+npm run build    # into dist/
+```
+
+[`.github/workflows/docs.yml`](../.github/workflows/docs.yml) builds the site on pull requests that touch it, and publishes it to GitHub Pages when such a change reaches `main`. Changes only to the site, `docs.yml`, `docs/` or Markdown are not released as an Edge build, and CI skips them. A change to the site's dependencies also changes `package-lock.json`, which CI and the release still run for.
 
 ## Releases
 

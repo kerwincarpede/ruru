@@ -1,0 +1,51 @@
+---
+title: Watch your cameras
+description: Maximise a tile, use the tile menu, go full screen, and read what a tile says when its picture stops.
+sidebar:
+  order: 1
+---
+
+Each tile shows the camera's latest snapshot until its video starts, then plays live. The camera's name sits in the tile's bottom corner.
+
+## Maximise a camera
+
+**Double-click** a tile, or right-click it and choose **Maximise**, to fill the window with that camera. The picture keeps moving and sharpens once the main stream arrives.
+
+Double-click again, choose **Restore**, or press `Esc` to go back to the wall.
+
+## The right-click menu
+
+Right-click a tile for that camera's menu:
+
+| Item | What it does |
+| --- | --- |
+| **Maximise** or **Restore** | Fills the window with the camera, or goes back to the wall. |
+| **Reconnect** | Starts the camera's video again. |
+| **Hide** | Takes the camera off the wall. Bring it back from [**Edit layout**](/ruru/wall/arrange/#hide-and-show-cameras). |
+| **Show stream info** | Shows playback details on every tile. See [Stream info](/ruru/wall/streams/#stream-info). |
+| **Automatic**, **Main stream**, **Sub stream** | Which of the camera's streams the tile plays. Only on cameras that have both. See [Streams](/ruru/wall/streams/). |
+
+The wall's own items follow below: **Settings…**, **Edit layout**, **Fit to window** and **Enter full screen**. Right-click anywhere else on the wall for just those.
+
+The arrow keys move through the menu, `Home` and `End` jump to the first and last items, and `Esc` closes it.
+
+## Full screen
+
+Press `F11` (`Ctrl+⌘ F` on macOS), or right-click and choose **Enter full screen**, to fill the screen. Press it again, or choose **Exit full screen**, to leave.
+
+Ruru starts full screen next time if you left it that way, which suits a wall display that powers on with the computer.
+
+The toolbar with **Edit layout** and the gear for **Settings** hides while you watch. Move the pointer to show it.
+
+## When a picture stops
+
+Ruru reconnects on its own when a camera or the network drops. While it does, the tile keeps its last frame, dims it, and says how old it is in its caption:
+
+- **Reconnecting · 12 s old**: the stream dropped and Ruru is connecting again.
+- **Frozen · 12 s old**: the stream is connected, but its picture stopped moving.
+- **Reconnecting…**: Ruru is trying again before any picture has arrived.
+- **Can't play this stream**: the stream doesn't play on this computer. See [Troubleshooting](/ruru/reference/troubleshooting/).
+
+The caption clears as soon as new video arrives. To force a fresh start, right-click the tile and choose **Reconnect**.
+
+Ruru stops every stream while its window is hidden, and starts them again when it comes back.

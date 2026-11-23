@@ -37,6 +37,8 @@ class Versions(unittest.TestCase):
         self.assertEqual(choose(commits, {"base": (0, 7, 57)}, (0, 2, 0)), (0, 7, 58))
         self.assertFalse(code_change(["README.md"]))
         self.assertTrue(code_change(["README.md", ".github/workflows/ci.yml"]))
+        self.assertFalse(code_change(["src/ruru-docs/src/content/docs/wall/watch.md", "src/ruru-docs/astro.config.mjs", ".github/workflows/docs.yml"]))
+        self.assertTrue(code_change(["src/ruru-docs/package.json", "package-lock.json"]))
 
     def test_first_release_uses_config_and_dispatch_can_release_docs(self):
         self.assertEqual(choose([commit("one")], {}, (0, 2, 0)), (0, 2, 0))

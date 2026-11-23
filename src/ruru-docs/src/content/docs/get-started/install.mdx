@@ -1,0 +1,91 @@
+---
+title: Install
+description: Install Ruru on Linux with one command, or download the installer for Windows, macOS or Linux.
+sidebar:
+  order: 1
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+## Linux: one command
+
+Paste this into a terminal:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/kerwincarpede/ruru/main/install.sh | sh
+```
+
+It installs the latest Stable release for your computer, on x86_64 or arm64:
+
+- **Debian and Ubuntu:** the `.deb`, with `apt`.
+- **Fedora and openSUSE:** the `.rpm`, with `dnf` or `zypper`.
+- **Anything else:** the AppImage, in `~/.local/bin`. It needs no password.
+
+The package installs ask for your password through `sudo`. Set `RURU_FORMAT` to `deb`, `rpm` or `appimage` to choose the installer, or `RURU_VERSION` to install a specific release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/kerwincarpede/ruru/main/install.sh | RURU_VERSION=0.4.0 sh
+```
+
+Prefer to read it first? [View install.sh](https://github.com/kerwincarpede/ruru/blob/main/install.sh).
+
+## Or download an installer
+
+Get the installer for your computer from the **[latest release](https://github.com/kerwincarpede/ruru/releases/latest)** (scroll down to *Assets*). On Windows and macOS, this is the way to install.
+
+| Your computer | Download | |
+| --- | --- | --- |
+| **Windows** 10 or 11 | `Ruru_<version>_x64-setup.exe` | The `.msi` works too. |
+| **macOS**, Apple silicon or Intel | `Ruru_<version>_universal.dmg` | One app for every Mac. |
+| **Linux**: Debian, Ubuntu, Raspberry Pi OS | `Ruru_<version>_amd64.deb` | On arm64: `Ruru_<version>_arm64.deb` |
+| **Linux**: Fedora, openSUSE | `Ruru-<version>-1.x86_64.rpm` | On arm64: `Ruru-<version>-1.aarch64.rpm` |
+| **Linux**: anything else | `Ruru_<version>_amd64.AppImage` | Runs without installing. On arm64: `Ruru_<version>_aarch64.AppImage` |
+
+Not sure which Linux build you need? Run `uname -m` in a terminal: `x86_64` takes the `amd64` and `x86_64` files, `aarch64` the `arm64` and `aarch64` ones.
+
+:::note
+Ruru isn't signed with a paid developer certificate, so Windows SmartScreen and macOS Gatekeeper warn you the first time you open it. That's expected. The steps below get you past it.
+:::
+
+<Tabs syncKey="os">
+<TabItem label="Windows" icon="seti:windows">
+
+1. Double-click `Ruru_<version>_x64-setup.exe`.
+2. If Windows shows **Windows protected your PC**, choose **More info**, then **Run anyway**.
+3. Follow the installer, then open **Ruru** from the Start menu.
+
+</TabItem>
+<TabItem label="macOS" icon="apple">
+
+1. Open the `.dmg` and drag **Ruru** into **Applications**.
+2. Open Ruru from Applications. macOS says it can't verify the developer: choose **Done**.
+3. Open **System Settings → Privacy & Security**, scroll down and choose **Open Anyway** next to Ruru. Confirm, and Ruru opens.
+
+</TabItem>
+<TabItem label="Linux" icon="linux">
+
+**Debian, Ubuntu and Raspberry Pi OS:**
+
+```sh
+sudo apt install ./Ruru_*.deb
+```
+
+**Fedora and openSUSE:**
+
+```sh
+sudo dnf install ./Ruru-*.rpm      # or: sudo zypper install ./Ruru-*.rpm
+```
+
+**AppImage:**
+
+```sh
+chmod +x Ruru_*.AppImage
+./Ruru_*.AppImage
+```
+
+Then open **Ruru** from your app menu.
+
+</TabItem>
+</Tabs>
+
+Installed? [Connect to Frigate](/ruru/get-started/connect/).
