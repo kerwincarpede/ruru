@@ -1,8 +1,10 @@
 //! Webview switches the camera wall needs.
 //!
-//! WebKitGTK, Linux's webview, ships with WebRTC turned off, so tiles there
-//! could only fall back to MSE. Ruru turns it on for its window. WebView2 and
-//! WKWebView have WebRTC on already.
+//! WebKitGTK, Linux's webview, ships with WebRTC turned off, so Ruru turns
+//! it on for its window. That only helps where WebKitGTK was built with
+//! WebRTC: Ubuntu's and Debian's builds leave it out, and tiles there play
+//! over MSE whatever this setting says. WebView2 and WKWebView have WebRTC on
+//! already.
 
 /// Turns on WebRTC (and the media stream API it builds on) in `window`'s
 /// WebKitGTK webview.

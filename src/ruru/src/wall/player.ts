@@ -30,11 +30,25 @@ export const WEBRTC_TIMEOUT_MS = 5000;
 /** The first reconnect delay; each failure doubles it up to the maximum. */
 export const RETRY_BASE_MS = 1000;
 export const RETRY_MAX_MS = 30000;
-/** MSE keeps this many seconds of video, and skips ahead when it falls further behind. */
+/** MSE keeps this many seconds of video behind the newest frame. */
 export const KEEP_S = 5;
-/** MSE playback speeds up or slows down within these rates to stay near the live edge. */
-const MIN_RATE = 0.95;
-const MAX_RATE = 1.08;
+/** MSE playback that falls this far behind the newest frame skips ahead. */
+export const MAX_LAG_S = 1.5;
+/** MSE playback closer to the newest frame than this waits, because a frame that arrives after its turn is never shown. */
+export const MIN_LAG_S = 0.35;
+/** A skip or a wait leaves playback this far behind the newest frame, which is room for frames that arrive late. */
+export const TARGET_LAG_S = 0.5;
+/** After a skip, MSE playback is left alone this long, so a webview that lands short of the target does not skip again and again. */
+export const SKIP_REST_MS = 5000;
+/** How often MSE playback compares the frames that arrived with the frames that were shown. */
+export const SHOWN_CHECK_MS = 4000;
+/** The comparison needs this many frames to mean anything. */
+export const SHOWN_MIN_FRAMES = 8;
+/** When fewer than this share of the frames that arrived were shown, playback stays further behind. */
+export const SHOWN_RATIO = 0.9;
+/** How much further behind each time, and at most. */
+export const LAG_STEP_S = 0.2;
+export const MAX_EXTRA_LAG_S = 2;
 
 /** A stream whose picture has not moved for this long is reconnected. */
 export const STALL_MS = 10000;
@@ -381,7 +395,6 @@ export class Go2rtcPlayer {
     this.socket = socket;
 
     let buffer: SourceBuffer | null = null;
-    let started = false;
     const queue: ArrayBuffer[] = [];
     const flush = () => {
       if (!buffer || buffer.updating || queue.length === 0) return;
@@ -392,11 +405,36 @@ export class Go2rtcPlayer {
         this.retry(generation);
       }
     };
-    // As go2rtc's video-rtc.js does: keep only the last few seconds, jump
-    // ahead when playback falls behind them, and otherwise speed up or slow
-    // down a little to stay near the live edge. Seeking on every small lag
-    // restarts decoding from the next keyframe, which on a 5 fps camera
-    // left tiles without new frames long enough to trip the watchdog.
+    // Keep only the last few seconds, and play them at normal speed between
+    // MIN_LAG_S and MAX_LAG_S behind the newest frame. Playback that falls
+    // further behind, as it does after the network stalls, skips ahead once.
+    // Playback that gets too close, where late frames miss their turn, waits
+    // for the stream to get ahead again. The speed is never changed instead:
+    // WebKitGTK restarts its decoder on every change of playbackRate, which
+    // blanks the picture for a frame or two, shows whatever is behind the
+    // video, and can show a frame it has already shown.
+    let skippedAt = -Infinity;
+    let waiting = true;
+    // A hardware decoder can hold each frame back until several more have
+    // arrived, so a frame is ready only after its turn and is never shown.
+    // The frames shown are counted against the frames that arrived, and
+    // playback stays `extra` seconds further behind while some go missing.
+    let extra = 0;
+    let arrived = 0;
+    let shown = 0;
+    let countedAt = Date.now();
+    const recount = () => {
+      arrived = 0;
+      shown = 0;
+      countedAt = Date.now();
+    };
+    const counts = typeof video.requestVideoFrameCallback === "function";
+    const count = () => {
+      if (!this.current(generation)) return;
+      shown++;
+      video.requestVideoFrameCallback(count);
+    };
+    if (counts) video.requestVideoFrameCallback(count);
     const keepUp = () => {
       if (!buffer || buffer.updating || !video.buffered || video.buffered.length === 0) return;
       const end = video.buffered.end(video.buffered.length - 1);
@@ -409,11 +447,30 @@ export class Go2rtcPlayer {
           // Trimming is housekeeping; the next update tries again.
         }
       }
-      if (video.currentTime < keepFrom) video.currentTime = keepFrom;
-      // Playback that paused or ended at the live edge carries on.
+      const lag = end - video.currentTime;
+      if (waiting) {
+        if (lag < TARGET_LAG_S + extra) return;
+        waiting = false;
+        recount();
+      }
+      // Playback that waited, or that paused or ended at the live edge, carries on.
       if (video.paused) play(video);
-      const lead = end - video.currentTime;
-      video.playbackRate = lead > 1.5 ? MAX_RATE : lead < 0.35 ? MIN_RATE : 1;
+      if (video.seeking) return;
+      if (Date.now() - countedAt >= SHOWN_CHECK_MS) {
+        // No count at all means the webview is not reporting frames, not that every one was late.
+        if (shown > 0 && arrived >= SHOWN_MIN_FRAMES && shown < arrived * SHOWN_RATIO) extra = Math.min(extra + LAG_STEP_S, MAX_EXTRA_LAG_S);
+        recount();
+      }
+      const rested = Date.now() - skippedAt >= SKIP_REST_MS;
+      // Video older than KEEP_S is gone, so playback that far back has to move.
+      if (lag > KEEP_S || (lag > MAX_LAG_S + extra && rested)) {
+        skippedAt = Date.now();
+        video.currentTime = end - TARGET_LAG_S - extra;
+        recount();
+      } else if (lag < MIN_LAG_S + extra) {
+        waiting = true;
+        video.pause();
+      }
     };
 
     socket.onopen = () => {
@@ -454,12 +511,10 @@ export class Go2rtcPlayer {
         }
         return;
       }
+      // One frame, after the first message. Playback starts once
+      // TARGET_LAG_S of video has arrived; see keepUp.
+      arrived++;
       queue.push(event.data as ArrayBuffer);
-      if (!started) {
-        // The first video data. The tile shows as playing once it decodes.
-        started = true;
-        play(video);
-      }
       flush();
     };
     socket.onclose = () => this.retry(generation);
@@ -489,7 +544,6 @@ export class Go2rtcPlayer {
       video.removeAttribute("src");
     }
     video.srcObject = null;
-    video.playbackRate = 1;
   }
 }
 

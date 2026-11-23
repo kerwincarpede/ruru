@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DECODE_FAILURES, FAILURE_MEMORY_MS, Go2rtcPlayer, KEEP_S, RETRY_MAX_MS, STALE_MS, STALL_CHECK_MS, STALL_MS, WEBRTC_TIMEOUT_MS, forgetFailures, isUndecodable, retryDelay, supportedMseCodecs, type PlayerState } from "./player";
+import { DECODE_FAILURES, FAILURE_MEMORY_MS, Go2rtcPlayer, KEEP_S, LAG_STEP_S, RETRY_MAX_MS, SHOWN_CHECK_MS, SKIP_REST_MS, STALE_MS, STALL_CHECK_MS, STALL_MS, TARGET_LAG_S, WEBRTC_TIMEOUT_MS, forgetFailures, isUndecodable, retryDelay, supportedMseCodecs, type PlayerState } from "./player";
 
 class FakeSocket {
   static OPEN = 1;
@@ -121,6 +121,7 @@ type TestVideo = HTMLVideoElement & { ready: number; paused: boolean };
 function video(): TestVideo {
   const element = document.createElement("video") as TestVideo;
   element.play = vi.fn().mockResolvedValue(undefined);
+  element.pause = vi.fn();
   element.ready = 4;
   Object.defineProperty(element, "readyState", { get: () => element.ready });
   Object.defineProperty(element, "paused", { configurable: true, writable: true, value: false });
@@ -442,7 +443,6 @@ describe("Go2rtcPlayer", () => {
     socket.message(chunk);
     // Bytes are not a picture: the tile plays once the video does.
     expect(states).toEqual(["connecting"]);
-    expect(element.play).toHaveBeenCalled();
     element.dispatchEvent(new Event("playing"));
     expect(states).toEqual(["connecting", "playing"]);
     source.open();
@@ -580,12 +580,11 @@ describe("Go2rtcPlayer", () => {
     player.stop();
   });
 
-  it("keeps MSE near the live edge and trims the old buffer", () => {
+  /** An MSE player on `element`, whose buffered range is whatever `range` returns. */
+  function mse(element: TestVideo, range: () => { start: number; end: number }) {
     vi.stubGlobal("MediaSource", FakeMediaSource);
-    const element = video();
-    let range = { start: 0, end: 30 };
     Object.defineProperty(element, "buffered", {
-      get: () => ({ length: 1, start: () => range.start, end: () => range.end }),
+      get: () => ({ length: 1, start: () => range().start, end: () => range().end }),
     });
     const player = make(element);
     player.start();
@@ -594,30 +593,97 @@ describe("Go2rtcPlayer", () => {
     source.open();
     socket.message(JSON.stringify({ type: "mse", value: 'video/mp4; codecs="avc1.640029"' }));
     const { buffer } = source.buffers[0];
+    return { player, socket, update: () => buffer.dispatchEvent(new Event("updateend")), buffer };
+  }
 
-    element.currentTime = 2;
-    buffer.dispatchEvent(new Event("updateend"));
-    // Far behind: it trims to the last few seconds and jumps to their start.
-    expect(buffer.removed).toEqual([[0, 30 - KEEP_S]]);
-    expect(element.currentTime).toBe(30 - KEEP_S);
-    expect(element.playbackRate).toBeCloseTo(1.08);
-
-    range = { start: 25, end: 30 };
-    element.currentTime = 29.5;
-    buffer.dispatchEvent(new Event("updateend"));
-    // Normal headroom: no seek, trim or change in speed.
-    expect(buffer.removed).toHaveLength(1);
-    expect(element.currentTime).toBe(29.5);
-    expect(element.playbackRate).toBe(1);
-    element.currentTime = 29.8;
-    buffer.dispatchEvent(new Event("updateend"));
-    expect(element.playbackRate).toBeCloseTo(0.95);
-
-    // Playback that paused at the live edge carries on.
-    const plays = vi.mocked(element.play).mock.calls.length;
+  it("keeps MSE near the live edge at normal speed and trims the old buffer", () => {
+    const element = video();
+    let range = { start: 0, end: 0.2 };
+    const { player, update, buffer } = mse(element, () => range);
     element.paused = true;
-    buffer.dispatchEvent(new Event("updateend"));
-    expect(element.play).toHaveBeenCalledTimes(plays + 1);
+
+    // Playback starts once enough video has arrived to ride out late frames.
+    update();
+    expect(element.play).not.toHaveBeenCalled();
+    range = { start: 0, end: 30 };
+    element.currentTime = 2;
+    update();
+    expect(element.play).toHaveBeenCalledTimes(1);
+    element.paused = false;
+    // Far behind: it trims to the last few seconds and skips ahead once.
+    expect(buffer.removed).toEqual([[0, 30 - KEEP_S]]);
+    expect(element.currentTime).toBe(30 - TARGET_LAG_S);
+
+    // Behind again straight after a skip: left alone until the rest is over.
+    range = { start: 27, end: 32 };
+    element.currentTime = 30;
+    update();
+    expect(element.currentTime).toBe(30);
+    vi.advanceTimersByTime(SKIP_REST_MS);
+    update();
+    expect(element.currentTime).toBe(32 - TARGET_LAG_S);
+
+    // Normal headroom: no skip, wait, trim or change in speed.
+    element.currentTime = 31.2;
+    update();
+    expect(buffer.removed).toHaveLength(1);
+    expect(element.currentTime).toBe(31.2);
+    expect(element.pause).not.toHaveBeenCalled();
+    expect(element.playbackRate).toBe(1);
+
+    // Too close to the newest frame: it waits for the stream to get ahead.
+    element.currentTime = 31.9;
+    update();
+    expect(element.pause).toHaveBeenCalledTimes(1);
+    element.paused = true;
+    range = { start: 27, end: 32.2 };
+    update();
+    expect(element.play).toHaveBeenCalledTimes(1);
+    range = { start: 27, end: 32.5 };
+    update();
+    expect(element.play).toHaveBeenCalledTimes(2);
+    expect(element.playbackRate).toBe(1);
+    player.stop();
+  });
+
+  it("stays further behind the live edge while frames arrive but are not shown", () => {
+    const element = video();
+    let frame: (() => void) | null = null;
+    element.requestVideoFrameCallback = (callback) => {
+      frame = callback as unknown as () => void;
+      return 1;
+    };
+    // The picture keeps moving, so the watchdog leaves the stream alone.
+    let decoded = 0;
+    countFrames(element, () => ++decoded);
+    let range = { start: 5, end: 10 };
+    const { player, socket, update } = mse(element, () => range);
+    const play = (arrived: number, shown: number) => {
+      for (let i = 0; i < arrived; i++) socket.message(new ArrayBuffer(4));
+      for (let i = 0; i < shown; i++) (frame as unknown as () => void)();
+      vi.advanceTimersByTime(SHOWN_CHECK_MS);
+      update();
+    };
+    element.currentTime = 10 - TARGET_LAG_S;
+    update();
+
+    // Every frame shown: playback stays where it is.
+    play(20, 20);
+    expect(element.pause).not.toHaveBeenCalled();
+    // A webview that reports no frames at all says nothing about late ones.
+    play(20, 0);
+    expect(element.pause).not.toHaveBeenCalled();
+
+    // Half the frames missed their turn: it waits until it is a step further behind.
+    play(20, 10);
+    expect(element.pause).toHaveBeenCalledTimes(1);
+    element.paused = true;
+    range = { start: 5, end: 10 + LAG_STEP_S / 2 };
+    update();
+    expect(element.play).not.toHaveBeenCalled();
+    range = { start: 5, end: 10.01 + LAG_STEP_S };
+    update();
+    expect(element.play).toHaveBeenCalledTimes(1);
     player.stop();
   });
 

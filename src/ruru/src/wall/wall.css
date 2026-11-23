@@ -58,6 +58,13 @@
   opacity: 1;
 }
 
+/* WebKitGTK shows what is behind a video for a frame or two whenever its
+   decoder restarts. That must not be the snapshot, which is as old as the
+   last time the cameras were loaded. */
+.tile.is-playing .tile-snapshot {
+  visibility: hidden;
+}
+
 /* A frozen picture is dimmed while the tile waits for new frames. */
 .tile.is-stale .tile-video,
 .tile.is-stale .tile-freeze {

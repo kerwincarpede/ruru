@@ -1,6 +1,6 @@
 # Linux playback
 
-Status: open. This page describes the problem and the evidence so far. No fix has been chosen yet.
+Status: partly fixed. The flicker and the backwards timestamps came from the MSE player changing `playbackRate`, and the player no longer does. [Linux streaming glitches: what we measured](../investigations/linux-streaming-glitches.md) has the causes, the proof and the numbers, and answers the questions below about timestamps, flicker, WebCodecs and `WEBKIT_DISABLE_DMABUF_RENDERER`. The Raspberry Pi 5 and how **Automatic** should choose a stream are still open. The rest of this page is the problem as first described.
 
 Ruru plays worse on Linux than on Windows and macOS. This page collects what we have seen, what we have measured, and what we still need to find out. Any fix must also work on a Raspberry Pi 5 (see [Running Ruru on a Raspberry Pi 5](../raspberry-pi.md)).
 
