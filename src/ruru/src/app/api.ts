@@ -239,8 +239,7 @@ export type WallCommand =
   | { kind: "maximise"; camera: string }
   | { kind: "restore" }
   | { kind: "fullScreen"; on: boolean }
-  | { kind: "streams"; on: boolean }
-  | { kind: "reconnect"; camera: string };
+  | { kind: "streams"; on: boolean };
 
 /**
  * Calls `handler` with each command Home Assistant sends the wall. Resolves

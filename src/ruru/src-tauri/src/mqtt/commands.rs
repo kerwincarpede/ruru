@@ -1,7 +1,6 @@
 //! The commands Home Assistant sends on Ruru's command topics: maximise a
 //! camera, restore the wall, turn full screen on or off, stop or start every
-//! stream, reconnect a tile, install the pending update and turn the display
-//! off or on. Each one is checked before it is carried out, since anything on
+//! stream, install the pending update and turn the display off or on. Each one is checked before it is carried out, since anything on
 //! the broker can publish to these topics.
 
 use serde::Serialize;
@@ -18,8 +17,6 @@ pub const RESTORE: &str = "restore";
 pub const FULL_SCREEN: &str = "full_screen";
 /// The switch that stops and starts every camera's stream.
 pub const STREAMS: &str = "streams";
-/// The buttons that reconnect a tile, each sending its camera's name.
-pub const RECONNECT: &str = "reconnect";
 /// The update entity's Install.
 pub const INSTALL: &str = "install";
 /// The switch that turns the display off and on.
@@ -49,8 +46,6 @@ pub enum WallCommand {
     FullScreen { on: bool },
     /// Start every tile's stream, or stop them all and leave the snapshots.
     Streams { on: bool },
-    /// Drop a tile's stream and connect it again.
-    Reconnect { camera: String },
 }
 
 /// A command from Home Assistant.
@@ -118,9 +113,6 @@ pub fn parse(name: &str, payload: &[u8], cameras: &[String]) -> Result<Command, 
         RESTORE => WallCommand::Restore,
         FULL_SCREEN => WallCommand::FullScreen { on: on_or_off()? },
         STREAMS => WallCommand::Streams { on: on_or_off()? },
-        RECONNECT => WallCommand::Reconnect {
-            camera: on_wall(payload)?,
-        },
         INSTALL => return Ok(Command::Install),
         DISPLAY => return Ok(Command::Display { on: on_or_off()? }),
         other => return Err(Refused::Unknown(other.to_string())),
@@ -160,22 +152,17 @@ mod tests {
     }
 
     #[test]
-    fn the_buttons_restore_reconnect_and_install() {
+    fn the_buttons_restore_and_install() {
         assert_eq!(
             wall("restore", PRESS),
             Ok(Command::Wall(WallCommand::Restore))
         );
+        assert_eq!(wall("install", INSTALL_PAYLOAD), Ok(Command::Install));
+        // Tiles reconnect on their own: Home Assistant has no Reconnect.
         assert_eq!(
             wall("reconnect", "front_door"),
-            Ok(Command::Wall(WallCommand::Reconnect {
-                camera: "front_door".into()
-            }))
+            Err(Refused::Unknown("reconnect".into()))
         );
-        assert_eq!(
-            wall("reconnect", "yard"),
-            Err(Refused::NotOnWall("yard".into()))
-        );
-        assert_eq!(wall("install", INSTALL_PAYLOAD), Ok(Command::Install));
     }
 
     #[test]
@@ -265,12 +252,6 @@ mod tests {
         assert_eq!(
             json(WallCommand::Streams { on: false }),
             serde_json::json!({ "kind": "streams", "on": false })
-        );
-        assert_eq!(
-            json(WallCommand::Reconnect {
-                camera: "garage".into()
-            }),
-            serde_json::json!({ "kind": "reconnect", "camera": "garage" })
         );
     }
 }

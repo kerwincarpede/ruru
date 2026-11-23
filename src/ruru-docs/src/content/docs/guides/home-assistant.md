@@ -42,11 +42,10 @@ It also has controls:
 | **Restore** | A button that shows the whole wall again. |
 | **Full screen** | A switch that turns full screen on and off. |
 | **Streams** | A switch that stops every tile's stream and starts them again. See [Streams](#streams). |
-| A **Reconnect** button for each camera, such as **Reconnect Front door** | Drops the tile's stream and connects it again. |
 | **Update** | Shows when a newer version is out on your update channel, and installs it. |
 | **Display** | A switch that turns the screen off and on. Only where Ruru can do it: see [Display](#display). |
 
-Every entity shows as unavailable while Ruru is not connected, such as when the computer is off. Problem sensors and Reconnect buttons follow the cameras on the wall: hiding a camera removes them, and showing it adds them back. **Maximise** offers only the cameras on the wall.
+Every entity shows as unavailable while Ruru is not connected, such as when the computer is off. Problem sensors follow the cameras on the wall: hiding a camera removes its sensor, and showing it adds it back. Tiles reconnect on their own, so there are no Reconnect buttons; Ruru removes any an earlier version added. **Maximise** offers only the cameras on the wall.
 
 ## Updates from Home Assistant
 
@@ -121,7 +120,6 @@ Home Assistant sends commands to `ruru/<device id>/command/<command>`:
 | `restore` | Anything. |
 | `full_screen` | `ON` or `OFF`. |
 | `streams` | `ON` or `OFF`. |
-| `reconnect` | A camera's name. |
 | `install` | Anything. |
 | `display` | `ON` or `OFF`. |
 

@@ -1,13 +1,12 @@
 //! Home Assistant MQTT discovery: the retained configs that make one install
-//! a device with its state sensors, a problem sensor and Reconnect button per
-//! camera, the wall's controls, an update entity and, where Ruru can turn the
+//! a device with its state sensors, a problem sensor per camera, the wall's
+//! controls, an update entity and, where Ruru can turn the
 //! screen off, a Display switch, and the state they read.
 
 use serde_json::{Value, json};
 
 use super::commands::{
-    DISPLAY, FULL_SCREEN, INSTALL, INSTALL_PAYLOAD, MAXIMISE, NONE, PRESS, RECONNECT, RESTORE,
-    STREAMS,
+    DISPLAY, FULL_SCREEN, INSTALL, INSTALL_PAYLOAD, MAXIMISE, NONE, PRESS, RESTORE, STREAMS,
 };
 use super::topics::{Topics, object_id};
 
@@ -43,11 +42,11 @@ pub struct Device {
 }
 
 impl Device {
-    /// This install, named after the computer it runs on.
-    pub fn this_install() -> Self {
+    /// This install, running `version`, named after the computer it runs on.
+    pub fn this_install(version: String) -> Self {
         Self {
             name: device_name(computer_name().as_deref()),
-            version: env!("CARGO_PKG_VERSION").into(),
+            version,
         }
     }
 }
@@ -287,41 +286,14 @@ pub fn maximise_config(topics: &Topics, device: &Device, cameras: &[String]) -> 
     )
 }
 
-/// What ends the discovery object id of every Reconnect button.
+/// What ends the discovery object id of the per-camera Reconnect buttons
+/// earlier versions offered. Tiles reconnect on their own, so any still on
+/// the broker are removed.
 pub const RECONNECT_SUFFIX: &str = "_reconnect";
 
-/// The discovery object of a camera's Reconnect button.
-pub fn reconnect_object(camera: &str) -> String {
-    format!("{}{RECONNECT_SUFFIX}", object_id(camera))
-}
-
-/// The button that reconnects one camera's tile. It sends the camera's
-/// name on the shared reconnect topic.
-pub fn reconnect_config(topics: &Topics, device: &Device, camera: &str) -> Message {
-    let object = reconnect_object(camera);
-    let mut config = base(
-        topics,
-        device,
-        &object,
-        &format!("Reconnect {}", camera_label(camera)),
-    );
-    config.insert("command_topic".into(), topics.command(RECONNECT).into());
-    config.insert("payload_press".into(), camera.into());
-    config.insert("icon".into(), "mdi:refresh".into());
-    Message::retained(
-        topics.discovery("button", &object),
-        Value::Object(config).to_string(),
-    )
-}
-
-/// Removes a camera's Reconnect button from Home Assistant.
-pub fn reconnect_removal(topics: &Topics, camera: &str) -> Message {
-    stale_reconnect(topics, &reconnect_object(camera))
-}
-
-/// Removes a Reconnect button known only by its object id, such as one left
-/// on the broker by an earlier run.
-pub fn stale_reconnect(topics: &Topics, object: &str) -> Message {
+/// Removes a Reconnect button an earlier version left on the broker, known
+/// by its object id.
+pub fn retired_reconnect(topics: &Topics, object: &str) -> Message {
     Message::retained(topics.discovery("button", object), "")
 }
 
@@ -594,18 +566,12 @@ mod tests {
     }
 
     #[test]
-    fn each_camera_has_a_reconnect_button() {
-        let config = reconnect_config(&topics(), &device(), "front_door");
+    fn a_retired_reconnect_button_is_removed() {
+        let removal = retired_reconnect(&topics(), "front_door_reconnect");
         assert_eq!(
-            config.topic,
+            removal.topic,
             "homeassistant/button/0123456789ab/front_door_reconnect/config"
         );
-        assert_eq!(
-            payload(&config),
-            fixture(include_str!("fixtures/discovery-reconnect.json"))
-        );
-        let removal = reconnect_removal(&topics(), "front_door");
-        assert_eq!(removal.topic, config.topic);
         assert!(removal.retain && removal.payload.is_empty());
     }
 
@@ -670,7 +636,7 @@ mod tests {
         assert_eq!(device_name(Some(" kitchen-pi\n")), "Ruru on kitchen-pi");
         assert_eq!(device_name(Some("")), "Ruru");
         assert_eq!(device_name(None), "Ruru");
-        assert_eq!(Device::this_install().version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(Device::this_install("0.7.3".into()).version, "0.7.3");
         assert_eq!(
             short_name("Kerwins-Mac.local").as_deref(),
             Some("Kerwins-Mac")

@@ -634,7 +634,7 @@ describe("App streams", () => {
     await waitFor(() => expect(calls).toContainEqual({ cmd: "report_tile_problem", payload: { camera: "porch", problem: true } }));
   });
 
-  it("maximises, restores and reconnects tiles when Home Assistant asks", async () => {
+  it("maximises and restores tiles when Home Assistant asks", async () => {
     const calls = wall();
     render(<App />);
     await screen.findByRole("figure", { name: "Garage" });
@@ -646,8 +646,6 @@ describe("App streams", () => {
     await act(() => emit("wall-command", { kind: "restore" }));
     expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate_sub"]);
     await waitFor(() => expect(reports()[reports().length - 1].maximised).toBeNull());
-    await act(() => emit("wall-command", { kind: "reconnect", camera: "maingate" }));
-    expect(FakeSocket.all.filter((socket) => socket.url.includes("maingate_sub")).map((socket) => socket.closed)).toEqual([true, false]);
   });
 
   it("turns full screen on and off when Home Assistant asks", async () => {
