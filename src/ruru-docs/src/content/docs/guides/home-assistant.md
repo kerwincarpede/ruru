@@ -81,9 +81,21 @@ You can also right-click the wall and choose **Stop streams** or **Start streams
 
 Frigate publishes what it sees to the same broker. While Ruru is connected, each tile shows its camera's activity:
 
-- **Motion:** a yellow outline round the tile while Frigate sees motion.
+- **Motion:** the tile is marked in yellow while Frigate sees motion.
 - **Objects:** a chip at the top right for each kind of object moving in view, such as **Person**, or **Car ×2** for two. Parked and other still objects get no chip.
-- **Alert:** a red highlight round the tile, and **Alert** in its caption, while Frigate has an alert open for the camera. Which objects and zones raise an alert is set in Frigate's `review` settings.
+- **Alert:** the tile is marked in red, its object chips turn red, and its caption says **Alert**, while Frigate has an alert open for the camera. Which objects and zones raise an alert is set in Frigate's `review` settings.
+
+Choose how tiles are marked with **Activity style** in **Settings → Home Assistant**. Every style leaves the picture clear apart from a few pixels at most:
+
+| Style | Motion | Alert |
+| --- | --- | --- |
+| **Outline between tiles** (the default) | A yellow outline in the gap round the tile, outside the picture. | A red outline in the gap, and a red caption. |
+| **Thin outline** | A thin yellow outline just inside the picture's edge. | A thin red outline, and a red caption. |
+| **Corner marks** | Yellow marks on the picture's four corners. | Larger red corner marks. |
+| **Top edge** | A thin yellow bar along the top of the picture. | A red bar. |
+| **Name only** | A thin yellow outline. | A red caption with a pulsing dot, and no outline. |
+
+A maximised tile has no gap round it, so **Outline between tiles** draws a thin outline inside its edge instead.
 
 **Show activity** is on by default. Turn it off in **Settings → Home Assistant**, or right-click the wall and untick **Show activity**. The tiles go quiet while Ruru is not connected to the broker.
 

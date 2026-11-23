@@ -15,8 +15,8 @@ function open(settings = empty) {
   const onUpdate = vi.fn();
   const onClose = vi.fn();
   const onMqttSaved = vi.fn();
-  const onActivity = vi.fn();
-  const props = { info, onSaved, onChannelSaved, onAutoUpdateSaved, onMqttSaved, onActivity, onUpdate, onClose };
+  const onWall = vi.fn();
+  const props = { info, onSaved, onChannelSaved, onAutoUpdateSaved, onMqttSaved, onWall, onUpdate, onClose };
   const { rerender } = render(<SettingsDialog settings={settings} {...props} />);
   // The window passes the saved settings back in, as App does.
   const passBack = (saved: Settings) => rerender(<SettingsDialog settings={saved} {...props} />);

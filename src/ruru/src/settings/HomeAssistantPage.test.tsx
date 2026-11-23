@@ -8,7 +8,7 @@ const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WAL
 
 function openHomeAssistant(mqtt: Partial<MqttSettings> = {}) {
   const onMqttSaved = vi.fn();
-  const onActivity = vi.fn();
+  const onWall = vi.fn();
   const onClose = vi.fn();
   render(
     <SettingsDialog
@@ -18,13 +18,13 @@ function openHomeAssistant(mqtt: Partial<MqttSettings> = {}) {
       onChannelSaved={vi.fn()}
       onAutoUpdateSaved={vi.fn()}
       onMqttSaved={onMqttSaved}
-      onActivity={onActivity}
+      onWall={onWall}
       onUpdate={vi.fn()}
       onClose={onClose}
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Home Assistant" }));
-  return { onMqttSaved, onActivity, onClose };
+  return { onMqttSaved, onWall, onClose };
 }
 
 const type = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
@@ -134,22 +134,38 @@ describe("SettingsDialog Home Assistant page", () => {
 
   it("shows activity by default and saves a change with the connection", async () => {
     mockCommands({ save_mqtt: () => empty });
-    const { onActivity, onClose } = openHomeAssistant();
+    const { onWall, onClose } = openHomeAssistant();
     const option = screen.getByRole("checkbox", { name: "Show activity" });
     expect(option).toBeChecked();
     fireEvent.click(option);
-    expect(onActivity).not.toHaveBeenCalled();
+    expect(onWall).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
-    expect(onActivity).toHaveBeenCalledWith(false);
+    expect(onWall).toHaveBeenCalledWith({ activity: false });
   });
 
   it("leaves Show activity alone when it was not changed", async () => {
     mockCommands({ save_mqtt: () => empty });
-    const { onActivity, onClose } = openHomeAssistant();
+    const { onWall, onClose } = openHomeAssistant();
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
-    expect(onActivity).not.toHaveBeenCalled();
+    expect(onWall).not.toHaveBeenCalled();
+  });
+
+  it("offers each activity style, explains the chosen one and saves a change with the connection", async () => {
+    mockCommands({ save_mqtt: () => empty });
+    const { onWall, onClose } = openHomeAssistant();
+    const style = screen.getByLabelText("Activity style");
+    expect(style).toHaveValue("ring");
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["Outline between tiles", "Thin outline", "Corner marks", "Top edge", "Name only"]);
+    expect(style).toHaveAccessibleDescription(expect.stringContaining("none of the picture is covered"));
+    fireEvent.change(style, { target: { value: "corners" } });
+    expect(style).toHaveAccessibleDescription(expect.stringContaining("four corners only"));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show activity" }));
+    expect(style).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(onWall).toHaveBeenCalledWith({ activity: false, activityStyle: "corners" });
   });
 
   it("says when the password is kept in the settings file", () => {

@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { saveMqtt, testMqtt, type MqttInput, type MqttSettings, type Settings } from "../app/api";
+import { saveMqtt, testMqtt, type ActivityStyle, type MqttInput, type MqttSettings, type Settings, type WallOptions } from "../app/api";
+import { ACTIVITY_STYLES } from "../wall/activity";
 
 interface HomeAssistantPageProps {
   mqtt: MqttSettings;
-  /** Tiles show Frigate's motion, objects and alerts. */
-  activity: boolean;
+  /** Whether tiles show Frigate's motion, objects and alerts, and how. */
+  wall: WallOptions;
   /** The connection was saved; the window uses the new settings. */
   onSaved: (settings: Settings) => void;
-  /** Show activity was changed and saved with the connection. */
-  onActivity: (on: boolean) => void;
+  /** Show activity or its style was changed and saved with the connection. */
+  onWall: (change: Partial<WallOptions>) => void;
   onClose: () => void;
 }
 
@@ -31,7 +32,7 @@ function parsePort(text: string): number | null {
 }
 
 /** Settings › Home Assistant: the MQTT broker in Home Assistant that Ruru connects to. */
-export default function HomeAssistantPage({ mqtt, activity, onSaved, onActivity, onClose }: HomeAssistantPageProps) {
+export default function HomeAssistantPage({ mqtt, wall, onSaved, onWall, onClose }: HomeAssistantPageProps) {
   const [enabled, setEnabled] = useState(mqtt.enabled);
   const [host, setHost] = useState(mqtt.host);
   const [port, setPort] = useState(String(mqtt.port));
@@ -41,7 +42,8 @@ export default function HomeAssistantPage({ mqtt, activity, onSaved, onActivity,
   const [password, setPassword] = useState<string | null>(null);
   const [discoveryPrefix, setDiscoveryPrefix] = useState(mqtt.discoveryPrefix);
   const [frigatePrefix, setFrigatePrefix] = useState(mqtt.frigatePrefix);
-  const [showActivity, setShowActivity] = useState(activity);
+  const [showActivity, setShowActivity] = useState(wall.activity);
+  const [style, setStyle] = useState(wall.activityStyle);
   const [test, setTest] = useState<Test>({ kind: "idle" });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -84,7 +86,11 @@ export default function HomeAssistantPage({ mqtt, activity, onSaved, onActivity,
     setSaveError(null);
     try {
       onSaved(await saveMqtt(value, password || null));
-      if (showActivity !== activity) onActivity(showActivity);
+      const change: Partial<WallOptions> = {
+        ...(showActivity !== wall.activity && { activity: showActivity }),
+        ...(style !== wall.activityStyle && { activityStyle: style }),
+      };
+      if (Object.keys(change).length > 0) onWall(change);
       onClose();
     } catch (error) {
       setSaveError(message(error));
@@ -235,8 +241,29 @@ export default function HomeAssistantPage({ mqtt, activity, onSaved, onActivity,
           Show activity
         </label>
         <span id="mqtt-activity-hint" className="field-hint">
-          Each tile is outlined while Frigate sees motion, shows a chip for each kind of object moving, and is highlighted during an alert.
+          Each tile is marked while Frigate sees motion, shows a chip for each kind of object moving, and is marked in red during an alert.
         </span>
+        <div className="field">
+          <label className="field-label" htmlFor="mqtt-activity-style">
+            Activity style
+          </label>
+          <select
+            id="mqtt-activity-style"
+            aria-describedby="mqtt-activity-style-hint"
+            value={style}
+            disabled={!showActivity}
+            onChange={(event) => setStyle(event.target.value as ActivityStyle)}
+          >
+            {ACTIVITY_STYLES.map((choice) => (
+              <option key={choice.value} value={choice.value}>
+                {choice.title}
+              </option>
+            ))}
+          </select>
+          <span id="mqtt-activity-style-hint" className="field-hint">
+            {ACTIVITY_STYLES.find((choice) => choice.value === style)?.hint}
+          </span>
+        </div>
         <div ref={result} className="settings-results">
           <div className="settings-test" aria-live="polite">
             <button type="button" onClick={() => void runTest()} disabled={!host.trim() || test.kind === "testing"}>

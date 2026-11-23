@@ -46,6 +46,27 @@ function renderWall(editing: boolean, lockRatio = true) {
 }
 
 describe("Wall", () => {
+  it("marks the wall with the activity style and each cell with its camera's activity", () => {
+    render(
+      <Wall
+        base="http://f"
+        cameras={[camera("a"), camera("b")]}
+        layout={undefined}
+        live={false}
+        editing={false}
+        activity={{ a: { motion: true, objects: {}, review: "alert" } }}
+        activityStyle="corners"
+        refresh={0}
+        onLayout={vi.fn()}
+      />,
+    );
+    const [a, b] = screen.getAllByRole("figure");
+    expect(a.closest(".wall")).toHaveClass("activity-corners");
+    expect(a.parentElement).toHaveClass("has-motion", "is-alert");
+    expect(b.parentElement).not.toHaveClass("has-motion");
+    expect(b.parentElement).not.toHaveClass("is-alert");
+  });
+
   it("drags and resizes only in Edit layout mode", () => {
     renderWall(false);
     expect(grid.props?.isDraggable).toBe(false);
