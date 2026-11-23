@@ -94,10 +94,10 @@ Some of these may already be installed with Ruru or Raspberry Pi OS. Whether thi
 
 These steps are not yet verified.
 
-**Kiosk with cage.** Install cage:
+**Kiosk with cage.** Install cage, and the session bus Ruru uses to keep to one copy and to reach the keyring:
 
 ```sh
-sudo apt install cage
+sudo apt install cage dbus-user-session
 ```
 
 Log the Pi's user in on the console automatically: run `sudo raspi-config` and choose **System Options → Boot / Auto Login → Console Autologin**. Then start cage from the login shell on the first console only, by adding this to the end of `~/.bash_profile` (or `~/.profile` if you have no `~/.bash_profile`):

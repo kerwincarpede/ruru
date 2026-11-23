@@ -3,6 +3,7 @@ use tauri::Manager;
 
 mod display;
 mod frigate;
+mod instance;
 mod menu;
 mod mqtt;
 mod settings;
@@ -40,6 +41,7 @@ pub fn app_version(package: &tauri::PackageInfo) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(instance::plugin())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(update::PendingUpdate::default())
         .setup(|app| {
