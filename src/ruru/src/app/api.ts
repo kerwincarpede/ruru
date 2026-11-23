@@ -252,3 +252,34 @@ export async function onWallCommand(handler: (command: WallCommand) => void): Pr
     return () => {};
   }
 }
+
+/** Mirrors `HostControlsCredentials` in src-tauri/src/host_controls.rs. */
+export interface HostControlsCredentials {
+  username: string;
+  password: string;
+}
+
+/** Mirrors `HostControlsStatus` in src-tauri/src/host_controls.rs. */
+export interface HostControlsStatus {
+  supported: boolean;
+  enabled: boolean;
+  connected: boolean;
+  cleanupPending: boolean;
+  message: string | null;
+}
+
+export function hostControlsStatus(): Promise<HostControlsStatus> {
+  return invoke<HostControlsStatus>("host_controls_status");
+}
+
+export function testHostControls(credentials: HostControlsCredentials): Promise<void> {
+  return invoke<void>("test_host_controls", { credentials });
+}
+
+export function enableHostControls(credentials: HostControlsCredentials, consent: boolean): Promise<void> {
+  return invoke<void>("enable_host_controls", { credentials, consent });
+}
+
+export function disableHostControls(): Promise<HostControlsStatus> {
+  return invoke<HostControlsStatus>("disable_host_controls");
+}

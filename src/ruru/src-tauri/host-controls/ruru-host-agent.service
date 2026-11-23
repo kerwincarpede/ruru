@@ -1,0 +1,16 @@
+[Unit]
+Description=Ruru Home Assistant host controls
+PartOf=graphical-session.target
+After=graphical-session-pre.target
+ConditionPathExists=%E/com.kerwincarpede.ruru/host-controls/agent.json
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/ruru --host-agent
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=graphical-session.target

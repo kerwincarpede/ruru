@@ -2,7 +2,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import SettingsDialog from "./SettingsDialog";
 import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, type MqttSettings, type Settings } from "../app/api";
-import { mockCommands } from "../test/mockCommands";
+import { mockCommands, type CommandCall } from "../test/mockCommands";
+function mqttCalls(calls: CommandCall[]): CommandCall[] {
+  return calls.filter(({ cmd }) => cmd !== "host_controls_status");
+}
 
 const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
 
@@ -51,7 +54,7 @@ describe("SettingsDialog Home Assistant page", () => {
     type("Password", "secret");
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
     expect(await screen.findByText("Connected to the broker at ha.local:1883.")).toBeInTheDocument();
-    expect(calls).toEqual([
+    expect(mqttCalls(calls)).toEqual([
       {
         cmd: "test_mqtt",
         payload: {
@@ -84,7 +87,7 @@ describe("SettingsDialog Home Assistant page", () => {
     type("Port", "70000");
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Enter a port from 1 to 65535.");
-    expect(calls).toEqual([]);
+    expect(mqttCalls(calls)).toEqual([]);
   });
 
   it("moves the usual port along with TLS", () => {
@@ -107,7 +110,7 @@ describe("SettingsDialog Home Assistant page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onMqttSaved).toHaveBeenCalledWith(saved));
     expect(onClose).toHaveBeenCalled();
-    expect(calls).toEqual([
+    expect(mqttCalls(calls)).toEqual([
       {
         cmd: "save_mqtt",
         payload: {
@@ -125,8 +128,8 @@ describe("SettingsDialog Home Assistant page", () => {
     type("Password", "");
     expect(screen.getByLabelText("Password")).toHaveAttribute("placeholder", "Saved");
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].payload).toMatchObject({ password: null });
+    await waitFor(() => expect(mqttCalls(calls)).toHaveLength(1));
+    expect(mqttCalls(calls)[0].payload).toMatchObject({ password: null });
   });
 
   it("says the keychain holds a saved password", () => {
@@ -162,6 +165,6 @@ describe("SettingsDialog Home Assistant page", () => {
     type("Port", "port");
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Enter a port from 1 to 65535.");
-    expect(calls).toEqual([]);
+    expect(mqttCalls(calls)).toEqual([]);
   });
 });

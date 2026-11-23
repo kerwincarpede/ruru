@@ -327,7 +327,8 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
         announcer.failed(&message);
         return Err(message);
     }
-    app.restart()
+    crate::host_controls::restart_after_update(&app)
+        .inspect_err(|message| announcer.failed(message))
 }
 
 /// The update Home Assistant's update entity offers: the fake update's
@@ -358,7 +359,7 @@ trait Relaunch {
     /// Installs the downloaded update.
     fn install(&mut self, bytes: Vec<u8>) -> Result<(), String>;
     /// Starts Ruru again on the installed version.
-    fn restart(&mut self);
+    fn restart(&mut self) -> Result<(), String>;
     /// Keeps the update pending after its install failed, so it can be
     /// tried again.
     fn keep_pending(&mut self);
@@ -383,7 +384,7 @@ fn relaunch_full_screen(steps: &mut impl Relaunch, bytes: Vec<u8>) -> Result<Ins
         }
         return Err(err);
     }
-    steps.restart();
+    steps.restart()?;
     Ok(Installed::Restarting)
 }
 
@@ -422,8 +423,8 @@ impl Relaunch for AppRelaunch<'_> {
             .map_err(|err| format!("The update could not be installed: {err}"))
     }
 
-    fn restart(&mut self) {
-        self.app.restart()
+    fn restart(&mut self) -> Result<(), String> {
+        crate::host_controls::restart_after_update(self.app)
     }
 
     fn keep_pending(&mut self) {
@@ -553,7 +554,7 @@ async fn auto_update(app: &AppHandle) -> Result<(), String> {
         announcer.failed(&message);
         return Err(message);
     }
-    app.restart()
+    crate::host_controls::restart_after_update(app).inspect_err(|message| announcer.failed(message))
 }
 
 /// Saves whether updates install by themselves and returns the settings with
@@ -838,8 +839,9 @@ mod tests {
             }
         }
 
-        fn restart(&mut self) {
+        fn restart(&mut self) -> Result<(), String> {
             self.done.push("restart".into());
+            Ok(())
         }
 
         fn keep_pending(&mut self) {

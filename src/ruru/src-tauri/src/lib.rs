@@ -3,6 +3,8 @@ use tauri::Manager;
 
 mod display;
 mod frigate;
+/// Entry points for the packaged host controls.
+pub mod host_controls;
 mod instance;
 mod menu;
 mod mqtt;
@@ -56,6 +58,7 @@ pub fn run() {
                     window.set_fullscreen(true)?;
                 }
             }
+            host_controls::app_ready()?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -72,6 +75,10 @@ pub fn run() {
             settings::set_update_channel,
             frigate::test_frigate,
             frigate::frigate_cameras,
+            host_controls::host_controls_status,
+            host_controls::test_host_controls,
+            host_controls::enable_host_controls,
+            host_controls::disable_host_controls,
             mqtt::test_mqtt,
             mqtt::save_mqtt,
             mqtt::report_wall_state,

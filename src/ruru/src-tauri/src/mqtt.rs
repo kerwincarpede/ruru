@@ -19,11 +19,11 @@
 //! when Ruru goes away.
 
 mod activity;
-mod client;
+pub(crate) mod client;
 mod commands;
-mod discovery;
+pub(crate) mod discovery;
 mod password;
-mod topics;
+pub(crate) mod topics;
 
 use std::{
     collections::BTreeSet,
@@ -242,6 +242,7 @@ struct Session {
     /// How this computer turns its screen off, if it can: only then is the
     /// Display switch offered.
     display: Option<Method>,
+    agent_owns_display: bool,
 }
 
 impl Session {
@@ -254,6 +255,7 @@ impl Session {
             on_broker: BTreeSet::new(),
             options: None,
             display,
+            agent_owns_display: false,
         }
     }
 
@@ -272,9 +274,11 @@ impl Session {
         }];
         messages.extend(discovery::device_configs(&self.topics, &self.device));
         messages.extend(discovery::control_configs(&self.topics, &self.device));
-        match self.display {
-            Some(_) => messages.push(discovery::display_config(&self.topics, &self.device)),
-            None => messages.extend(discovery::display_removal(&self.topics)),
+        if !self.agent_owns_display {
+            match self.display {
+                Some(_) => messages.push(discovery::display_config(&self.topics, &self.device)),
+                None => messages.extend(discovery::display_removal(&self.topics)),
+            }
         }
         messages.extend(self.cameras_changed(wall, true));
         messages.push(discovery::state(&self.topics, &self.device, &wall.state));
@@ -387,7 +391,7 @@ impl Session {
 
     /// The Display switch's state, where it is offered.
     fn display(&self, wall: &Wall) -> Vec<Message> {
-        if !self.connected || self.display.is_none() {
+        if !self.connected || self.agent_owns_display || self.display.is_none() {
             return Vec::new();
         }
         vec![discovery::display_state(&self.topics, !wall.display_off)]
@@ -676,15 +680,20 @@ async fn run(
     let problem_configs = topics.configs(PROBLEM.0);
     let reconnect_configs = topics.configs(RECONNECT.0);
     let own = topics.clone();
-    let display = match tauri::async_runtime::spawn_blocking(display::support).await {
-        Ok(Ok(method)) => Some(method),
-        Ok(Err(reason)) => {
-            eprintln!("Ruru: Home Assistant gets no Display switch: {reason}");
-            None
-        }
-        Err(err) => {
-            eprintln!("Ruru: could not tell whether the display can be turned off: {err}");
-            None
+    let agent_owns_display = crate::host_controls::enabled();
+    let display = if agent_owns_display {
+        None
+    } else {
+        match tauri::async_runtime::spawn_blocking(display::support).await {
+            Ok(Ok(method)) => Some(method),
+            Ok(Err(reason)) => {
+                eprintln!("Ruru: Home Assistant gets no Display switch: {reason}");
+                None
+            }
+            Err(err) => {
+                eprintln!("Ruru: could not tell whether the display can be turned off: {err}");
+                None
+            }
         }
     };
     {
@@ -693,11 +702,12 @@ async fn run(
         if inner.generation != generation {
             return;
         }
-        let session = Session::new(
+        let mut session = Session::new(
             topics,
             Device::this_install(crate::app_version(app.package_info())),
             display,
         );
+        session.agent_owns_display = agent_owns_display;
         inner.link = Some(Link {
             client: client.clone(),
             session,
@@ -1032,6 +1042,10 @@ pub async fn save_mqtt(
 ) -> Result<Settings, String> {
     let enabled = input.enabled;
     let input = input.validated(enabled).map_err(|err| err.to_string())?;
+    #[cfg(target_os = "linux")]
+    let _guard = crate::host_controls::CHANGE.lock().await;
+    #[cfg(target_os = "linux")]
+    crate::host_controls::check_wall_broker(&input)?;
     let password = checked_password(password).map_err(|err| err.to_string())?;
     let change = PasswordChange::from_page(&input.username, password);
     let current = settings::lock(&store).current().mqtt.clone();
@@ -1144,6 +1158,27 @@ mod tests {
             .iter()
             .map(|message| message.topic.as_str())
             .collect()
+    }
+
+    #[test]
+    fn agent_mode_leaves_display_discovery_alone_and_returns_ownership_after_disable() {
+        let mut session = session_with(Some(Method::X11));
+        session.connected = true;
+        let config = session.topics.discovery("switch", commands::DISPLAY);
+        let state = session.topics.display();
+        let owned = |message: &Message| message.topic == config || message.topic == state;
+        session.agent_owns_display = true;
+        assert!(!session.announce(&Wall::default()).iter().any(owned));
+        assert!(session.display(&Wall::default()).is_empty());
+        session.agent_owns_display = false;
+        assert_eq!(
+            session
+                .announce(&Wall::default())
+                .iter()
+                .filter(|message| owned(message))
+                .count(),
+            2
+        );
     }
 
     #[test]

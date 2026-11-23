@@ -39,7 +39,7 @@ url = "2"
 # provider, trusting the system's root certificates for TLS.
 rumqttc = { version = "0.25", default-features = false, features = ["use-rustls-no-provider"] }
 rustls-native-certs = "0.8"
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "macros"] }
 # The computer's name, for the Home Assistant device.
 gethostname = "1"
 # The broker password, in the macOS Keychain, Windows Credential Manager or the

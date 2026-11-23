@@ -48,7 +48,7 @@ It also has controls:
 | **Check for updates** | A button that checks your update channel now, rather than waiting for the next check. |
 | **Display** | A switch that turns the screen off and on. Only where Ruru can do it: see [Display](#display). |
 
-Every entity shows as unavailable while Ruru is not connected, such as when the computer is off. Problem sensors follow the cameras on the wall: hiding a camera removes its sensor, and showing it adds it back. Tiles reconnect on their own, so there are no Reconnect buttons; Ruru removes any an earlier version added. **Maximise** offers only the cameras on the wall.
+The wall’s entities show as unavailable while Ruru is disconnected. With [Ubuntu host controls](#ubuntu-host-controls) on, the agent’s entities follow its separate connection. Problem sensors follow the cameras on the wall: hiding a camera removes its sensor, and showing it adds it back. Tiles reconnect on their own, so there are no Reconnect buttons; Ruru removes any an earlier version added. **Maximise** offers only the cameras on the wall.
 
 ## Updates from Home Assistant
 
@@ -69,9 +69,50 @@ The **Display** switch turns the computer's screen off and on, such as from an a
 | Linux with X11 | `xset dpms force off` and `xset dpms force on`. | `xset`, from the `x11-xserver-utils` package on Debian and Raspberry Pi OS, and an X server with DPMS. |
 | Linux with Wayland | `wlopm --off '*'` and `wlopm --on '*'`. | `wlopm`, from the `wlopm` package, and a wlroots compositor that can turn its outputs off, such as labwc or Sway. |
 
-Ruru checks when it connects. Where the tool is missing, or the compositor can't turn its outputs off, such as GNOME or KDE on Wayland, the switch is not offered and Ruru says why in its log. Install the tool, then restart Ruru or save **Settings → Home Assistant** again, to get the switch. Whether cage can turn its outputs off is not yet verified.
+Ruru checks when it connects. Where the tool is missing, or the compositor can't turn its outputs off, such as KDE on Wayland, or GNOME without host controls, the switch is not offered and Ruru says why in its log. Install the tool, then restart Ruru or save **Settings → Home Assistant** again, to get the switch. Whether cage can turn its outputs off is not yet verified.
 
-The switch shows what Ruru last did. Touching the mouse or keyboard may wake the screen without the switch knowing, so it can show off while the screen is on. Turn it on, or off and on again, to match.
+Without Ubuntu host controls, the switch shows what Ruru last did. Touching the mouse or keyboard may wake the screen without the switch knowing, so it can show off while the screen is on. Turn it on, or off and on again, to match.
+
+## Ubuntu host controls
+
+With the Ubuntu `.deb` on GNOME Wayland, an optional user service can keep **Display** available after the Ruru window closes. It reads display power from GNOME so the switch follows changes such as wake from local input. It also adds these entities to the same Ruru device:
+
+| Entity | What it shows or does |
+| --- | --- |
+| **Ruru** | Starts or stops the wall’s user service. It shows the confirmed service state and is unavailable during a transition. A failed start leaves the switch off and reports an error in the entity’s attributes and in Ruru. To relaunch, turn it off, wait for it to show off, then turn it on. |
+| **Ruru CPU** | CPU usage for the service and its child processes over 30 seconds. One fully used logical core is 100%. The reading starts at zero on a new service invocation. |
+| **Ruru memory** | Current service memory in MiB, including the service’s child processes. |
+
+Both sensors show zero when the wall is stopped. All agent entities show as unavailable when the agent disconnects.
+
+### Set up host controls
+
+1. Save the Ruru connection in **Settings → Home Assistant**.
+2. Create a separate account for the agent on the same MQTT 5-capable broker and grant the [permissions below](#broker-permissions).
+3. Choose **Enable host controls**, enter the separate MQTT username and password, and choose **Test host controls connection**.
+4. Confirm the startup change and choose **Enable and restart Ruru**. Ruru restarts under `ruru.service` and the agent runs under `ruru-host-agent.service`. Your previous user service file and matching GNOME autostart entries are saved and restored when you turn host controls off.
+5. Open the Home Assistant page again and look for **Host controls connected**. Open the existing Ruru device in Home Assistant to see the new controls and sensors.
+
+The wall starts whenever you sign into the graphical desktop, even if you turned it off in Home Assistant before signing out. Opening Ruru locally starts the service or raises the running window. The service also handles relaunches after in-app, Home Assistant, and automatic updates. Updates use the usual installer permissions.
+
+Choose **Disable host controls** to stop the agent, restore the previous startup settings and remove its Home Assistant controls. If the broker is unreachable, the agent stops immediately and **Retry broker cleanup** appears. Use it once the broker is reachable. Ruru keeps the agent’s credentials until it can remove the retained messages.
+
+The agent runs as your desktop user, connects only to your saved broker and sends the states listed here. Its MQTT credentials are in a separate user-readable file under Ruru’s local configuration directory. To see why the service could not start or connect, run `journalctl --user -u ruru-host-agent.service -u ruru.service -b` in the desktop session. The configuration folder’s `host-controls` directory holds the original startup files while the agent is enabled.
+
+### Broker permissions
+
+Substitute the discovery prefix and device ID from Ruru’s MQTT setup and `settings.json`. Give the agent account read access to `<discovery prefix>/status` and `ruru/<device id>/agent/command/+`. Give it write access to:
+
+- `ruru/<device id>/agent/availability`
+- `ruru/<device id>/agent/+/state`
+- `ruru/<device id>/agent/+/availability`
+- `ruru/<device id>/agent/+/attributes`
+- `<discovery prefix>/switch/<device id>/display/config`
+- `<discovery prefix>/switch/<device id>/ruru/config`
+- `<discovery prefix>/sensor/<device id>/cpu/config`
+- `<discovery prefix>/sensor/<device id>/memory/config`
+
+Home Assistant needs to read the agent’s discovery, availability and state messages and publish to `ruru/<device id>/agent/command/+`. Keep all command messages non-retained. For the **Ruru** and **Display** switches, the payloads are `ON` and `OFF` and the command names are `ruru` and `display`. The agent rejects retained commands and broker redeliveries.
 
 ## Streams
 
