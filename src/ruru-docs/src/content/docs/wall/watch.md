@@ -25,7 +25,7 @@ Right-click a tile for that camera's menu:
 | **Show stream info** | Shows playback details on every tile. See [Stream info](/ruru/wall/streams/#stream-info). |
 | **Automatic**, **Main stream**, **Sub stream** | Which of the camera's streams the tile plays. Only on cameras that have both. See [Streams](/ruru/wall/streams/). |
 
-The wall's own items follow below: **Settings…**, **Edit layout**, **Fit to window**, **Show activity** while **Connect to Home Assistant** is on, and **Enter full screen**. Right-click anywhere else on the wall for just those.
+The wall's own items follow below: **Settings…**, **Edit layout**, **Stop streams** (or **Start streams**), **Fit to window**, **Show activity** while **Connect to Home Assistant** is on, and **Enter full screen**. Right-click anywhere else on the wall for just those.
 
 The arrow keys move through the menu, `Home` and `End` jump to the first and last items, and `Esc` closes it.
 
@@ -40,6 +40,10 @@ Press `F11` (`Ctrl+⌘ F` on macOS), or right-click and choose **Enter full scre
 Ruru starts full screen next time if you left it that way, which suits a wall display that powers on with the computer.
 
 The toolbar with **Edit layout** and the gear for **Settings** hides while you watch. Move the pointer to show it.
+
+## Stopping the streams
+
+Right-click the wall and choose **Stop streams** to stop every tile's stream. The tiles show their snapshots and a note says the streams are stopped. Choose **Start streams** to play them again. Home Assistant can do the same with its [Streams switch](/ruru/guides/home-assistant/#streams).
 
 ## When a picture stops
 

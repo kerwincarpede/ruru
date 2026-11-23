@@ -238,6 +238,7 @@ describe("App", () => {
     expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "Settings…",
       "Edit layout",
+      "Stop streams",
       "Enter full screen",
     ]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Enter full screen" }));
@@ -279,7 +280,7 @@ describe("App", () => {
     expect(within(menu).getAllByRole("group").map((group) => Array.from(group.querySelectorAll("button"), (item) => item.textContent))).toEqual([
       ["Maximise", "Reconnect", "Hide", "Show stream info"],
       ["Automatic (Sub)", "Main stream", "Sub stream"],
-      ["Settings…", "Edit layout", "Fit to window", "Enter full screen"],
+      ["Settings…", "Edit layout", "Stop streams", "Fit to window", "Enter full screen"],
     ]);
     expect(within(menu).getByRole("group", { name: "Stream" })).toBeInTheDocument();
     expect(within(menu).getByRole("group", { name: "Garage" })).toBeInTheDocument();
@@ -596,9 +597,9 @@ describe("App streams", () => {
     render(<App />);
     const reports = () => calls.filter((call) => call.cmd === "report_wall_state").map((call) => (call.payload as { report: unknown }).report);
     const last = () => reports()[reports().length - 1];
-    await waitFor(() => expect(reports()).toEqual([{ maximised: null, fullScreen: false, windowShown: true, cameras: ["maingate", "yard"] }]));
+    await waitFor(() => expect(reports()).toEqual([{ maximised: null, fullScreen: false, windowShown: true, streams: true, cameras: ["maingate", "yard"] }]));
     fireEvent.doubleClick(screen.getByRole("figure", { name: "Yard" }));
-    await waitFor(() => expect(last()).toEqual({ maximised: "yard", fullScreen: false, windowShown: true, cameras: ["maingate", "yard"] }));
+    await waitFor(() => expect(last()).toEqual({ maximised: "yard", fullScreen: false, windowShown: true, streams: true, cameras: ["maingate", "yard"] }));
     fireEvent.keyDown(window, { key: "F11" });
     await waitFor(() => expect(last()).toMatchObject({ fullScreen: true }));
     setVisibility("hidden");
@@ -660,6 +661,34 @@ describe("App streams", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     await act(() => emit("wall-command", { kind: "fullScreen", on: false }));
     await waitFor(() => expect(changes()).toEqual([{ fullScreen: true }, { fullScreen: false }]));
+  });
+
+  it("stops and starts every stream when Home Assistant asks, and tells it so", async () => {
+    const calls = wall();
+    render(<App />);
+    await screen.findByRole("figure", { name: "Garage" });
+    const reports = () => calls.filter((call) => call.cmd === "report_wall_state").map((call) => (call.payload as { report: { streams: boolean } }).report);
+    expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate_sub"]);
+    await act(() => emit("wall-command", { kind: "streams", on: false }));
+    expect(FakeSocket.open()).toEqual([]);
+    expect(screen.getByRole("status")).toHaveTextContent("Streams are stopped");
+    await waitFor(() => expect(reports()[reports().length - 1].streams).toBe(false));
+    await act(() => emit("wall-command", { kind: "streams", on: true }));
+    expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate_sub"]);
+    expect(screen.queryByText(/Streams are stopped/)).not.toBeInTheDocument();
+    await waitFor(() => expect(reports()[reports().length - 1].streams).toBe(true));
+  });
+
+  it("stops and starts every stream from the wall's menu", async () => {
+    wall();
+    render(<App />);
+    await screen.findByRole("figure", { name: "Garage" });
+    fireEvent.contextMenu(screen.getByRole("main"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Stop streams" }));
+    expect(FakeSocket.open()).toEqual([]);
+    fireEvent.contextMenu(screen.getByRole("main"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Start streams" }));
+    expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate_sub"]);
   });
 
   it("reconnects a tile from its right-click menu", async () => {

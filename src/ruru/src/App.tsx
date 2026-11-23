@@ -44,6 +44,8 @@ function App() {
   const [automatic, setAutomatic] = useState<Record<string, StreamKind>>({});
   const [menu, setMenu] = useState<{ x: number; y: number; camera?: string } | null>(null);
   const [live, setLive] = useState(() => document.visibilityState !== "hidden");
+  // Stopped from the wall menu or Home Assistant, such as overnight; Ruru starts with them on.
+  const [streams, setStreams] = useState(true);
   const [activity, setActivity] = useState<Activity>({});
   const [toolbar, setToolbar] = useState(true);
   const toolbarTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -215,6 +217,9 @@ function App() {
         case "fullScreen":
           if (command.on !== fullScreenRef.current) changeFullScreen(command.on);
           break;
+        case "streams":
+          setStreams(command.on);
+          break;
         case "reconnect":
           setReconnects((now) => ({ ...now, [command.camera]: (now[command.camera] ?? 0) + 1 }));
           break;
@@ -265,9 +270,9 @@ function App() {
   const shownMaximised = maximised && onWall?.includes(maximised) ? maximised : null;
   useEffect(() => {
     if (onWallKey === null) return;
-    const report = { maximised: shownMaximised, fullScreen: fullScreenNow, windowShown: live, cameras: JSON.parse(onWallKey) as string[] };
+    const report = { maximised: shownMaximised, fullScreen: fullScreenNow, windowShown: live, streams, cameras: JSON.parse(onWallKey) as string[] };
     void reportWallState(report).catch(() => {});
-  }, [onWallKey, shownMaximised, fullScreenNow, live]);
+  }, [onWallKey, shownMaximised, fullScreenNow, live, streams]);
   const onProblem = useCallback((camera: string, problem: boolean) => {
     void reportTileProblem(camera, problem).catch(() => {});
   }, []);
@@ -283,6 +288,7 @@ function App() {
     ...(url && cameras?.length
       ? [
           { label: editing ? "Done editing" : "Edit layout", onSelect: () => setEditing((now) => !now) },
+          { label: streams ? "Stop streams" : "Start streams", onSelect: () => setStreams((now) => !now) },
           { label: "Fit to window", kind: "checkbox" as const, checked: wallOptions.fitToWindow, onSelect: () => changeWall({ fitToWindow: !wallOptions.fitToWindow }) },
           // Activity comes from Frigate over the Home Assistant connection.
           ...(settings?.mqtt.enabled
@@ -392,12 +398,17 @@ function App() {
         </p>
       )}
       {url && cameras && cameras.length === 0 && <p className="wall-empty">Frigate has no cameras yet.</p>}
+      {url && cameras && cameras.length > 0 && !streams && (
+        <p className="wall-paused" role="status">
+          Streams are stopped. Showing snapshots.
+        </p>
+      )}
       {url && cameras && cameras.length > 0 && (
         <Wall
           base={url}
           cameras={cameras}
           layout={layout}
-          live={live}
+          live={live && streams}
           editing={editing}
           lockRatio={wallOptions.lockRatio}
           fitToWindow={wallOptions.fitToWindow}

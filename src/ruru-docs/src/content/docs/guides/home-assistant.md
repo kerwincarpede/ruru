@@ -41,6 +41,7 @@ It also has controls:
 | **Maximise** | A select: pick a camera to fill the window with it, or `none` to show the whole wall. |
 | **Restore** | A button that shows the whole wall again. |
 | **Full screen** | A switch that turns full screen on and off. |
+| **Streams** | A switch that stops every tile's stream and starts them again. See [Streams](#streams). |
 | A **Reconnect** button for each camera, such as **Reconnect Front door** | Drops the tile's stream and connects it again. |
 | **Update** | Shows when a newer version is out on your update channel, and installs it. |
 | **Display** | A switch that turns the screen off and on. Only where Ruru can do it: see [Display](#display). |
@@ -70,6 +71,12 @@ Ruru checks when it connects. Where the tool is missing, or the compositor can't
 
 The switch shows what Ruru last did. Touching the mouse or keyboard may wake the screen without the switch knowing, so it can show off while the screen is on. Turn it on, or off and on again, to match.
 
+## Streams
+
+Turn the **Streams** switch off to stop every tile's stream, such as overnight when nobody is watching. The tiles show their last snapshots and Ruru stops pulling video from Frigate, which saves network, CPU and power. Turn it on to start them all again. Pair it with the **Display** switch to turn the wall off at night without shutting the computer down.
+
+You can also right-click the wall and choose **Stop streams** or **Start streams**. Ruru always starts with its streams on.
+
 ## Activity on the tiles
 
 Frigate publishes what it sees to the same broker. While Ruru is connected, each tile shows its camera's activity:
@@ -89,7 +96,7 @@ Ruru publishes under `ruru/<device id>/`, where the device id is made once for e
 | Topic | Payload |
 | --- | --- |
 | `ruru/<device id>/availability` | `online`, or `offline` when Ruru goes away. |
-| `ruru/<device id>/state` | JSON with `version`, `maximised`, `full_screen` and `window_shown`. |
+| `ruru/<device id>/state` | JSON with `version`, `maximised`, `full_screen`, `window_shown` and `streams`. |
 | `ruru/<device id>/problem/<camera>` | `ON` or `OFF`. |
 | `ruru/<device id>/update` | JSON with `installed_version`, `latest_version`, `title`, `release_url` and `in_progress`, for the update entity. |
 | `ruru/<device id>/display` | `ON` or `OFF`, as Ruru last turned the screen. Only where the **Display** switch is offered. |
@@ -101,6 +108,7 @@ Home Assistant sends commands to `ruru/<device id>/command/<command>`:
 | `maximise` | A camera's name, or `none` to restore. |
 | `restore` | Anything. |
 | `full_screen` | `ON` or `OFF`. |
+| `streams` | `ON` or `OFF`. |
 | `reconnect` | A camera's name. |
 | `install` | Anything. |
 | `display` | `ON` or `OFF`. |
