@@ -107,8 +107,9 @@ function App() {
   useEffect(() => {
     let current = true;
     let stop = () => {};
+    // The notice takes the prompt's place; the offer stays, so putting away
+    // a failed install brings back Install and restart.
     void onUpdateStatus((status) => {
-      setUpdate(null);
       setUpdateStatus(status);
     }).then((unlisten) => {
       if (current) stop = unlisten;

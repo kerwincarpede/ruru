@@ -7,7 +7,7 @@ sidebar:
 
 Ruru checks for a newer release each time it starts. When there is one, it says so, such as **Ruru 0.4.1 is ready. Install and restart?** Choose **Install and restart** to update, or **Not now** to carry on. To update without being asked, turn on [automatic updates](#automatic-updates).
 
-However an update starts, from that prompt, from Home Assistant or by itself, a notice at the bottom of the window shows how it is going: **Downloading Ruru 0.4.1: 42%.** with a progress bar, then **Installing Ruru 0.4.1. Ruru will restart in a moment.** Ruru then restarts on the new version. If the update fails, the notice says why. Choose **OK** to put it away.
+However an update starts, from that prompt, **Settings → Updates**, Home Assistant or by itself, a notice at the bottom of the window shows how it is going: **Downloading Ruru 0.4.1: 42%.** with a progress bar, then **Installing Ruru 0.4.1. Ruru will restart in a moment.** Ruru then restarts on the new version. If the update fails, the notice says why. Choose **OK** to put it away.
 
 To check by hand, open **Settings → Updates** and choose **Check for updates**. The page also shows the version you have.
 

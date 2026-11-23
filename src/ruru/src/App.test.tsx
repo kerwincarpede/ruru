@@ -158,6 +158,17 @@ describe("App", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("brings back the prompt after a failed install is put away", async () => {
+    backend();
+    findUpdateMock.mockResolvedValue({ version: "0.2.0", install: vi.fn() });
+    render(<App />);
+    expect(await screen.findByRole("dialog", { name: "Ruru 0.2.0 is ready. Install and restart?" })).toBeInTheDocument();
+    await act(() => emit("update-status", { state: "failed", version: "0.2.0", message: "Download failed", automatic: false }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    expect(screen.getByRole("button", { name: "Install and restart" })).toBeEnabled();
+  });
+
   it("puts away the notice of a failed update", async () => {
     backend();
     render(<App />);
