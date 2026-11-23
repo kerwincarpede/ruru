@@ -23,7 +23,7 @@ Choose **Save** to use the address. See [Connect to Frigate](/ruru/get-started/c
 | **Connect to Home Assistant** | Connects Ruru to the MQTT broker below. Off until you turn it on. |
 | **Broker** and **Port** | The MQTT broker Home Assistant uses, such as `homeassistant.local`, on port 1883 (8883 with TLS). |
 | **Use TLS** | Connects over TLS and checks the broker's certificate against the ones your computer trusts. |
-| **Username** and **Password** | The broker login. Leave the password empty to keep the saved one; clear the username to remove both. |
+| **Username** and **Password** | The broker login. Leave the password empty to keep the saved one. To remove the saved password, clear the username and save. |
 | **Discovery prefix** | Where Home Assistant looks for new devices. Usually `homeassistant`. |
 | **Frigate prefix** | The topic prefix set in Frigate's `mqtt` settings. Usually `frigate`. |
 | **Test connection** | Connects to the broker once, and says whether it worked. |

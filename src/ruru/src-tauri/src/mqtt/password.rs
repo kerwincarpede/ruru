@@ -68,15 +68,15 @@ pub enum PasswordChange {
 
 impl PasswordChange {
     /// What the page asked for. No username means no login, so no password;
-    /// no password sent means the field was left alone; an empty one means
-    /// the user cleared it.
+    /// no password, or an empty one, keeps the saved one, so clearing the
+    /// field never deletes it by accident.
     pub fn from_page(username: &str, password: Option<String>) -> Self {
         if username.trim().is_empty() {
             return Self::Remove;
         }
         match password {
             None => Self::Keep,
-            Some(password) if password.is_empty() => Self::Remove,
+            Some(password) if password.is_empty() => Self::Keep,
             Some(password) => Self::Set(password),
         }
     }
@@ -252,7 +252,7 @@ pub mod tests {
         );
         assert_eq!(
             PasswordChange::from_page("ruru", Some(String::new())),
-            PasswordChange::Remove
+            PasswordChange::Keep
         );
         // No username, no login.
         assert_eq!(

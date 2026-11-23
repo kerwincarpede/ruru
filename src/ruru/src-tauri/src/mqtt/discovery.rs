@@ -53,19 +53,16 @@ pub fn device_name(computer: Option<&str>) -> String {
     }
 }
 
-/// The computer's name, from where each platform keeps it.
+/// The computer's name, as the system reports it, without a `.local` or
+/// other domain suffix.
 fn computer_name() -> Option<String> {
-    let from_env = ["COMPUTERNAME", "HOSTNAME"].iter().find_map(|key| {
-        std::env::var(key)
-            .ok()
-            .filter(|name| !name.trim().is_empty())
-    });
-    from_env.or_else(|| {
-        std::fs::read_to_string("/etc/hostname")
-            .ok()
-            .map(|name| name.trim().to_string())
-            .filter(|name| !name.is_empty())
-    })
+    short_name(&gethostname::gethostname().to_string_lossy())
+}
+
+/// A host name up to its first dot, or `None` when it is blank.
+fn short_name(host: &str) -> Option<String> {
+    let name = host.trim().split('.').next().unwrap_or_default().trim();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// A camera name as people read it: `front_yard` is "Front yard". The same
@@ -177,9 +174,12 @@ pub fn device_configs(topics: &Topics, device: &Device) -> Vec<Message> {
     ]
 }
 
+/// What ends the discovery object id of every problem sensor.
+pub const PROBLEM_SUFFIX: &str = "_problem";
+
 /// The discovery object of a camera's problem sensor.
-fn problem_object(camera: &str) -> String {
-    format!("{}_problem", object_id(camera))
+pub fn problem_object(camera: &str) -> String {
+    format!("{}{PROBLEM_SUFFIX}", object_id(camera))
 }
 
 /// The problem sensor for one camera: on while its tile can't play or has
@@ -209,6 +209,16 @@ pub fn camera_removal(topics: &Topics, camera: &str) -> Message {
         topics.discovery("binary_sensor", &problem_object(camera)),
         "",
     )
+}
+
+/// Removes a problem sensor known only by its object id, such as one left
+/// on the broker by an earlier run: its config and its retained state.
+pub fn stale_problem(topics: &Topics, object: &str) -> Vec<Message> {
+    let camera = object.strip_suffix(PROBLEM_SUFFIX).unwrap_or(object);
+    vec![
+        Message::retained(topics.discovery("binary_sensor", object), ""),
+        Message::retained(topics.problem(camera), ""),
+    ]
 }
 
 /// `ON` or `OFF`, as the binary sensors read them.
@@ -356,6 +366,13 @@ mod tests {
         assert_eq!(device_name(Some("")), "Ruru");
         assert_eq!(device_name(None), "Ruru");
         assert_eq!(Device::this_install().version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(
+            short_name("Kerwins-Mac.local").as_deref(),
+            Some("Kerwins-Mac")
+        );
+        assert_eq!(short_name(" kitchen-pi\n").as_deref(), Some("kitchen-pi"));
+        assert_eq!(short_name(""), None);
+        assert_eq!(short_name(".local"), None);
     }
 
     #[test]

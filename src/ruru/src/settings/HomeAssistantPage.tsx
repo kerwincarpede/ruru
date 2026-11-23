@@ -33,7 +33,7 @@ export default function HomeAssistantPage({ mqtt, onSaved, onClose }: HomeAssist
   const [port, setPort] = useState(String(mqtt.port));
   const [tls, setTls] = useState(mqtt.tls);
   const [username, setUsername] = useState(mqtt.username);
-  // Null until typed in: the saved password stays.
+  // Null until typed in. Left empty, the saved password stays.
   const [password, setPassword] = useState<string | null>(null);
   const [discoveryPrefix, setDiscoveryPrefix] = useState(mqtt.discoveryPrefix);
   const [frigatePrefix, setFrigatePrefix] = useState(mqtt.frigatePrefix);
@@ -41,7 +41,7 @@ export default function HomeAssistantPage({ mqtt, onSaved, onClose }: HomeAssist
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const saved = mqtt.passwordStorage !== "none" && password === null;
+  const saved = mqtt.passwordStorage !== "none" && !password;
   const changed = () => {
     setTest({ kind: "idle" });
     setSaveError(null);
@@ -57,7 +57,7 @@ export default function HomeAssistantPage({ mqtt, onSaved, onClose }: HomeAssist
     if (typeof value === "string") return setTest({ kind: "failed", message: value });
     setTest({ kind: "testing" });
     try {
-      await testMqtt(value, password);
+      await testMqtt(value, password || null);
       setTest({ kind: "ok", address: `${value.host.trim()}:${value.port}` });
     } catch (error) {
       setTest({ kind: "failed", message: message(error) });
@@ -71,7 +71,7 @@ export default function HomeAssistantPage({ mqtt, onSaved, onClose }: HomeAssist
     setSaving(true);
     setSaveError(null);
     try {
-      onSaved(await saveMqtt(value, password));
+      onSaved(await saveMqtt(value, password || null));
       onClose();
     } catch (error) {
       setSaveError(message(error));

@@ -108,6 +108,17 @@ describe("SettingsDialog Home Assistant page", () => {
     ]);
   });
 
+  it("keeps the saved password when a typed one is cleared again", async () => {
+    const calls = mockCommands({ save_mqtt: () => empty });
+    openHomeAssistant({ host: "ha.local", username: "ruru", passwordStorage: "keychain" });
+    type("Password", "typo");
+    type("Password", "");
+    expect(screen.getByLabelText("Password")).toHaveAttribute("placeholder", "Saved");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].payload).toMatchObject({ password: null });
+  });
+
   it("says when the password is kept in the settings file", () => {
     openHomeAssistant({ host: "ha.local", username: "ruru", passwordStorage: "file" });
     expect(screen.getByText("This computer has no keychain Ruru can use, so the password is kept in Ruru’s settings file.")).toBeInTheDocument();

@@ -515,6 +515,30 @@ describe("App streams", () => {
     setVisibility("visible");
   });
 
+  it("tells Home Assistant when a tile can't play its camera", async () => {
+    const porch: Camera = { name: "porch", enabled: true, mainStream: "porch", subStream: "porch" };
+    const calls = wall({ frigate_cameras: () => [porch] });
+    render(<App />);
+    await screen.findByRole("figure", { name: "Porch" });
+    const video = () => {
+      const element = document.querySelector<HTMLVideoElement>('video[data-stream="porch"]');
+      if (!element) throw new Error("No video plays porch");
+      Object.defineProperty(element, "error", { configurable: true, value: { code: 3 } });
+      return element;
+    };
+    act(() => {
+      video().dispatchEvent(new Event("error"));
+    });
+    // A decode failure after the first retry gives up on the stream.
+    await waitFor(() => {
+      act(() => {
+        video().dispatchEvent(new Event("error"));
+      });
+      expect(screen.getByRole("figure", { name: "Porch" })).toHaveTextContent("Can't play this stream");
+    }, { timeout: 3000 });
+    await waitFor(() => expect(calls).toContainEqual({ cmd: "report_tile_problem", payload: { camera: "porch", problem: true } }));
+  });
+
   it("reconnects a tile from its right-click menu", async () => {
     wall();
     render(<App />);

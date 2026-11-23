@@ -150,10 +150,7 @@ export function frigateCameras(url: string): Promise<Camera[]> {
 /** Mirrors `MqttInput` in src-tauri/src/mqtt.rs: the Home Assistant connection as the page sends it. */
 export type MqttInput = Omit<MqttSettings, "deviceId" | "passwordStorage">;
 
-/**
- * Connects to the broker once with `input`, for Test connection. A null
- * `password` uses the saved one; an empty one tests without a password.
- */
+/** Connects to the broker once with `input`, for Test connection. A null `password` uses the saved one. */
 export function testMqtt(input: MqttInput, password: string | null): Promise<void> {
   return invoke<void>("test_mqtt", { input, password });
 }
@@ -161,7 +158,7 @@ export function testMqtt(input: MqttInput, password: string | null): Promise<voi
 /**
  * Saves the Home Assistant connection and connects with it, or disconnects
  * when it is off, and returns the new settings. A null `password` keeps the
- * saved one; an empty one removes it.
+ * saved one; an empty username removes it.
  */
 export function saveMqtt(input: MqttInput, password: string | null): Promise<Settings> {
   return invoke<Settings>("save_mqtt", { input, password });

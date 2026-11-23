@@ -71,6 +71,28 @@ impl Topics {
         )
     }
 
+    /// Every discovery config of `component` for this device, as a
+    /// subscription filter.
+    pub fn configs(&self, component: &str) -> String {
+        format!(
+            "{}/{component}/{}/+/config",
+            self.discovery_prefix, self.device_id
+        )
+    }
+
+    /// The object id in one of this device's `component` discovery topics.
+    pub fn config_object<'a>(&self, topic: &'a str, component: &str) -> Option<&'a str> {
+        let object = topic
+            .strip_prefix(self.discovery_prefix.as_str())?
+            .strip_prefix('/')?
+            .strip_prefix(component)?
+            .strip_prefix('/')?
+            .strip_prefix(self.device_id.as_str())?
+            .strip_prefix('/')?
+            .strip_suffix("/config")?;
+        (!object.is_empty() && !object.contains('/')).then_some(object)
+    }
+
     /// Home Assistant says `online` here when it starts, asking for
     /// discovery again.
     pub fn home_assistant_status(&self) -> String {
@@ -101,6 +123,33 @@ mod tests {
             topics.discovery("binary_sensor", "front_door_problem"),
             "ha/binary_sensor/0123456789ab/front_door_problem/config"
         );
+    }
+
+    #[test]
+    fn config_topics_give_back_their_object() {
+        let topics = Topics::new("0123456789ab", "homeassistant");
+        assert_eq!(
+            topics.configs("binary_sensor"),
+            "homeassistant/binary_sensor/0123456789ab/+/config"
+        );
+        let topic = topics.discovery("binary_sensor", "garage_problem");
+        assert_eq!(
+            topics.config_object(&topic, "binary_sensor"),
+            Some("garage_problem")
+        );
+        for other in [
+            "homeassistant/sensor/0123456789ab/version/config",
+            "homeassistant/binary_sensor/ffffffffffff/garage/config",
+            "homeassistant/binary_sensor/0123456789ab/a/b/config",
+            "homeassistant/binary_sensor/0123456789ab//config",
+            "homeassistant/status",
+        ] {
+            assert_eq!(
+                topics.config_object(other, "binary_sensor"),
+                None,
+                "{other}"
+            );
+        }
     }
 
     #[test]

@@ -223,7 +223,12 @@ export default function Tile({ base, camera, choice, live, maximised = false, re
   else if (stale) status = `${frontState === "stalled" ? "Frozen" : "Reconnecting"} · ${age} s old`;
   else if (live && frontState === "retrying") status = "Reconnecting…";
 
-  const problem = useProblem(failed, live && (frontState === "retrying" || frontState === "stalled"));
+  // Trouble lasts from a freeze or a dropped stream until a frame plays again,
+  // through the reconnect attempts in between.
+  const [troubled, setTroubled] = useState(false);
+  const troubleNow = live && frontState !== "playing" && (troubled || frontState === "stalled" || frontState === "retrying");
+  if (troubled !== troubleNow) setTroubled(troubleNow);
+  const problem = useProblem(failed, troubleNow && !failed);
   const reportProblem = useRef(onProblem);
   useEffect(() => {
     reportProblem.current = onProblem;

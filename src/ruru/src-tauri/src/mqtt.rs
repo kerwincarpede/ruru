@@ -185,6 +185,9 @@ struct Wall {
     cameras: Vec<String>,
     /// Cameras whose tile has a problem now.
     problems: BTreeSet<String>,
+    /// The page has reported the cameras at least once, so a problem sensor
+    /// for a camera not in `cameras` is really stale.
+    reported: bool,
 }
 
 impl Wall {
@@ -203,6 +206,9 @@ struct Session {
     connected: bool,
     /// The cameras whose problem sensor has been announced.
     announced: BTreeSet<String>,
+    /// The problem sensors' object ids the broker holds a config for, from
+    /// this or an earlier run.
+    on_broker: BTreeSet<String>,
 }
 
 impl Session {
@@ -212,6 +218,7 @@ impl Session {
             device,
             connected: false,
             announced: BTreeSet::new(),
+            on_broker: BTreeSet::new(),
         }
     }
 
@@ -244,6 +251,7 @@ impl Session {
         let mut messages = Vec::new();
         for camera in self.announced.difference(&current) {
             messages.push(discovery::camera_removal(&self.topics, camera));
+            self.on_broker.remove(&discovery::problem_object(camera));
         }
         for camera in &wall.cameras {
             if all || !self.announced.contains(camera) {
@@ -256,6 +264,43 @@ impl Session {
             }
         }
         self.announced = current;
+        messages
+    }
+
+    /// Notes a discovery config the broker sent, and removes it if it is a
+    /// problem sensor for a camera no longer on the wall.
+    fn config_seen(&mut self, topic: &str, payload: &[u8], wall: &Wall) -> Vec<Message> {
+        let Some(object) = self.topics.config_object(topic, "binary_sensor") else {
+            return Vec::new();
+        };
+        if !object.ends_with(discovery::PROBLEM_SUFFIX) {
+            return Vec::new();
+        }
+        if payload.is_empty() {
+            self.on_broker.remove(object);
+        } else {
+            self.on_broker.insert(object.to_string());
+        }
+        self.prune(wall)
+    }
+
+    /// Removes problem sensors the broker still holds for cameras that are
+    /// not on the wall, such as one hidden while Ruru was disconnected.
+    fn prune(&mut self, wall: &Wall) -> Vec<Message> {
+        if !self.connected || !wall.reported {
+            return Vec::new();
+        }
+        let wanted: BTreeSet<String> = wall
+            .cameras
+            .iter()
+            .map(|camera| discovery::problem_object(camera))
+            .collect();
+        let stale: Vec<String> = self.on_broker.difference(&wanted).cloned().collect();
+        let mut messages = Vec::new();
+        for object in stale {
+            messages.extend(discovery::stale_problem(&self.topics, &object));
+            self.on_broker.remove(&object);
+        }
         messages
     }
 
@@ -396,6 +441,7 @@ async fn run(app: AppHandle, generation: u64, broker: Broker, topics: Topics) {
     };
     let (client, mut events) = AsyncClient::new(options, client::QUEUE);
     let home_assistant = topics.home_assistant_status();
+    let problem_configs = topics.configs("binary_sensor");
     {
         let state = app.state::<MqttState>();
         let mut inner = state.lock();
@@ -427,12 +473,27 @@ async fn run(app: AppHandle, generation: u64, broker: Broker, topics: Topics) {
                 if let Err(err) = client.try_subscribe(home_assistant.clone(), QoS::AtLeastOnce) {
                     eprintln!("Ruru: could not follow Home Assistant's status: {err}");
                 }
+                // The retained configs show sensors left from earlier runs.
+                if let Err(err) = client.try_subscribe(problem_configs.clone(), QoS::AtLeastOnce) {
+                    eprintln!("Ruru: could not read the device's discovery configs: {err}");
+                }
             }
             // Home Assistant restarted and forgot its devices.
             Ok(Event::Incoming(Packet::Publish(publish)))
                 if publish.topic == home_assistant && &publish.payload[..] == b"online" =>
             {
                 announce(true);
+            }
+            Ok(Event::Incoming(Packet::Publish(publish))) => {
+                let state = app.state::<MqttState>();
+                let mut inner = state.lock();
+                if let Some((link, wall)) = inner.link(generation) {
+                    let wall = wall.clone();
+                    let messages =
+                        link.session
+                            .config_seen(&publish.topic, &publish.payload, &wall);
+                    link.send(messages);
+                }
             }
             Ok(_) => {}
             Err(err) => {
@@ -489,6 +550,7 @@ impl Wall {
             full_screen: report.full_screen,
             window_shown: report.window_shown,
         };
+        self.reported = true;
         let changed = self.cameras != report.cameras;
         if changed {
             let cameras: BTreeSet<&String> = report.cameras.iter().collect();
@@ -578,6 +640,7 @@ pub fn report_wall_state(state: State<'_, MqttState>, report: WallReport) -> Res
         if cameras_changed {
             messages.extend(link.session.cameras_changed(&wall, false));
         }
+        messages.extend(link.session.prune(&wall));
         messages.extend(link.session.state(&wall));
         link.send(messages);
     }
@@ -638,6 +701,7 @@ mod tests {
     fn wall(cameras: &[&str]) -> Wall {
         Wall {
             cameras: cameras.iter().map(|name| name.to_string()).collect(),
+            reported: true,
             ..Wall::default()
         }
     }
@@ -790,6 +854,36 @@ mod tests {
         // A camera Home Assistant has not been told about gets no problem state.
         assert!(session.problem("front_door", true).is_empty());
         assert_eq!(session.problem("yard", true)[0].payload, "ON");
+    }
+
+    #[test]
+    fn sensors_left_from_an_earlier_run_are_removed_once_the_wall_is_known() {
+        let mut session = session();
+        let config = "homeassistant/binary_sensor/0123456789ab/garage_problem/config";
+        // Before the page reports its cameras, nothing is judged stale.
+        let unknown = Wall::default();
+        session.announce(&unknown);
+        assert!(session.config_seen(config, b"{}", &unknown).is_empty());
+        // Once it has, a camera that is not on the wall loses its sensor and state.
+        let shown = wall(&["front_door"]);
+        let messages = session.prune(&shown);
+        assert_eq!(
+            topics(&messages),
+            [config, "ruru/0123456789ab/problem/garage"]
+        );
+        assert!(messages.iter().all(|m| m.retain && m.payload.is_empty()));
+        assert!(session.prune(&shown).is_empty());
+        // A camera on the wall, other entities and other devices are left alone.
+        let front = "homeassistant/binary_sensor/0123456789ab/front_door_problem/config";
+        assert!(session.config_seen(front, b"{}", &shown).is_empty());
+        let full = "homeassistant/binary_sensor/0123456789ab/full_screen/config";
+        assert!(session.config_seen(full, b"{}", &shown).is_empty());
+        let other = "homeassistant/binary_sensor/ffffffffffff/garage_problem/config";
+        assert!(session.config_seen(other, b"{}", &shown).is_empty());
+        // Hiding it later removes it, and its echoed removal is forgotten.
+        let messages = session.prune(&wall(&[]));
+        assert_eq!(topics(&messages)[0], front);
+        assert!(session.config_seen(front, b"", &wall(&[])).is_empty());
     }
 
     #[test]
