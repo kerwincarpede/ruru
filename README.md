@@ -55,6 +55,10 @@ Ruru updates from one of two channels. Pick one with **Update channel** in **Set
 
 Switching channel checks the new one straight away. Ruru never installs an older version, so moving from Edge back to Stable keeps the version you have until Stable passes it. Every Edge build is also on the [releases page](https://github.com/kerwincarpede/ruru/releases) as a pre-release.
 
+### Automatic updates
+
+Ruru asks before it installs an update. To skip the question, turn on **Install updates automatically** in **Settings → Updates**. Ruru then checks your channel at startup, every 6 hours and as soon as you turn it on, and installs a newer version and restarts on its own. Your layout and full screen come back as they were. On Linux, the `.deb` and `.rpm` installs still ask for your password to update; the AppImage does not.
+
 The installers are not signed with a paid certificate, so Windows SmartScreen and macOS Gatekeeper warn on first launch. On macOS, choose **Done**, then **Open Anyway** in **System Settings → Privacy & Security**.
 
 ## Why Ruru?
@@ -109,7 +113,7 @@ Ruru is a [Tauri](https://tauri.app/) desktop app: a Rust backend and a React + 
 - **Discovery:** the Rust backend reads your cameras and their streams from Frigate's HTTP API (`/api/version`, `/api/config` and `/api/go2rtc/streams`) when Ruru starts and whenever its window comes back into focus.
 - **Playback:** each tile opens a WebRTC connection to the camera's stream on Frigate's go2rtc restreamer, the same path Frigate's own live view uses, and falls back to MSE. It shows the camera's latest snapshot until the video starts, reconnects on its own, and stops while the window is hidden. Video goes from Frigate to the tile without passing through Ruru's backend.
 - **Home Assistant:** when you turn it on in **Settings → Home Assistant**, Ruru connects to the MQTT broker that Home Assistant uses and shows up there as a device, with its version, the maximised camera, whether it is full screen and shown, and a problem sensor for each camera on the wall. Home Assistant can maximise a camera, restore the wall, turn full screen on or off, reconnect a tile, and install a pending update, after which Ruru restarts full screen. Its **Display** switch turns the screen off and on, on Windows, macOS, and Linux with X11 (`xset`) or a wlroots compositor such as labwc (`wlopm`). On the same broker it follows Frigate's motion, object and review topics to draw activity on the tiles.
-- **Layout and settings:** the Frigate address, full screen, the wall options, the update channel, the Home Assistant connection, and each server's tile positions and sizes are saved in `settings.json` in Ruru's config folder on your computer. The broker password goes in your computer's keychain, or in `settings.json` when there is no keychain Ruru can use.
+- **Layout and settings:** the Frigate address, full screen, the wall options, the update channel, whether updates install automatically, the Home Assistant connection, and each server's tile positions and sizes are saved in `settings.json` in Ruru's config folder on your computer. The broker password goes in your computer's keychain, or in `settings.json` when there is no keychain Ruru can use.
 
 Nothing leaves your computer except requests to the Frigate server you point it at, a check of Ruru's GitHub releases for updates, and, only if you turn it on, the connection to your MQTT broker. No analytics, no telemetry, no cloud account.
 

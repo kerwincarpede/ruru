@@ -11,6 +11,7 @@ type Commands = {
   check_update: () => string | null;
   install_update: () => null;
   set_update_channel: (args: { channel: UpdateChannel }) => Settings;
+  set_auto_update: (args: { enabled: boolean }) => Settings;
   get_settings: () => Settings;
   save_frigate_url: (args: { url: string }) => Settings;
   set_full_screen: (args: { fullScreen: boolean }) => null;

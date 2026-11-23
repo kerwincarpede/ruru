@@ -4,22 +4,25 @@ import SettingsDialog from "./SettingsDialog";
 import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, type Settings } from "../app/api";
 import { mockCommands } from "../test/mockCommands";
 
-const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
+const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
 
 const info = { name: "Ruru", version: "0.3.0" };
 
 function open(settings = empty) {
   const onSaved = vi.fn();
   const onChannelSaved = vi.fn();
+  const onAutoUpdateSaved = vi.fn();
   const onUpdate = vi.fn();
   const onClose = vi.fn();
   const onMqttSaved = vi.fn();
   const onActivity = vi.fn();
-  const props = { info, onSaved, onChannelSaved, onMqttSaved, onActivity, onUpdate, onClose };
+  const props = { info, onSaved, onChannelSaved, onAutoUpdateSaved, onMqttSaved, onActivity, onUpdate, onClose };
   const { rerender } = render(<SettingsDialog settings={settings} {...props} />);
   // The window passes the saved settings back in, as App does.
-  onChannelSaved.mockImplementation((saved: Settings) => rerender(<SettingsDialog settings={saved} {...props} />));
-  return { onSaved, onChannelSaved, onUpdate, onClose, field: screen.getByLabelText("Frigate URL") };
+  const passBack = (saved: Settings) => rerender(<SettingsDialog settings={saved} {...props} />);
+  onChannelSaved.mockImplementation(passBack);
+  onAutoUpdateSaved.mockImplementation(passBack);
+  return { onSaved, onChannelSaved, onAutoUpdateSaved, onUpdate, onClose, field: screen.getByLabelText("Frigate URL") };
 }
 
 function openUpdates(settings = empty) {
@@ -210,6 +213,53 @@ describe("SettingsDialog Updates page", () => {
     expect(onChannelSaved).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Update channel")).toHaveValue("stable");
     expect(calls.map((call) => call.cmd)).toEqual(["set_update_channel"]);
+  });
+
+  it("installs updates by asking first until automatic updates are turned on", () => {
+    openUpdates();
+    const box = screen.getByRole("checkbox", { name: "Install updates automatically" });
+    expect(box).not.toBeChecked();
+    expect(box).toHaveAccessibleDescription(/installs the update and restarts without asking/);
+  });
+
+  it("turning on automatic updates saves it and puts away an update found by hand", async () => {
+    const calls = mockCommands({
+      fake_update: () => null,
+      check_update: () => "0.4.0",
+      set_auto_update: ({ enabled }) => ({ ...empty, autoUpdate: enabled }),
+    });
+    const { onAutoUpdateSaved, onUpdate } = openUpdates();
+    fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+    expect(await screen.findByText("Ruru 0.4.0 is ready.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Install updates automatically" }));
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "Install updates automatically" })).toBeChecked());
+    expect(onAutoUpdateSaved).toHaveBeenCalledWith({ ...empty, autoUpdate: true });
+    expect(onUpdate).toHaveBeenLastCalledWith(null);
+    expect(screen.queryByText("Ruru 0.4.0 is ready.")).not.toBeInTheDocument();
+    expect(calls).toContainEqual({ cmd: "set_auto_update", payload: { enabled: true } });
+  });
+
+  it("turning off automatic updates saves it", async () => {
+    const calls = mockCommands({ set_auto_update: ({ enabled }) => ({ ...empty, autoUpdate: enabled }) });
+    openUpdates({ ...empty, autoUpdate: true });
+    const box = screen.getByRole("checkbox", { name: "Install updates automatically" });
+    expect(box).toBeChecked();
+    fireEvent.click(box);
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "Install updates automatically" })).not.toBeChecked());
+    expect(calls).toEqual([{ cmd: "set_auto_update", payload: { enabled: false } }]);
+  });
+
+  it("keeps automatic updates as they were when saving fails", async () => {
+    mockCommands({
+      set_auto_update: () => {
+        throw "The settings could not be saved: disk full";
+      },
+    });
+    const { onAutoUpdateSaved } = openUpdates();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Install updates automatically" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("disk full");
+    expect(onAutoUpdateSaved).not.toHaveBeenCalled();
+    expect(screen.getByRole("checkbox", { name: "Install updates automatically" })).not.toBeChecked();
   });
 
   it("closes on Close", () => {

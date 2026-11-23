@@ -5,8 +5,9 @@ import { cameraLabel, type Camera } from "./app/frigate";
 import { isMac, shortcutFor } from "./app/keys";
 import Logo from "./app/Logo";
 import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, cameraActivity, frigateCameras, getSettings, onCameraActivity, onFullScreenChanged, onOpenSettings, onWallCommand, reportTileProblem, reportWallState, saveLayout, saveWallOptions, setFullScreen, type Activity, type SavedLayout, type Settings, type WallOptions } from "./app/api";
+import AutoUpdateNotice from "./app/AutoUpdateNotice";
 import UpdatePrompt from "./app/UpdatePrompt";
-import { findUpdate, versionLabel, type AvailableUpdate } from "./app/updates";
+import { findUpdate, onAutoUpdate, versionLabel, type AutoUpdateStatus, type AvailableUpdate } from "./app/updates";
 import SettingsDialog from "./settings/SettingsDialog";
 import { EMPTY_LAYOUT, hideCamera, showCamera, wallPlacements } from "./wall/layout";
 import { tileMenu, type MenuItem, type MenuSection } from "./wall/menu";
@@ -17,7 +18,7 @@ import WallMenu from "./wall/WallMenu";
 /** How long the toolbar stays after the pointer stops moving. */
 export const TOOLBAR_HIDE_MS = 2500;
 
-const NO_SETTINGS: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
+const NO_SETTINGS: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
 
 function GearIcon() {
   return (
@@ -31,6 +32,7 @@ function GearIcon() {
 function App() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [update, setUpdate] = useState<AvailableUpdate | null>(null);
+  const [autoStatus, setAutoStatus] = useState<AutoUpdateStatus | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [cameras, setCameras] = useState<Camera[] | null>(null);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
@@ -55,17 +57,37 @@ function App() {
       .catch(() => {});
   }, []);
 
-  // One check per launch. findUpdate never rejects: a failed check offers nothing.
-  // A channel switch in Settings meanwhile makes its answer stale.
+  // One check per launch, once the settings are in. With Install updates
+  // automatically on, the backend checks and installs instead, so nothing asks.
+  // findUpdate never rejects: a failed check offers nothing. A channel switch,
+  // or turning automatic updates on, meanwhile makes its answer stale.
   const channelSwitches = useRef(0);
+  const askToUpdate = settings ? !settings.autoUpdate : null;
+  const checkedAtStartup = useRef(false);
   useEffect(() => {
-    let current = true;
+    if (askToUpdate === null || checkedAtStartup.current) return;
+    checkedAtStartup.current = true;
+    if (!askToUpdate) return;
     const switches = channelSwitches.current;
     void findUpdate().then((found) => {
-      if (current && switches === channelSwitches.current) setUpdate(found);
+      if (switches === channelSwitches.current) setUpdate(found);
+    });
+  }, [askToUpdate]);
+
+  // The backend says when an automatic update installs; Ruru restarts after.
+  useEffect(() => {
+    let current = true;
+    let stop = () => {};
+    void onAutoUpdate((status) => {
+      setUpdate(null);
+      setAutoStatus(status);
+    }).then((unlisten) => {
+      if (current) stop = unlisten;
+      else unlisten();
     });
     return () => {
       current = false;
+      stop();
     };
   }, []);
 
@@ -402,6 +424,10 @@ function App() {
           }}
           onMqttSaved={setSettings}
           onActivity={(on) => changeWall({ activity: on })}
+          onAutoUpdateSaved={(saved) => {
+            channelSwitches.current += 1;
+            setSettings(saved);
+          }}
           onUpdate={setUpdate}
           onSaved={(saved) => {
             setSettings(saved);
@@ -413,7 +439,11 @@ function App() {
           onClose={() => setSettingsOpen(false)}
         />
       )}
-      {update && <UpdatePrompt update={update} onClose={() => setUpdate(null)} />}
+      {autoStatus ? (
+        <AutoUpdateNotice status={autoStatus} onClose={() => setAutoStatus(null)} />
+      ) : (
+        update && <UpdatePrompt update={update} onClose={() => setUpdate(null)} />
+      )}
       {!url && (
         <footer className="footer" aria-label="About Ruru">
           {version && <span>{version}</span>}

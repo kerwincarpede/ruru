@@ -81,6 +81,8 @@ export interface Settings {
   wall: WallOptions;
   updateChannel: UpdateChannel;
   mqtt: MqttSettings;
+  /** Updates install, and Ruru restarts on them, without asking. */
+  autoUpdate: boolean;
   layouts: Record<string, SavedLayout>;
 }
 
@@ -97,6 +99,14 @@ export function saveFrigateUrl(url: string): Promise<Settings> {
 /** Saves the update channel and returns the new settings. */
 export function setUpdateChannel(channel: UpdateChannel): Promise<Settings> {
   return invoke<Settings>("set_update_channel", { channel });
+}
+
+/**
+ * Saves whether updates install by themselves and returns the new settings.
+ * Turning it on makes the backend check straight away.
+ */
+export function setAutoUpdate(enabled: boolean): Promise<Settings> {
+  return invoke<Settings>("set_auto_update", { enabled });
 }
 
 /** Turns full screen on or off and remembers it for the next launch. */

@@ -1,7 +1,7 @@
 //! Ruru's settings, stored as `settings.json` in the app config folder: the
 //! Frigate URL, whether the window is full screen, how the wall is drawn,
-//! the update channel, the Home Assistant (MQTT) connection, and one wall
-//! layout per Frigate server.
+//! the update channel, whether updates install by themselves, the Home
+//! Assistant (MQTT) connection, and one wall layout per Frigate server.
 //!
 //! Missing keys fall back to their defaults and unknown keys are ignored, so
 //! settings files from other versions still load.
@@ -220,6 +220,9 @@ pub struct Settings {
     pub update_channel: UpdateChannel,
     /// The Home Assistant (MQTT) connection.
     pub mqtt: MqttSettings,
+    /// Updates install, and Ruru restarts on them, without asking. Off until
+    /// the user turns it on in Settings › Updates.
+    pub auto_update: bool,
     /// Layouts by normalised Frigate URL.
     pub layouts: BTreeMap<String, SavedLayout>,
 }
@@ -435,6 +438,11 @@ impl SettingsStore {
             saved => saved.to_string(),
         };
         self.update(|settings| settings.mqtt = mqtt)
+    }
+
+    /// Saves whether updates install by themselves.
+    pub fn set_auto_update(&mut self, auto_update: bool) -> Result<&Settings, SettingsError> {
+        self.update(|settings| settings.auto_update = auto_update)
     }
 
     /// Saves the layout for the Frigate server at `server`.
@@ -735,6 +743,17 @@ mod tests {
     }
 
     #[test]
+    fn updates_ask_first_until_automatic_updates_are_turned_on() {
+        assert!(!Settings::default().auto_update);
+        let dir = TempDir::new("auto-update");
+        let mut store = SettingsStore::open(Some(dir.file()));
+        assert!(store.set_auto_update(true).unwrap().auto_update);
+        assert!(SettingsStore::open(Some(dir.file())).current().auto_update);
+        assert!(!store.set_auto_update(false).unwrap().auto_update);
+        assert!(!SettingsStore::open(Some(dir.file())).current().auto_update);
+    }
+
+    #[test]
     fn an_unknown_update_channel_reads_as_stable() {
         for stored in [r#""nightly""#, "3", "null", r#"{"edge": true}"#] {
             let settings: Settings = serde_json::from_str(&format!(
@@ -798,6 +817,7 @@ mod tests {
                 password: Some("secret".into()),
                 ..MqttSettings::default()
             },
+            auto_update: true,
             layouts: BTreeMap::new(),
         };
         settings.layouts.insert(
@@ -814,6 +834,7 @@ mod tests {
                 "fullScreen": true,
                 "wall": {"lockRatio": true, "fitToWindow": true, "streamInfo": false, "activity": true},
                 "updateChannel": "edge",
+                "autoUpdate": true,
                 "mqtt": {
                     "enabled": false,
                     "host": "",

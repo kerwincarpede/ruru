@@ -9,21 +9,28 @@
 //! refuses anything else. Only a newer version counts as an update, so a copy
 //! moved from Edge back to Stable keeps its version until Stable passes it.
 //!
+//! With Install updates automatically turned on, a background thread checks
+//! at startup, every [`AUTO_CHECK_INTERVAL`] and whenever the setting is
+//! turned on, then installs what it finds and restarts Ruru without asking.
+//!
 //! A debug build run with `RURU_FAKE_UPDATE` set offers a fake update
 //! instead, so the prompt and Home Assistant's update entity can be seen
 //! without a newer release.
 
 use std::{
-    sync::{Mutex, MutexGuard},
+    sync::{
+        Mutex, MutexGuard,
+        mpsc::{self, RecvTimeoutError},
+    },
     time::Duration,
 };
 
 use semver::Version;
-use serde::Deserialize;
-use tauri::{AppHandle, Manager, Url};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, Manager, State, Url};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
-use crate::settings::{self, SharedSettings, UpdateChannel};
+use crate::settings::{self, Settings, SharedSettings, UpdateChannel};
 
 /// Stable's manifest: the one on the release GitHub marks as latest.
 pub const STABLE_ENDPOINT: &str =
@@ -354,6 +361,133 @@ pub async fn install_for_home_assistant(app: &AppHandle) -> Result<Installed, St
     )
 }
 
+/// How often automatic updates check, after the check at startup.
+pub const AUTO_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// The event the page hears while an automatic update installs, or after one
+/// failed.
+pub const AUTO_UPDATE_EVENT: &str = "auto-update";
+
+/// What an automatic update is doing, for the page's notice.
+///
+/// Mirrored by `AutoUpdateStatus` in `src/app/updates.ts`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum AutoUpdateStatus {
+    /// Downloading and installing; Ruru restarts when it is done.
+    Installing { version: String },
+    /// The install failed. The next check tries again.
+    Failed { version: String, message: String },
+}
+
+/// Wakes the automatic-update thread so it checks straight away, such as
+/// when the setting is turned on.
+pub struct AutoUpdater(Mutex<mpsc::Sender<()>>);
+
+impl AutoUpdater {
+    fn wake(&self) {
+        let sender = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // The thread only stops with the app, so a failed send changes nothing.
+        let _ = sender.send(());
+    }
+}
+
+/// Calls `tick` at once, then each time `wake` is sent to or `interval`
+/// passes, until every sender is gone.
+fn every(interval: Duration, wake: &mpsc::Receiver<()>, mut tick: impl FnMut()) {
+    loop {
+        tick();
+        match wake.recv_timeout(interval) {
+            Ok(()) | Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => return,
+        }
+    }
+}
+
+/// Starts the automatic-update thread and returns the handle that wakes it,
+/// for the app to manage. Each check does nothing unless Install updates
+/// automatically is on. Needs the settings and the pending update to be
+/// managed first.
+pub fn start_auto_updates(app: AppHandle) -> AutoUpdater {
+    let (sender, wake) = mpsc::channel();
+    std::thread::spawn(move || {
+        every(AUTO_CHECK_INTERVAL, &wake, || {
+            if !settings::lock(&app.state::<SharedSettings>())
+                .current()
+                .auto_update
+            {
+                return;
+            }
+            if let Err(err) = tauri::async_runtime::block_on(auto_update(&app)) {
+                eprintln!("Ruru: automatic update: {err}");
+            }
+        });
+    });
+    AutoUpdater(Mutex::new(sender))
+}
+
+/// Checks the saved channel and installs what it offers, telling the page.
+/// Restarts Ruru when the install succeeds; a failed one stays pending for
+/// the next try. The pending update is taken to install it, so the user,
+/// Home Assistant and this thread never install the same update twice.
+async fn auto_update(app: &AppHandle) -> Result<(), String> {
+    let announce = |status: AutoUpdateStatus| {
+        let _ = app.emit(AUTO_UPDATE_EVENT, status);
+    };
+    if let Some(version) = fake_update() {
+        // Nothing to install: the notice shows and Ruru keeps running.
+        announce(AutoUpdateStatus::Installing { version });
+        return Ok(());
+    }
+    let Some(version) = check(app).await? else {
+        return Ok(());
+    };
+    announce(AutoUpdateStatus::Installing {
+        version: version.clone(),
+    });
+    let installed = match download(app).await {
+        Ok((channel, update, bytes)) => match update.install(bytes) {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                app.state::<PendingUpdate>().put_back(channel, update);
+                Err(format!("The update could not be installed: {err}"))
+            }
+        },
+        Err(err) => Err(err),
+    };
+    match installed {
+        Ok(()) => app.restart(),
+        Err(message) => {
+            announce(AutoUpdateStatus::Failed {
+                version,
+                message: message.clone(),
+            });
+            Err(message)
+        }
+    }
+}
+
+/// Saves whether updates install by themselves and returns the settings with
+/// it. Turning it on checks straight away.
+#[tauri::command]
+pub async fn set_auto_update(
+    state: State<'_, SharedSettings>,
+    updater: State<'_, AutoUpdater>,
+    enabled: bool,
+) -> Result<Settings, String> {
+    let saved = settings::lock(&state)
+        .set_auto_update(enabled)
+        .cloned()
+        .map_err(|err| err.to_string())?;
+    if enabled {
+        updater.wake();
+    }
+    Ok(saved)
+}
+
 /// The environment variable that fakes an update in a debug build.
 pub const FAKE_UPDATE_VAR: &str = "RURU_FAKE_UPDATE";
 
@@ -390,6 +524,51 @@ pub fn fake_update() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_schedule_ticks_at_once_on_each_wake_and_stops_with_its_senders() {
+        let (sender, wake) = mpsc::channel();
+        sender.send(()).unwrap();
+        sender.send(()).unwrap();
+        drop(sender);
+        let mut ticks = 0;
+        every(Duration::from_secs(3600), &wake, || ticks += 1);
+        assert_eq!(ticks, 3);
+    }
+
+    #[test]
+    fn the_schedule_ticks_again_when_the_interval_passes() {
+        let (sender, wake) = mpsc::channel::<()>();
+        let mut sender = Some(sender);
+        let mut ticks = 0;
+        every(Duration::from_millis(1), &wake, || {
+            ticks += 1;
+            if ticks == 3 {
+                // With no sender left, the schedule ends after this tick.
+                sender.take();
+            }
+        });
+        assert_eq!(ticks, 3);
+    }
+
+    #[test]
+    fn automatic_update_status_serialises_as_the_page_expects() {
+        assert_eq!(
+            serde_json::to_value(AutoUpdateStatus::Installing {
+                version: "0.4.1".into()
+            })
+            .unwrap(),
+            serde_json::json!({ "state": "installing", "version": "0.4.1" })
+        );
+        assert_eq!(
+            serde_json::to_value(AutoUpdateStatus::Failed {
+                version: "0.4.1".into(),
+                message: "No disk space".into()
+            })
+            .unwrap(),
+            serde_json::json!({ "state": "failed", "version": "0.4.1", "message": "No disk space" })
+        );
+    }
 
     fn releases(json: &str) -> Vec<GithubRelease> {
         serde_json::from_str(json).unwrap()
