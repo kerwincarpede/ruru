@@ -99,7 +99,6 @@ export default function UpdatesPage({ info, channel, autoUpdate, onChannelSaved,
     <div className="settings-body">
       <h3 className="settings-title">Updates</h3>
       <div className="settings-content">
-        <p className="settings-version">{info ? versionLabel(info, channel) : "Ruru"}</p>
         <div className="field">
           <label className="field-label" htmlFor="update-channel">
             Update channel
@@ -139,24 +138,27 @@ export default function UpdatesPage({ info, channel, autoUpdate, onChannelSaved,
             Ruru checks at startup and every 6 hours, then installs the update and restarts without asking.
           </span>
         </div>
-        <div className="settings-test" aria-live="polite">
-          {offered ? (
-            <button type="button" className="primary" onClick={() => void install(offered)} disabled={busy}>
-              {check.kind === "installing" ? "Installing…" : "Install and restart"}
-            </button>
-          ) : (
-            <button type="button" onClick={() => void runCheck()} disabled={busy}>
-              {check.kind === "checking" ? "Checking…" : "Check for updates"}
-            </button>
-          )}
-          {check.kind === "current" && <p className="test-ok">Ruru is up to date.</p>}
-          {offered && <p className="test-ok">Ruru {offered.version} is ready.</p>}
-          {check.kind === "failed" && (
-            <p className="test-failed" role="alert">
-              {check.message}
-            </p>
-          )}
-        </div>
+        <section className="settings-section" aria-labelledby="installed-version">
+          <h4 id="installed-version">{info ? versionLabel(info, channel) : "Ruru"}</h4>
+          <div className="settings-test" aria-live="polite">
+            {offered ? (
+              <button type="button" className="primary" onClick={() => void install(offered)} disabled={busy}>
+                {check.kind === "installing" ? "Installing…" : "Install and restart"}
+              </button>
+            ) : (
+              <button type="button" onClick={() => void runCheck()} disabled={busy}>
+                {check.kind === "checking" ? "Checking…" : "Check for updates"}
+              </button>
+            )}
+            {check.kind === "current" && <p className="test-ok">Ruru is up to date.</p>}
+            {offered && <p className="test-ok">Ruru {offered.version} is ready.</p>}
+            {check.kind === "failed" && (
+              <p className="test-failed" role="alert">
+                {check.message}
+              </p>
+            )}
+          </div>
+        </section>
       </div>
       <footer className="dialog-foot">
         <span className="dialog-foot-note">Changes save as you make them.</span>

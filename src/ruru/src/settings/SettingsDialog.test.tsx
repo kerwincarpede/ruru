@@ -15,14 +15,14 @@ function open(settings = empty) {
   const onUpdate = vi.fn();
   const onClose = vi.fn();
   const onMqttSaved = vi.fn();
-  const onWall = vi.fn();
-  const props = { info, onSaved, onChannelSaved, onAutoUpdateSaved, onMqttSaved, onWall, onUpdate, onClose };
+  const onWallSaved = vi.fn();
+  const props = { info, onSaved, onChannelSaved, onAutoUpdateSaved, onMqttSaved, onWallSaved, onUpdate, onClose };
   const { rerender } = render(<SettingsDialog settings={settings} {...props} />);
   // The window passes the saved settings back in, as App does.
   const passBack = (saved: Settings) => rerender(<SettingsDialog settings={saved} {...props} />);
   onChannelSaved.mockImplementation(passBack);
   onAutoUpdateSaved.mockImplementation(passBack);
-  return { onSaved, onChannelSaved, onAutoUpdateSaved, onUpdate, onClose, field: screen.getByLabelText("Frigate URL") };
+  return { onSaved, onChannelSaved, onAutoUpdateSaved, onUpdate, onClose, onWallSaved, field: screen.getByLabelText("Frigate URL") };
 }
 
 function openUpdates(settings = empty) {
@@ -101,11 +101,63 @@ describe("SettingsDialog", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   });
 
-  it("closes on Cancel and on Escape", () => {
+  it("closes on Cancel, Close Settings and Escape", () => {
     const { onClose } = open();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Settings" }));
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(onClose).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("SettingsDialog Appearance page", () => {
+  function openAppearance(settings = empty) {
+    const opened = open(settings);
+    fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
+    return opened;
+  }
+
+  it("saves highlighting and tile details without saving the MQTT connection", async () => {
+    const calls = mockCommands({ save_wall_options: () => null });
+    const { onWallSaved, onClose } = openAppearance({ ...empty, wall: { ...empty.wall, fitToWindow: false } });
+    const activity = screen.getByRole("checkbox", { name: "Show activity" });
+    const style = screen.getByLabelText("Activity style");
+    const save = screen.getByRole("button", { name: "Save" });
+    expect(activity).toBeChecked();
+    expect(activity).toHaveAccessibleDescription(/Connect to Home Assistant/);
+    expect(style).toHaveValue("ring");
+    expect(save).toBeDisabled();
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["Outline between tiles", "Thin outline", "Corner marks", "Top edge", "Name only"]);
+    fireEvent.change(style, { target: { value: "corners" } });
+    expect(style).toHaveAccessibleDescription(/four corners only/);
+    fireEvent.click(activity);
+    expect(style).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show stream info" }));
+    expect(calls).toEqual([]);
+    fireEvent.click(save);
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    const options = { ...empty.wall, fitToWindow: false, activity: false, activityStyle: "corners", streamInfo: true };
+    expect(calls).toEqual([{ cmd: "save_wall_options", payload: { options } }]);
+    expect(onWallSaved).toHaveBeenCalledWith(options);
+  });
+
+  it("shows a save error and keeps the draft for retry", async () => {
+    mockCommands({
+      save_wall_options: () => {
+        throw "The settings could not be saved: disk full";
+      },
+    });
+    const { onWallSaved, onClose } = openAppearance({ ...empty, mqtt: { ...empty.mqtt, enabled: true } });
+    const activity = screen.getByRole("checkbox", { name: "Show activity" });
+    expect(activity).toHaveAccessibleDescription("Mark tiles when Frigate detects motion, objects or alerts.");
+    fireEvent.click(activity);
+    const save = screen.getByRole("button", { name: "Save" });
+    fireEvent.click(save);
+    expect(await screen.findByRole("alert")).toHaveTextContent("disk full");
+    expect(activity).not.toBeChecked();
+    expect(save).toBeEnabled();
+    expect(onWallSaved).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
 

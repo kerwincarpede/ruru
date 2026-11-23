@@ -8,7 +8,6 @@ const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WAL
 
 function openHomeAssistant(mqtt: Partial<MqttSettings> = {}) {
   const onMqttSaved = vi.fn();
-  const onWall = vi.fn();
   const onClose = vi.fn();
   render(
     <SettingsDialog
@@ -18,13 +17,13 @@ function openHomeAssistant(mqtt: Partial<MqttSettings> = {}) {
       onChannelSaved={vi.fn()}
       onAutoUpdateSaved={vi.fn()}
       onMqttSaved={onMqttSaved}
-      onWall={onWall}
+      onWallSaved={vi.fn()}
       onUpdate={vi.fn()}
       onClose={onClose}
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Home Assistant" }));
-  return { onMqttSaved, onWall, onClose };
+  return { onMqttSaved, onClose };
 }
 
 const type = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
@@ -35,7 +34,10 @@ describe("SettingsDialog Home Assistant page", () => {
     expect(screen.getByRole("heading", { name: "Home Assistant" })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Connect to Home Assistant" })).not.toBeChecked();
     expect(screen.getByLabelText("Port")).toHaveValue("1883");
+    expect(screen.getByRole("region", { name: "MQTT broker" })).toContainElement(screen.getByLabelText("Broker"));
+    expect(screen.getByRole("region", { name: "MQTT topics" })).toContainElement(screen.getByLabelText("Discovery prefix"));
     expect(screen.getByLabelText("Discovery prefix")).toHaveValue("homeassistant");
+    expect(screen.queryByLabelText("Show activity")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Frigate prefix")).toHaveValue("frigate");
     expect(screen.getByRole("button", { name: "Test connection" })).toBeDisabled();
     expect(screen.getByText("Ruru keeps the password in this computer’s keychain if it has one, or else in Ruru’s settings file.")).toBeInTheDocument();
@@ -130,42 +132,6 @@ describe("SettingsDialog Home Assistant page", () => {
   it("says the keychain holds a saved password", () => {
     openHomeAssistant({ host: "ha.local", username: "ruru", passwordStorage: "keychain" });
     expect(screen.getByText("The password is kept in this computer’s keychain.")).toBeInTheDocument();
-  });
-
-  it("shows activity by default and saves a change with the connection", async () => {
-    mockCommands({ save_mqtt: () => empty });
-    const { onWall, onClose } = openHomeAssistant();
-    const option = screen.getByRole("checkbox", { name: "Show activity" });
-    expect(option).toBeChecked();
-    fireEvent.click(option);
-    expect(onWall).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
-    expect(onWall).toHaveBeenCalledWith({ activity: false });
-  });
-
-  it("leaves Show activity alone when it was not changed", async () => {
-    mockCommands({ save_mqtt: () => empty });
-    const { onWall, onClose } = openHomeAssistant();
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
-    expect(onWall).not.toHaveBeenCalled();
-  });
-
-  it("offers each activity style, explains the chosen one and saves a change with the connection", async () => {
-    mockCommands({ save_mqtt: () => empty });
-    const { onWall, onClose } = openHomeAssistant();
-    const style = screen.getByLabelText("Activity style");
-    expect(style).toHaveValue("ring");
-    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["Outline between tiles", "Thin outline", "Corner marks", "Top edge", "Name only"]);
-    expect(style).toHaveAccessibleDescription(expect.stringContaining("none of the picture is covered"));
-    fireEvent.change(style, { target: { value: "corners" } });
-    expect(style).toHaveAccessibleDescription(expect.stringContaining("four corners only"));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Show activity" }));
-    expect(style).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
-    expect(onWall).toHaveBeenCalledWith({ activity: false, activityStyle: "corners" });
   });
 
   it("says when the password is kept in the settings file", () => {

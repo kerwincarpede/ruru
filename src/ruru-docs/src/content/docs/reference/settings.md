@@ -26,11 +26,19 @@ Choose **Save** to use the address. See [Connect to Frigate](/ruru/get-started/c
 | **Username** and **Password** | The broker login. Leave the password empty to keep the saved one. To remove the saved password, clear the username and save. |
 | **Discovery prefix** | Where Home Assistant looks for new devices. Usually `homeassistant`. |
 | **Frigate prefix** | The topic prefix set in Frigate's `mqtt` settings. Usually `frigate`. |
-| **Show activity** | Shows Frigate's motion, objects and alerts on each tile. On by default. Also in the wall's right-click menu. |
-| **Activity style** | How a tile is marked for motion and alerts: **Outline between tiles** (the default), **Thin outline**, **Corner marks**, **Top edge** or **Name only**. See [Activity on the tiles](/ruru/guides/home-assistant/#activity-on-the-tiles). |
 | **Test connection** | Connects to the broker once, and says whether it worked. |
 
 Choose **Save** to connect, or to disconnect when **Connect to Home Assistant** is off. See [Home Assistant](/ruru/guides/home-assistant/).
+
+## Appearance
+
+| Setting | What it does |
+| --- | --- |
+| **Show activity** | Shows Frigate's motion, objects and alerts on each tile. On by default. Also in the wall's right-click menu. |
+| **Activity style** | How a tile is marked for motion and alerts: **Outline between tiles** (the default), **Thin outline**, **Corner marks**, **Top edge** or **Name only**. See [Activity on the tiles](/ruru/guides/home-assistant/#activity-on-the-tiles). |
+| **Show stream info** | Shows playback details on each tile. Also in the tile’s right-click menu. See [Stream info](/ruru/wall/streams/#stream-info). |
+
+Choose **Save** to apply these settings. Card highlighting uses activity from the MQTT broker configured in **Settings → Home Assistant**.
 
 ## Updates
 

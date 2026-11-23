@@ -506,7 +506,7 @@ function App() {
             setSettings(saved);
           }}
           onMqttSaved={setSettings}
-          onWall={changeWall}
+          onWallSaved={(wall) => setSettings((current) => ({ ...(current ?? NO_SETTINGS), wall }))}
           onAutoUpdateSaved={(saved) => {
             channelSwitches.current += 1;
             setSettings(saved);
