@@ -201,13 +201,14 @@ pub async fn check(app: &AppHandle) -> Result<Option<String>, String> {
 }
 
 /// Takes the pending update, if the channel has not changed since it was
-/// found, and downloads it. A failed download keeps it pending.
-async fn download(app: &AppHandle) -> Result<(Update, Vec<u8>), String> {
+/// found, and downloads it, returning the channel too. A failed download
+/// keeps it pending.
+async fn download(app: &AppHandle) -> Result<(UpdateChannel, Update, Vec<u8>), String> {
     let channel = saved_channel(&app.state::<SharedSettings>());
     let pending = app.state::<PendingUpdate>();
     let update = pending.take(channel)?;
     match update.download(|_, _| {}, || {}).await {
-        Ok(bytes) => Ok((update, bytes)),
+        Ok(bytes) => Ok((channel, update, bytes)),
         Err(err) => {
             pending.put_back(channel, update);
             Err(format!("The update could not be downloaded: {err}"))
@@ -226,7 +227,7 @@ pub async fn check_update(app: AppHandle) -> Result<Option<String>, String> {
 /// Ruru on it. Refused when the channel changed since that check.
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
-    let (update, bytes) = download(&app).await?;
+    let (_, update, bytes) = download(&app).await?;
     update
         .install(bytes)
         .map_err(|err| format!("The update could not be installed: {err}"))?;
@@ -262,14 +263,25 @@ trait Relaunch {
     fn install(&mut self, bytes: Vec<u8>) -> Result<(), String>;
     /// Starts Ruru again on the installed version.
     fn restart(&mut self);
+    /// Keeps the update pending after its install failed, so it can be
+    /// tried again.
+    fn keep_pending(&mut self);
 }
 
 /// Installs a downloaded update so that Ruru comes back full screen: full
 /// screen is saved first, because some installers end Ruru themselves, and
-/// put back if the install fails.
+/// put back if the install fails. A failed install, such as a cancelled
+/// password prompt, leaves the update pending.
 fn relaunch_full_screen(steps: &mut impl Relaunch, bytes: Vec<u8>) -> Result<Installed, String> {
-    let before = steps.save_full_screen(true)?;
+    let before = match steps.save_full_screen(true) {
+        Ok(before) => before,
+        Err(err) => {
+            steps.keep_pending();
+            return Err(err);
+        }
+    };
     if let Err(err) = steps.install(bytes) {
+        steps.keep_pending();
         if !before && let Err(undo) = steps.save_full_screen(false) {
             eprintln!("Ruru: full screen could not be put back: {undo}");
         }
@@ -289,7 +301,8 @@ fn fake_install(steps: &mut impl Relaunch) -> Result<Installed, String> {
 /// The running app, finishing an install.
 struct AppRelaunch<'a> {
     app: &'a AppHandle,
-    update: Option<Update>,
+    /// The update being installed, and the channel it came from.
+    update: Option<(UpdateChannel, Update)>,
 }
 
 impl Relaunch for AppRelaunch<'_> {
@@ -304,7 +317,7 @@ impl Relaunch for AppRelaunch<'_> {
     }
 
     fn install(&mut self, bytes: Vec<u8>) -> Result<(), String> {
-        let update = self
+        let (_, update) = self
             .update
             .as_ref()
             .ok_or("There is no update to install. Check for updates again.")?;
@@ -316,6 +329,12 @@ impl Relaunch for AppRelaunch<'_> {
     fn restart(&mut self) {
         self.app.restart()
     }
+
+    fn keep_pending(&mut self) {
+        if let Some((channel, update)) = self.update.take() {
+            self.app.state::<PendingUpdate>().put_back(channel, update);
+        }
+    }
 }
 
 /// Installs the pending update because Home Assistant asked, and restarts
@@ -325,11 +344,11 @@ pub async fn install_for_home_assistant(app: &AppHandle) -> Result<Installed, St
     if fake_update().is_some() {
         return fake_install(&mut AppRelaunch { app, update: None });
     }
-    let (update, bytes) = download(app).await?;
+    let (channel, update, bytes) = download(app).await?;
     relaunch_full_screen(
         &mut AppRelaunch {
             app,
-            update: Some(update),
+            update: Some((channel, update)),
         },
         bytes,
     )
@@ -521,6 +540,10 @@ mod tests {
         fn restart(&mut self) {
             self.done.push("restart".into());
         }
+
+        fn keep_pending(&mut self) {
+            self.done.push("keep pending".into());
+        }
     }
 
     #[test]
@@ -535,7 +558,7 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_install_puts_full_screen_back_and_does_not_restart() {
+    fn a_failed_install_keeps_the_update_puts_full_screen_back_and_does_not_restart() {
         let mut steps = Steps {
             fail_install: true,
             ..Steps::default()
@@ -546,7 +569,12 @@ mod tests {
         );
         assert_eq!(
             steps.done,
-            ["full screen true", "install 0", "full screen false"]
+            [
+                "full screen true",
+                "install 0",
+                "keep pending",
+                "full screen false"
+            ]
         );
         assert!(!steps.full_screen);
         // Full screen that was already saved stays saved.
@@ -556,7 +584,10 @@ mod tests {
             ..Steps::default()
         };
         assert!(relaunch_full_screen(&mut steps, Vec::new()).is_err());
-        assert_eq!(steps.done, ["full screen true", "install 0"]);
+        assert_eq!(
+            steps.done,
+            ["full screen true", "install 0", "keep pending"]
+        );
         assert!(steps.full_screen);
     }
 

@@ -459,6 +459,26 @@ impl Inner {
             .is_some_and(|link| link.session.connected)
     }
 
+    /// Takes in how an install from Home Assistant ended, returning whether
+    /// to check for updates again. A failed or refused install makes a check
+    /// due now, so the update entity offers only what can be installed, such
+    /// as nothing once the channel changed.
+    fn install_ended(&mut self, installed: Result<Installed, String>) -> bool {
+        self.wall.update.installing = false;
+        match installed {
+            Ok(Installed::Faked) => {
+                self.wall.update.latest = None;
+                false
+            }
+            Ok(Installed::Restarting) => false,
+            Err(err) => {
+                eprintln!("Ruru: {err}");
+                self.last_check = None;
+                true
+            }
+        }
+    }
+
     /// Publishes the update entity's state on the current connection.
     fn publish_update(&mut self) {
         let generation = self.generation;
@@ -787,15 +807,16 @@ async fn install_from_home_assistant(app: AppHandle) {
         inner.publish_update();
     }
     let installed = update::install_for_home_assistant(&app).await;
-    let state = app.state::<MqttState>();
-    let mut inner = state.lock();
-    inner.wall.update.installing = false;
-    match installed {
-        Ok(Installed::Faked) => inner.wall.update.latest = None,
-        Ok(Installed::Restarting) => {}
-        Err(err) => eprintln!("Ruru: {err}"),
+    let check_again = {
+        let state = app.state::<MqttState>();
+        let mut inner = state.lock();
+        let check_again = inner.install_ended(installed);
+        inner.publish_update();
+        check_again
+    };
+    if check_again {
+        check_if_due(&app);
     }
-    inner.publish_update();
 }
 
 /// What the page reports about the wall.
@@ -1242,6 +1263,35 @@ mod tests {
         let messages = session.update(&wall);
         assert_eq!(topics(&messages), ["ruru/0123456789ab/update"]);
         assert!(messages[0].payload.contains(r#""latest_version":"9.9.9""#));
+    }
+
+    #[test]
+    fn a_failed_install_makes_a_check_due_and_keeps_the_offer_until_then() {
+        let mut inner = Inner {
+            last_check: Some(Instant::now()),
+            ..Inner::default()
+        };
+        inner.wall.update = UpdateInfo {
+            latest: Some("9.9.9".into()),
+            installing: true,
+        };
+        assert!(inner.install_ended(Err("The update channel changed.".into())));
+        assert!(!inner.wall.update.installing);
+        assert!(check_due(inner.last_check, Instant::now()));
+        // The check that follows decides what is offered.
+        assert_eq!(inner.wall.update.latest.as_deref(), Some("9.9.9"));
+    }
+
+    #[test]
+    fn a_fake_install_shows_the_wall_up_to_date() {
+        let mut inner = Inner::default();
+        inner.wall.update = UpdateInfo {
+            latest: Some("9.9.9".into()),
+            installing: true,
+        };
+        assert!(!inner.install_ended(Ok(Installed::Faked)));
+        assert_eq!(inner.wall.update, UpdateInfo::default());
+        assert!(!inner.install_ended(Ok(Installed::Restarting)));
     }
 
     #[test]
