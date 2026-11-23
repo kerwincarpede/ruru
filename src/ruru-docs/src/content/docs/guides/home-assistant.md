@@ -52,7 +52,7 @@ Every entity shows as unavailable while Ruru is not connected, such as when the 
 
 ## Updates from Home Assistant
 
-While connected, Ruru checks the update channel picked in **Settings → Updates** when it connects and then every 6 hours, and the **Update** entity shows what it found. Press **Check for updates** to check now, such as just after a new release is out. Choose **Install** in Home Assistant to download and install it. Ruru then restarts on the new version full screen, ready for a wall display. If the install fails, such as when its password prompt is cancelled, Ruru keeps running as it was and checks again, so **Install** can be tried again.
+While connected, Ruru checks the update channel picked in **Settings → Updates** when it connects and then every 6 hours, and the **Update** entity shows what it found. Press **Check for updates** to check now, such as just after a new release is out. Choose **Install** in Home Assistant to download and install it. The wall shows how far the download has got, then restarts on the new version full screen, ready for a wall display. If the install fails, such as when its password prompt is cancelled, Ruru keeps running as it was and checks again, so **Install** can be tried again.
 
 On Linux, a `.deb` or `.rpm` install may ask for your password on the computer running Ruru before it can finish. The AppImage updates without asking.
 

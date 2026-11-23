@@ -45,19 +45,22 @@ export async function checkForUpdate(): Promise<AvailableUpdate | null> {
   return { version, install: () => invoke<void>("install_update") };
 }
 
-/** Mirrors `AutoUpdateStatus` in src-tauri/src/update.rs: what an automatic update is doing. */
-export type AutoUpdateStatus =
+/**
+ * Mirrors `UpdateStatus` in src-tauri/src/update.rs: what an install is
+ * doing, whoever started it. `percent` is null while the size is unknown.
+ */
+export type UpdateStatus =
+  | { state: "downloading"; version: string; percent: number | null }
   | { state: "installing"; version: string }
-  | { state: "failed"; version: string; message: string };
+  | { state: "failed"; version: string; message: string; automatic: boolean };
 
 /**
- * Calls `handler` when an automatic update starts installing, or fails.
- * Resolves to a function that stops listening; a backend without events
- * gives a no-op.
+ * Calls `handler` as an update downloads, installs or fails. Resolves to a
+ * function that stops listening; a backend without events gives a no-op.
  */
-export async function onAutoUpdate(handler: (status: AutoUpdateStatus) => void): Promise<() => void> {
+export async function onUpdateStatus(handler: (status: UpdateStatus) => void): Promise<() => void> {
   try {
-    return await listen<AutoUpdateStatus>("auto-update", (event) => handler(event.payload));
+    return await listen<UpdateStatus>("update-status", (event) => handler(event.payload));
   } catch {
     return () => {};
   }
