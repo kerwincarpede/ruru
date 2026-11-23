@@ -72,7 +72,7 @@ The switch shows what Ruru last did. Touching the mouse or keyboard may wake the
 
 ## Streams
 
-Turn the **Streams** switch off to stop every tile's stream, such as overnight when nobody is watching. The tiles show their last snapshots and Ruru stops pulling video from Frigate, which saves network, CPU and power. Turn it on to start them all again. Pair it with the **Display** switch to turn the wall off at night without shutting the computer down.
+Turn the **Streams** switch off to stop every tile's stream, such as overnight when nobody is watching. The wall shows a sleeping Ruru owl that says the streams are off and how to turn them back on, and Ruru stops pulling video and snapshots from Frigate, which saves network, CPU and power. Turn it on to start them all again. Pair it with the **Display** switch to turn the wall off at night without shutting the computer down.
 
 You can also right-click the wall and choose **Stop streams** or **Start streams**. Ruru always starts with its streams on.
 

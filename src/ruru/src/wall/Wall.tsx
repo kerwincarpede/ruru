@@ -34,6 +34,8 @@ interface WallProps {
   onAutomatic?: (camera: string, stream: StreamKind) => void;
   /** Told whether each camera's tile has a problem, while the window is shown. */
   onProblem?: (camera: string, problem: boolean) => void;
+  /** Told each time a camera's tile starts playing video. */
+  onPlaying?: (camera: string) => void;
   /** The layout changed in Edit layout mode and should be saved. */
   onLayout: (layout: SavedLayout) => void;
 }
@@ -75,6 +77,7 @@ export default function Wall({
   reconnects = {},
   onAutomatic,
   onProblem,
+  onPlaying,
   onLayout,
 }: WallProps) {
   const [box, size] = useSize();
@@ -143,6 +146,7 @@ export default function Wall({
                   onHide={() => onLayout(hideCamera(fromGridItems(items, hidden, layout), camera.name))}
                   onAutomatic={onAutomatic && ((stream) => onAutomatic(camera.name, stream))}
                   onProblem={onProblem && ((problem) => onProblem(camera.name, problem))}
+                  onPlaying={onPlaying && (() => onPlaying(camera.name))}
                 />
               </div>
             );
