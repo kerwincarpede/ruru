@@ -12,11 +12,18 @@ sidebar:
 - If Frigate runs in Docker, its container must publish port 5000.
 - Include `http://` and the port, such as `http://frigate.local:5000`.
 
+## Ruru says Waiting for Frigate…
+
+Frigate isn't answering yet, or answered with a server error such as HTTP 500. This is normal for a short while after a reboot, when Ruru starts before Frigate. Ruru keeps asking on its own, after 2, 5 and 10 seconds and then every 30 seconds, and fills the wall with your cameras as soon as Frigate answers. You don't need to click the wall or restart Ruru.
+
+If the message stays for more than a few minutes, check that Frigate is running, then choose **Settings** and use **Test connection** to check the address. Test connection shows the full error.
+
 ## Ruru says it can't reach Frigate
 
-Ruru can't read the cameras from the Frigate address in Settings, and tries again every 5 seconds. The owl's heading says why:
+Ruru can't read the cameras from the Frigate address in Settings. It keeps trying on its own, waiting longer after each failure up to every 30 seconds. The owl's heading says why:
 
-- **Ruru can't reach Frigate**: nothing answered. Check that Frigate is running and that this computer is on the same network.
+- **Waiting for Frigate…**: see [Ruru says Waiting for Frigate…](#ruru-says-waiting-for-frigate).
+- **Ruru can't reach Frigate**: the address isn't one Ruru can use. Check it in Settings.
 - **Frigate turned Ruru away**: Frigate answered with an HTTP error, such as 401. Check the address, and that Frigate allows access without signing in on this port.
 - **That doesn't look like Frigate**: something else answered. Check the address and port.
 

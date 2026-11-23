@@ -26,6 +26,10 @@ describe("Connecting", () => {
     expect(screen.getByRole("status", { name: "Frigate turned Ruru away" })).toHaveTextContent("answered with HTTP 401. Check the address");
     rerender(<Connecting {...frigate} error="Frigate's answer was not understood: expected value" />);
     expect(screen.getByRole("status", { name: "That doesn't look like Frigate" })).toHaveTextContent("not with Frigate's camera list");
+    rerender(<Connecting {...frigate} error="Waiting for Frigate…" />);
+    const waiting = screen.getByRole("status", { name: "Waiting for Frigate…" });
+    expect(waiting).toHaveTextContent("isn't answering yet");
+    expect(waiting.querySelector(".wall-notice-error")).toBeNull();
   });
 
   it("lights a dot for each camera as it connects, and counts a single camera as one camera", () => {

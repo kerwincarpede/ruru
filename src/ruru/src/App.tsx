@@ -1,7 +1,7 @@
 import "./App.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { appInfo, type AppInfo } from "./app/api";
-import { cameraLabel, type Camera } from "./app/frigate";
+import { RETRY_DELAYS_MS, cameraLabel, type Camera } from "./app/frigate";
 import { isMac, shortcutFor } from "./app/keys";
 import Owl from "./app/Owl";
 import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, cameraActivity, frigateCameras, getSettings, onCameraActivity, onFullScreenChanged, onOpenSettings, onWallCommand, reportTileProblem, reportWallState, saveLayout, saveWallOptions, setFullScreen, type Activity, type SavedLayout, type Settings, type WallOptions } from "./app/api";
@@ -21,8 +21,6 @@ import WallMenu from "./wall/WallMenu";
 /** How long the toolbar stays after the pointer stops moving. */
 export const TOOLBAR_HIDE_MS = 2500;
 
-/** How often Ruru asks Frigate for its cameras again until it first answers. */
-export const RETRY_MS = 5_000;
 /** The longest the wall stays covered while its tiles start their streams. */
 export const CONNECTING_MS = 20_000;
 const NO_SETTINGS: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
@@ -129,7 +127,11 @@ function App() {
 
   // Cameras come from Frigate at startup, after Save, and whenever the window regains focus.
   // A discovery still running for a server that is no longer saved is ignored.
+  // `failures` counts the failed discoveries in a row for the saved server;
+  // keyed by server, so another server starts again from none.
   const currentUrl = useRef<string | null>(null);
+  const [failed, setFailed] = useState<{ server: string | null; count: number }>({ server: null, count: 0 });
+  const failures = failed.server === url ? failed.count : 0;
   const discover = useCallback(
     (server: string) =>
       frigateCameras(server)
@@ -138,9 +140,12 @@ function App() {
             if (currentUrl.current !== server) return;
             setCameras(found);
             setDiscoveryError(null);
+            setFailed({ server, count: 0 });
           },
           (error: unknown) => {
-            if (currentUrl.current === server) setDiscoveryError(String(error));
+            if (currentUrl.current !== server) return;
+            setDiscoveryError(String(error));
+            setFailed((last) => ({ server, count: last.server === server ? last.count + 1 : 1 }));
           },
         )
         .then(() => setRefresh((count) => count + 1)),
@@ -156,10 +161,10 @@ function App() {
     return () => window.removeEventListener("focus", onFocus);
   }, [url, discover]);
 
-  // Until Frigate has answered once, Ruru keeps asking it.
-  // Each try restarts the wait, and counts so the owl wakes up for it.
+  // After a failure Ruru asks Frigate again on its own, waiting longer after
+  // each failure in a row, since a wall display may never regain focus.
+  // Each try counts so the owl wakes up for it.
   const [attempt, setAttempt] = useState(0);
-  const unreached = url !== null && cameras === null && discoveryError !== null;
   const retry = useCallback(
     (server: string) => {
       setAttempt((count) => count + 1);
@@ -168,10 +173,11 @@ function App() {
     [discover],
   );
   useEffect(() => {
-    if (!unreached || !url) return;
-    const timer = setTimeout(() => retry(url), RETRY_MS);
+    if (failures === 0 || !url) return;
+    const delay = RETRY_DELAYS_MS[Math.min(failures, RETRY_DELAYS_MS.length) - 1];
+    const timer = setTimeout(() => retry(url), delay);
     return () => clearTimeout(timer);
-  }, [unreached, url, retry, attempt]);
+  }, [failures, url, retry]);
 
   // Streams stop while the window is hidden or minimised.
   useEffect(() => {
