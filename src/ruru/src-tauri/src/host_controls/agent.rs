@@ -204,9 +204,10 @@ async fn bounded<T>(work: impl Future<Output = Result<T, String>>) -> Result<T, 
         .map_err(|_| "The host controls broker did not answer in time.".to_owned())?
 }
 
-async fn subscribed(events: &mut EventLoop) -> Result<(), String> {
+async fn subscribed(events: &mut EventLoop, mut observe: impl FnMut(Event)) -> Result<(), String> {
     loop {
-        if let Event::Incoming(Packet::SubAck(ack)) = incoming(events).await? {
+        let event = incoming(events).await?;
+        if let Event::Incoming(Packet::SubAck(ack)) = event {
             return if ack
                 .return_codes
                 .iter()
@@ -217,6 +218,7 @@ async fn subscribed(events: &mut EventLoop) -> Result<(), String> {
                 Err("The broker refused the host controls subscriptions.".into())
             };
         }
+        observe(event);
     }
 }
 
@@ -259,7 +261,7 @@ pub(super) async fn test(config: &setup::Config) -> Result<(), String> {
     client
         .try_subscribe_many(wire.filters())
         .map_err(|err| err.to_string())?;
-    bounded(subscribed(&mut events)).await?;
+    bounded(subscribed(&mut events, |_| {})).await?;
     disconnect(&client, &mut events).await;
     Ok(())
 }
@@ -279,22 +281,32 @@ pub(super) async fn cleanup(config: &setup::Config) -> Result<(), String> {
     let cleanup = wire.cleanup();
     let expected = cleanup.len();
     send(&client, cleanup)?;
-    acknowledged(&mut events, expected).await?;
+    acknowledged(&mut events, expected, |_| {}).await?;
     disconnect(&client, &mut events).await;
     Ok(())
 }
 
-async fn acknowledged(events: &mut EventLoop, expected: usize) -> Result<(), String> {
+async fn acknowledged(
+    events: &mut EventLoop,
+    expected: usize,
+    mut observe: impl FnMut(Event),
+) -> Result<(), String> {
     bounded(async {
         let mut count = 0;
         while count < expected {
-            if matches!(incoming(events).await?, Event::Incoming(Packet::PubAck(_))) {
-                count += 1;
-            }
+            acknowledge_event(incoming(events).await?, &mut count, &mut observe);
         }
         Ok(())
     })
     .await
+}
+
+fn acknowledge_event(event: Event, count: &mut usize, observe: &mut impl FnMut(Event)) {
+    if matches!(event, Event::Incoming(Packet::PubAck(_))) {
+        *count += 1;
+    } else {
+        observe(event);
+    }
 }
 
 async fn disconnect(client: &AsyncClient, events: &mut EventLoop) {
@@ -311,6 +323,7 @@ async fn disconnect(client: &AsyncClient, events: &mut EventLoop) {
 }
 
 pub(super) fn run() -> Result<(), String> {
+    setup::write_status(false, None);
     let config = setup::read_config()?;
     async_runtime::block_on(async {
         let topics = Topics::new(&config.device_id, &config.discovery_prefix);
@@ -350,17 +363,22 @@ async fn session(
     client
         .try_subscribe_many(wire.filters())
         .map_err(|err| err.to_string())?;
-    bounded(subscribed(&mut events)).await?;
-    // Recreate the connection on loss. Its clean session and fresh request
-    // queue cannot carry pending commands or state over from the old broker session.
-    state.queued.clear();
+    // Drop waiting commands and republish state for a new clean session.
+    state.reconnect();
+    bounded(subscribed(&mut events, |event| {
+        state.enqueue_event(wire, event)
+    }))
+    .await?;
     let configs = wire.discovery();
     let config_count = configs.len();
     send(&client, configs)?;
-    state.published.clear();
     let state_count = state.report(wire, &client).await?;
     send(&client, vec![wire.message("availability", "online")])?;
-    acknowledged(&mut events, config_count + state_count + 1).await?;
+    acknowledged(&mut events, config_count + state_count + 1, |event| {
+        state.enqueue_event(wire, event);
+    })
+    .await?;
+    state.start_next(wire, &client)?;
     setup::write_status(true, state.error());
     *attempt = 0;
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
@@ -390,7 +408,8 @@ async fn session(
                 state.published.clear();
                 state.report(wire, &client).await?;
             } else if let Some(action) = wire.command(&publish) {
-                state.queue(wire, &client, action)?;
+                state.enqueue(action);
+                state.start_next(wire, &client)?;
             }
         }
     }
@@ -401,30 +420,81 @@ struct State {
     pending: Option<(Action, JoinHandle<Result<(), String>>)>,
     queued: VecDeque<Action>,
     published: BTreeMap<String, String>,
-    wall_error: Option<String>,
-    display_error: Option<String>,
+    wall_error: Diagnostics,
+    display_error: Diagnostics,
     cpu: super::samples::Cpu,
+}
+
+#[derive(Default)]
+struct Diagnostics {
+    read: Option<String>,
+    command: Option<(bool, String)>,
+}
+
+impl Diagnostics {
+    fn message(&self) -> Option<&str> {
+        self.read
+            .as_deref()
+            .or_else(|| self.command.as_ref().map(|(_, error)| error.as_str()))
+    }
+
+    fn observed(&mut self, on: Option<bool>, error: Option<String>) {
+        self.read = error;
+        if self
+            .command
+            .as_ref()
+            .is_some_and(|(wanted, _)| on == Some(*wanted))
+        {
+            self.command = None;
+        }
+    }
 }
 
 impl State {
     fn error(&self) -> Option<&str> {
-        self.wall_error.as_deref().or(self.display_error.as_deref())
+        self.wall_error.message().or(self.display_error.message())
     }
 
-    fn queue(
-        &mut self,
-        wire: &Wire<'_>,
-        client: &AsyncClient,
-        action: Action,
-    ) -> Result<(), String> {
+    fn reconnect(&mut self) {
+        self.queued.clear();
+        self.published.clear();
+    }
+
+    fn enqueue_event(&mut self, wire: &Wire<'_>, event: Event) {
+        if let Event::Incoming(Packet::Publish(publish)) = event
+            && let Some(action) = wire.command(&publish)
+        {
+            self.enqueue(action);
+        }
+    }
+
+    fn enqueue(&mut self, action: Action) {
         if self.queued.len() < 8 {
             self.queued.push_back(action);
-            self.start_next(wire, client)?;
         }
-        Ok(())
     }
 
     fn start_next(&mut self, wire: &Wire<'_>, client: &AsyncClient) -> Result<(), String> {
+        self.start_next_with(wire, client, |action| {
+            async_runtime::spawn_blocking(move || {
+                let result = match action {
+                    Action::Wall(on) => system::change_wall(on),
+                    Action::Display(on) => super::mutter::set(on),
+                };
+                if let Err(err) = &result {
+                    eprintln!("Ruru host controls: {err}");
+                }
+                result
+            })
+        })
+    }
+
+    fn start_next_with(
+        &mut self,
+        wire: &Wire<'_>,
+        client: &AsyncClient,
+        spawn: impl FnOnce(Action) -> JoinHandle<Result<(), String>>,
+    ) -> Result<(), String> {
         if self.pending.is_some() {
             return Ok(());
         }
@@ -438,49 +508,62 @@ impl State {
         let message = wire.message(&format!("{entity}/availability"), "offline");
         send(client, vec![message.clone()])?;
         self.published.insert(message.topic, message.payload);
-        self.pending = Some((
-            action,
-            async_runtime::spawn_blocking(move || {
-                let result = match action {
-                    Action::Wall(on) => system::change_wall(on),
-                    Action::Display(on) => super::mutter::set(on),
-                };
-                if let Err(err) = &result {
-                    eprintln!("Ruru host controls: {err}");
-                }
-                result
-            }),
-        ));
+        self.pending = Some((action, spawn(action)));
         Ok(())
     }
 
-    async fn report(&mut self, wire: &Wire<'_>, client: &AsyncClient) -> Result<usize, String> {
+    fn complete(&mut self, action: Action, result: Result<(), String>) {
+        let (status, wanted) = match action {
+            Action::Wall(on) => (&mut self.wall_error, on),
+            Action::Display(on) => (&mut self.display_error, on),
+        };
+        status.command = result.err().map(|error| (wanted, error));
+    }
+
+    async fn finish_completed(&mut self) -> Result<(), String> {
         if self
             .pending
             .as_ref()
             .is_some_and(|(_, job)| job.inner().is_finished())
         {
             let (action, job) = self.pending.take().expect("finished command exists");
-            let error = job.await.map_err(|err| err.to_string())?.err();
-            match action {
-                Action::Wall(_) => self.wall_error = error,
-                Action::Display(_) => self.display_error = error,
-            }
+            let result = job.await.map_err(|err| err.to_string())?;
+            self.complete(action, result);
         }
+        Ok(())
+    }
+
+    async fn report(&mut self, wire: &Wire<'_>, client: &AsyncClient) -> Result<usize, String> {
+        self.finish_completed().await?;
+        let display = if matches!(self.pending.as_ref(), Some((Action::Display(_), _))) {
+            None
+        } else {
+            Some(super::mutter::state())
+        };
+        let messages = self.observe(wire, system::wall(), display, Instant::now());
+        let count = messages.len();
+        send(client, messages)?;
+        Ok(count)
+    }
+
+    fn observe(
+        &mut self,
+        wire: &Wire<'_>,
+        wall: Result<system::Wall, String>,
+        display: Option<Result<bool, String>>,
+        now: Instant,
+    ) -> Vec<Message> {
         let pending = self.pending.as_ref().map(|(action, _)| action);
         let mut messages = Vec::new();
-        let wall = system::wall();
         let (wall_on, cpu, memory) = match wall {
             Ok(wall) => {
-                if wall.failure.is_some() {
-                    self.wall_error = wall.failure.clone();
-                }
                 let running = match wall.phase {
                     system::Phase::Running => Some(true),
                     system::Phase::Stopped => Some(false),
                     system::Phase::Changing => None,
                 };
-                let cpu = self.cpu.sample(&wall, Instant::now());
+                self.wall_error.observed(running, wall.failure.clone());
+                let cpu = self.cpu.sample(&wall, now);
                 let memory = match running {
                     Some(false) => Some(0.0),
                     Some(true) => wall.memory.map(|bytes| bytes as f64 / 1_048_576.0),
@@ -493,20 +576,20 @@ impl State {
                 }
             }
             Err(err) => {
-                self.wall_error = Some(err);
+                self.wall_error.observed(None, Some(err));
                 (None, None, None)
             }
         };
-        let display_on = if matches!(pending, Some(Action::Display(_))) {
-            None
-        } else {
-            match super::mutter::state() {
-                Ok(on) => Some(on),
-                Err(err) => {
-                    self.display_error = Some(err);
-                    None
-                }
+        let display_on = match display {
+            Some(Ok(on)) => {
+                self.display_error.observed(Some(on), None);
+                Some(on)
             }
+            Some(Err(err)) => {
+                self.display_error.observed(None, Some(err));
+                None
+            }
+            None => None,
         };
         for (object, value) in [
             ("ruru", wall_on.map(|on| on_off(on).into())),
@@ -523,7 +606,10 @@ impl State {
                 if available { "online" } else { "offline" },
             ));
         }
-        for (object, error) in [("ruru", &self.wall_error), ("display", &self.display_error)] {
+        for (object, error) in [
+            ("ruru", self.wall_error.message()),
+            ("display", self.display_error.message()),
+        ] {
             messages.push(wire.message(
                 &format!("{object}/attributes"),
                 json!({ "error": error }).to_string(),
@@ -534,9 +620,7 @@ impl State {
             self.published
                 .insert(message.topic.clone(), message.payload.clone());
         }
-        let count = messages.len();
-        send(client, messages)?;
-        Ok(count)
+        messages
     }
 }
 
@@ -625,5 +709,178 @@ mod tests {
                     && message.payload.is_empty()
                     && message.retain)
         );
+    }
+
+    fn wall(phase: system::Phase) -> Result<system::Wall, String> {
+        Ok(system::Wall {
+            phase,
+            invocation: "test".into(),
+            cpu: Some(0),
+            memory: Some(0),
+            failure: None,
+        })
+    }
+
+    fn payload<'a>(wire: &Wire<'_>, messages: &'a [Message], suffix: &str) -> Option<&'a str> {
+        let topic = wire.topic(suffix);
+        messages
+            .iter()
+            .find(|message| message.topic == topic)
+            .map(|message| message.payload.as_str())
+    }
+
+    #[test]
+    fn bootstrap_preserves_live_commands_between_acknowledgements() {
+        use rumqttc::v5::mqttbytes::v5::PubAck;
+
+        let topics = Topics::new("wall", "homeassistant");
+        let device = device();
+        let wire = Wire {
+            topics: &topics,
+            device: &device,
+        };
+        let mut state = State::default();
+        let mut collect = |event| state.enqueue_event(&wire, event);
+        let mut count = 0;
+        let ack = |pkid| {
+            Event::Incoming(Packet::PubAck(PubAck {
+                pkid,
+                reason: PubAckReason::Success,
+                properties: None,
+            }))
+        };
+        acknowledge_event(ack(1), &mut count, &mut collect);
+        let mut publish = Publish::new(wire.topic("command/ruru"), QOS, b"ON".to_vec(), None);
+        publish.retain = true;
+        acknowledge_event(
+            Event::Incoming(Packet::Publish(publish.clone())),
+            &mut count,
+            &mut collect,
+        );
+        publish.retain = false;
+        acknowledge_event(
+            Event::Incoming(Packet::Publish(publish)),
+            &mut count,
+            &mut collect,
+        );
+        acknowledge_event(ack(2), &mut count, &mut collect);
+        assert_eq!(count, 2);
+        assert_eq!(state.queued, [Action::Wall(true)]);
+    }
+
+    #[test]
+    fn serializes_service_jobs_and_publishes_off_after_a_failed_start() {
+        async_runtime::block_on(async {
+            let topics = Topics::new("wall", "homeassistant");
+            let device = device();
+            let wire = Wire {
+                topics: &topics,
+                device: &device,
+            };
+            let broker = Broker {
+                host: "unused.invalid".into(),
+                port: 1883,
+                tls: false,
+                username: String::new(),
+                password: None,
+            };
+            let (client, _events) = connection(&broker, "test".into(), None).unwrap();
+            let mut state = State::default();
+            let now = Instant::now();
+            let (complete, work) = tokio::sync::oneshot::channel();
+            state.observe(&wire, wall(system::Phase::Stopped), Some(Ok(true)), now);
+            state.enqueue(Action::Wall(true));
+            state.enqueue(Action::Wall(false));
+            state
+                .start_next_with(&wire, &client, |action| {
+                    assert_eq!(action, Action::Wall(true));
+                    async_runtime::spawn(async move { work.await.expect("test result") })
+                })
+                .unwrap();
+            assert_eq!(
+                state
+                    .published
+                    .get(&wire.topic("ruru/availability"))
+                    .map(String::as_str),
+                Some("offline")
+            );
+            state
+                .start_next_with(&wire, &client, |_| {
+                    panic!("another command began before Start completed")
+                })
+                .unwrap();
+            assert_eq!(state.queued, [Action::Wall(false)]);
+            complete
+                .send(Err("The app exited during startup.".into()))
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(1), async {
+                while state.pending.is_some() {
+                    state.finish_completed().await.unwrap();
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            let confirmed = state.observe(&wire, wall(system::Phase::Stopped), Some(Ok(true)), now);
+            assert_eq!(
+                payload(&wire, &confirmed, "ruru/availability"),
+                Some("online")
+            );
+            assert_eq!(
+                state
+                    .published
+                    .get(&wire.topic("ruru/state"))
+                    .map(String::as_str),
+                Some("OFF")
+            );
+            assert_eq!(state.error(), Some("The app exited during startup."));
+            state
+                .start_next_with(&wire, &client, |action| {
+                    assert_eq!(action, Action::Wall(false));
+                    async_runtime::spawn(async { Ok(()) })
+                })
+                .unwrap();
+        });
+    }
+
+    #[test]
+    fn reconnect_clears_old_commands_and_reannounces_the_same_snapshot() {
+        let topics = Topics::new("wall", "homeassistant");
+        let device = device();
+        let wire = Wire {
+            topics: &topics,
+            device: &device,
+        };
+        let mut state = State::default();
+        let now = Instant::now();
+        let first = state.observe(&wire, wall(system::Phase::Stopped), Some(Ok(true)), now);
+        assert_eq!(payload(&wire, &first, "ruru/state"), Some("OFF"));
+        assert_eq!(payload(&wire, &first, "display/state"), Some("ON"));
+        assert!(
+            state
+                .observe(&wire, wall(system::Phase::Stopped), Some(Ok(true)), now)
+                .is_empty()
+        );
+        state.enqueue(Action::Wall(true));
+        state.reconnect();
+        assert!(state.queued.is_empty());
+        assert_eq!(
+            state.observe(&wire, wall(system::Phase::Stopped), Some(Ok(true)), now),
+            first
+        );
+    }
+
+    #[test]
+    fn recovered_readback_clears_transient_errors_and_keeps_unresolved_command_errors() {
+        let mut diagnostics = Diagnostics {
+            command: Some((true, "start failed".into())),
+            ..Default::default()
+        };
+        diagnostics.observed(None, Some("read failed".into()));
+        assert_eq!(diagnostics.message(), Some("read failed"));
+        diagnostics.observed(Some(false), None);
+        assert_eq!(diagnostics.message(), Some("start failed"));
+        diagnostics.observed(Some(true), None);
+        assert_eq!(diagnostics.message(), None);
     }
 }

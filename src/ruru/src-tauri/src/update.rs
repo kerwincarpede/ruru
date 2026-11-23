@@ -321,13 +321,7 @@ pub async fn check_update(app: AppHandle) -> Result<Option<String>, String> {
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
     let (channel, update, bytes, announcer) = download(&app, false).await?;
-    if let Err(err) = update.install(bytes) {
-        app.state::<PendingUpdate>().put_back(channel, update);
-        let message = format!("The update could not be installed: {err}");
-        announcer.failed(&message);
-        return Err(message);
-    }
-    crate::host_controls::restart_after_update(&app)
+    install_and_restart(&app, channel, update, bytes)
         .inspect_err(|message| announcer.failed(message))
 }
 
@@ -442,13 +436,22 @@ pub async fn install_for_home_assistant(app: &AppHandle) -> Result<Installed, St
         return fake_install(&mut AppRelaunch { app, update: None });
     }
     let (channel, update, bytes, announcer) = download(app, false).await?;
-    let installed = relaunch_full_screen(
-        &mut AppRelaunch {
-            app,
-            update: Some((channel, update)),
-        },
-        bytes,
-    );
+    let installed = (|| {
+        let _install = match crate::host_controls::lock_update_install() {
+            Ok(guard) => guard,
+            Err(error) => {
+                app.state::<PendingUpdate>().put_back(channel, update);
+                return Err(error);
+            }
+        };
+        relaunch_full_screen(
+            &mut AppRelaunch {
+                app,
+                update: Some((channel, update)),
+            },
+            bytes,
+        )
+    })();
     if let Err(message) = &installed {
         announcer.failed(message);
     }
@@ -548,13 +551,28 @@ async fn auto_update(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
     let (channel, update, bytes, announcer) = download(app, true).await?;
+    install_and_restart(app, channel, update, bytes)
+        .inspect_err(|message| announcer.failed(message))
+}
+
+fn install_and_restart(
+    app: &AppHandle,
+    channel: UpdateChannel,
+    update: Update,
+    bytes: Vec<u8>,
+) -> Result<(), String> {
+    let _install = match crate::host_controls::lock_update_install() {
+        Ok(guard) => guard,
+        Err(error) => {
+            app.state::<PendingUpdate>().put_back(channel, update);
+            return Err(error);
+        }
+    };
     if let Err(err) = update.install(bytes) {
         app.state::<PendingUpdate>().put_back(channel, update);
-        let message = format!("The update could not be installed: {err}");
-        announcer.failed(&message);
-        return Err(message);
+        return Err(format!("The update could not be installed: {err}"));
     }
-    crate::host_controls::restart_after_update(app).inspect_err(|message| announcer.failed(message))
+    crate::host_controls::restart_after_update(app)
 }
 
 /// Saves whether updates install by themselves and returns the settings with

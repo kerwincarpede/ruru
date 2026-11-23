@@ -14,12 +14,23 @@ mod system;
 /// Handles the Linux package's agent and managed launcher entry points.
 #[cfg(target_os = "linux")]
 pub fn dispatch() -> Option<Result<(), String>> {
-    match std::env::args().nth(1).as_deref() {
-        Some("--host-agent") => Some(agent::run()),
-        Some("--host-activate") => Some(setup::activate()),
-        Some("--managed-wall") => None,
-        _ if setup::installed() && setup::enabled() => Some(system::open_wall()),
-        _ => None,
+    let mode = std::env::args().nth(1);
+    match mode.as_deref() {
+        Some("--host-agent") => return Some(agent::run()),
+        Some("--host-activate") => return Some(setup::activate()),
+        _ => {}
+    }
+    if !setup::installed() {
+        return None;
+    }
+    match setup::recover_before_open() {
+        Err(error) => Some(Err(error)),
+        Ok(false) => Some(Ok(())),
+        Ok(true) if mode.as_deref() == Some("--managed-wall") && !setup::enabled() => Some(Ok(())),
+        Ok(true) if mode.as_deref() == Some("--managed-wall") => None,
+        Ok(true) if setup::enabled() && system::in_wall_service() => Some(Ok(())),
+        Ok(true) if setup::enabled() => Some(system::open_wall()),
+        Ok(true) => None,
     }
 }
 
@@ -155,4 +166,13 @@ pub fn restart_after_update(app: &tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
     app.restart()
+}
+
+/// Keeps a managed wall running through its package transaction.
+pub fn lock_update_install() -> Result<Option<std::fs::File>, String> {
+    #[cfg(target_os = "linux")]
+    if system::in_wall_service() {
+        return system::lock_wall_operation().map(Some);
+    }
+    Ok(None)
 }

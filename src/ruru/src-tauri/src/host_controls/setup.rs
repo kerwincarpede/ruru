@@ -1,5 +1,6 @@
 use std::{
     env, fs,
+    fs::File,
     io::{self, Write},
     os::unix::{fs::OpenOptionsExt, fs::symlink, process::CommandExt},
     path::{Path, PathBuf},
@@ -14,6 +15,10 @@ use crate::{mqtt::client::Broker, settings::MqttSettings};
 
 const DESKTOP_ID: &str = "com.kerwincarpede.ruru";
 const PACKAGE: &str = "/usr/share/ruru/host-controls/ruru.service";
+const ACTIVE: &str = "agent.json";
+const PREPARING: &str = "migration.json";
+const DISABLING: &str = "disabling.json";
+const DISABLED: &str = "disabled.json";
 const UBUNTU_AGENT: &str = "/usr/lib/systemd/user/ruru-host-agent.service";
 
 #[derive(Serialize, Deserialize)]
@@ -64,11 +69,11 @@ pub(super) fn installed() -> bool {
 }
 
 pub(super) fn enabled() -> bool {
-    directory().is_ok_and(|dir| dir.join("agent.json").is_file())
+    directory().is_ok_and(|dir| dir.join(ACTIVE).is_file())
 }
 
 pub(super) fn read_config() -> Result<Config, String> {
-    let bytes = fs::read(directory()?.join("agent.json")).map_err(|err| err.to_string())?;
+    let bytes = fs::read(directory()?.join(ACTIVE)).map_err(|err| err.to_string())?;
     serde_json::from_slice(&bytes).map_err(|err| err.to_string())
 }
 
@@ -119,11 +124,17 @@ enum Replacement {
 struct Migration {
     path: PathBuf,
     replacement: Replacement,
+    had_original: bool,
 }
 
 impl Migration {
     fn new(path: PathBuf, replacement: Replacement) -> Self {
-        Self { path, replacement }
+        let had_original = fs::symlink_metadata(&path).is_ok();
+        Self {
+            path,
+            replacement,
+            had_original,
+        }
     }
 
     fn apply(&self) -> io::Result<()> {
@@ -228,14 +239,31 @@ fn migrate(dir: &Path, changes: &[Migration]) -> Result<(), String> {
     Ok(())
 }
 
+fn check_restore(dir: &Path, changes: &[Migration]) -> Result<(), String> {
+    for (index, change) in changes.iter().enumerate() {
+        if fs::symlink_metadata(backup_path(dir, index)).is_ok()
+            && fs::symlink_metadata(&change.path).is_ok()
+            && !change.is_managed()
+        {
+            return Err(format!(
+                "Move {} aside before restoring the previous setting.",
+                change.path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn restore(dir: &Path, changes: &[Migration]) -> Result<(), String> {
+    check_restore(dir, changes)?;
     for (index, change) in changes.iter().enumerate().rev() {
         let path = &change.path;
         let backup = backup_path(dir, index);
-        if change.is_managed() {
+        let has_backup = fs::symlink_metadata(&backup).is_ok();
+        if (!change.had_original || has_backup) && change.is_managed() {
             fs::remove_file(path).map_err(|err| err.to_string())?;
         }
-        if fs::symlink_metadata(&backup).is_ok() {
+        if has_backup {
             if fs::symlink_metadata(path).is_ok() {
                 return Err(format!(
                     "Move {} aside before restoring the previous setting.",
@@ -250,17 +278,10 @@ fn restore(dir: &Path, changes: &[Migration]) -> Result<(), String> {
 
 fn install_wall(dir: &Path, changes: &[Migration]) -> Result<(), String> {
     migrate(dir, changes)?;
-    let result = (|| {
-        system::ctl(&["daemon-reload"])?;
-        system::check_managed_wall(Path::new(PACKAGE))?;
-        system::ctl(&["enable", system::AGENT])?;
-        Ok(())
-    })();
-    if result.is_err() {
-        restore(dir, changes)?;
-        system::ctl(&["daemon-reload"])?;
-    }
-    result
+    system::ctl(&["daemon-reload"])?;
+    system::check_managed_wall(Path::new(PACKAGE))?;
+    system::ctl(&["enable", system::AGENT])?;
+    Ok(())
 }
 
 fn remove_wall(dir: &Path, changes: &[Migration]) -> Result<(), String> {
@@ -270,17 +291,85 @@ fn remove_wall(dir: &Path, changes: &[Migration]) -> Result<(), String> {
     Ok(())
 }
 
+fn lock_migration(dir: &Path) -> Result<Option<File>, String> {
+    fs::create_dir_all(dir).map_err(|err| err.to_string())?;
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(dir.join("migration.lock"))
+        .map_err(|err| err.to_string())?;
+    match lock.try_lock() {
+        Ok(()) => Ok(Some(lock)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(err)) => Err(err.to_string()),
+    }
+}
+
+fn preparing(dir: &Path) -> Result<(), String> {
+    let journal = dir.join(PREPARING);
+    let bytes = match fs::read(&journal) {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err.to_string()),
+    };
+    if !dir.join(ACTIVE).exists() {
+        let changes: Vec<Migration> =
+            serde_json::from_slice(&bytes).map_err(|err| err.to_string())?;
+        remove_wall(dir, &changes)?;
+    }
+    fs::remove_file(journal).map_err(|err| err.to_string())
+}
+
+fn finish_disable(dir: &Path) -> Result<(), String> {
+    let journal = dir.join(DISABLING);
+    let bytes = match fs::read(&journal) {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err.to_string()),
+    };
+    let config: Config = serde_json::from_slice(&bytes).map_err(|err| err.to_string())?;
+    system::ctl(&["stop", system::AGENT])?;
+    remove_wall(dir, &config.migrations)?;
+    fs::rename(journal, dir.join(DISABLED)).map_err(|err| err.to_string())?;
+    if let Ok(path) = status_path() {
+        let _ = fs::remove_file(path);
+    }
+    Ok(())
+}
+
+/// Resolves an interrupted migration before the local launcher decides whether
+/// to delegate to the wall service. The journal can exist without credentials.
+pub(super) fn recover_before_open() -> Result<bool, String> {
+    let dir = directory()?;
+    if !dir.join(PREPARING).exists() && !dir.join(DISABLING).exists() {
+        return Ok(true);
+    }
+    let Some(_lock) = lock_migration(&dir)? else {
+        return Ok(false);
+    };
+    // A failed restore must leave the ordinary launcher usable so Settings
+    // can surface the journal and offer a retry.
+    if let Err(error) = preparing(&dir).and_then(|()| finish_disable(&dir)) {
+        eprintln!("Ruru host controls: {error}");
+    }
+    Ok(true)
+}
+
 pub(super) fn schedule_takeover() -> Result<(), String> {
+    let pid = process::id().to_string();
     let output = Command::new("/usr/bin/systemd-run")
         .args([
             "--user",
             "--collect",
-            "--unit=ruru-host-activate",
+            &format!("--unit=ruru-host-activate-{pid}"),
             "--property=PartOf=graphical-session.target",
             "/usr/bin/ruru",
             "--host-activate",
         ])
-        .arg(process::id().to_string())
+        .arg(pid)
         .output()
         .map_err(|err| err.to_string())?;
     if output.status.success() {
@@ -336,19 +425,26 @@ fn check_platform() -> Result<(), String> {
 
 pub(super) fn write_status(connected: bool, error: Option<&str>) {
     if let Ok(path) = status_path()
-        && let Ok(bytes) = serde_json::to_vec(&(connected, error))
+        && let Ok(bytes) = serde_json::to_vec(&(process::id(), connected, error))
     {
         let _ = write_private(&path, &bytes);
     }
 }
 
+fn read_agent_status(data: &[u8], active_pid: u32) -> Option<(bool, Option<String>)> {
+    let (pid, connected, message): (u32, bool, Option<String>) =
+        serde_json::from_slice(data).ok()?;
+    (pid == active_pid).then_some((connected, message))
+}
+
 pub(super) fn status() -> HostControlsStatus {
     let enabled = enabled();
-    let active = enabled && system::ctl(&["is-active", system::AGENT]).is_ok();
-    let (connected, message) = if active {
-        let path = status_path().ok();
-        path.and_then(|path| fs::read(path).ok())
-            .and_then(|data| serde_json::from_slice::<(bool, Option<String>)>(&data).ok())
+    let active_pid = enabled.then(system::agent_pid).flatten();
+    let (connected, message) = if let Some(active_pid) = active_pid {
+        status_path()
+            .ok()
+            .and_then(|path| fs::read(path).ok())
+            .and_then(|data| read_agent_status(&data, active_pid))
             .unwrap_or_default()
     } else if enabled {
         (
@@ -365,7 +461,11 @@ pub(super) fn status() -> HostControlsStatus {
         supported: supported(),
         enabled,
         connected,
-        cleanup_pending: directory().is_ok_and(|dir| dir.join("disabled.json").exists()),
+        cleanup_pending: directory().is_ok_and(|dir| {
+            [PREPARING, DISABLING, DISABLED]
+                .iter()
+                .any(|name| dir.join(name).exists())
+        }),
         message,
     }
 }
@@ -415,36 +515,44 @@ pub(super) async fn enable(
     }
     let mut config = new_config(saved, credentials)?;
     let dir = directory()?;
-    if dir.join("disabled.json").exists() {
-        return Err(
-            "Finish removing the previous MQTT entities before enabling host controls again."
-                .into(),
-        );
-    }
     agent::test(&config).await?;
     tauri::async_runtime::spawn_blocking(move || {
-        if fs::read_dir(&dir).into_iter().flatten().any(|entry| {
-            entry.is_ok_and(|file| file.file_name().to_string_lossy().starts_with("prior-"))
-        }) {
+        let _lock = lock_migration(&dir)?.ok_or("Another host controls migration is running.")?;
+        preparing(&dir)?;
+        finish_disable(&dir)?;
+        if dir.join(DISABLED).exists() {
+            return Err(
+                "Finish removing the previous MQTT entities before enabling host controls again."
+                    .into(),
+            );
+        }
+        if dir.join(ACTIVE).exists() {
+            return Err("Host controls are already enabled.".into());
+        }
+        if read_directory(&dir)?
+            .iter()
+            .any(|file| file.file_name().to_string_lossy().starts_with("prior-"))
+        {
             return Err(
                 "A previous setup left recovery files in the host-controls directory.".into(),
             );
         }
         config.migrations = migration_paths(&config_root()?)?;
-        fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+        let changes = serde_json::to_vec(&config.migrations).map_err(|err| err.to_string())?;
         let data = serde_json::to_vec(&config).map_err(|err| err.to_string())?;
-        let file = dir.join("agent.json");
-        write_private(&file, &data).map_err(|err| err.to_string())?;
-        if let Err(error) = install_wall(&dir, &config.migrations) {
-            fs::remove_file(&file).map_err(|err| err.to_string())?;
-            return Err(error);
+        let journal = dir.join(PREPARING);
+        write_private(&journal, &changes).map_err(|err| err.to_string())?;
+        let result = install_wall(&dir, &config.migrations)
+            .and_then(|()| schedule_takeover())
+            .and_then(|()| write_private(&dir.join(ACTIVE), &data).map_err(|err| err.to_string()));
+        // An active file commits the setup. If the process is interrupted
+        // before it exists, the journal instead describes what to restore.
+        if result.is_ok() {
+            let _ = fs::remove_file(journal);
+        } else {
+            preparing(&dir)?;
         }
-        if let Err(error) = schedule_takeover() {
-            remove_wall(&dir, &config.migrations)?;
-            fs::remove_file(&file).map_err(|err| err.to_string())?;
-            return Err(error);
-        }
-        Ok(())
+        result
     })
     .await
     .map_err(|err| err.to_string())?
@@ -452,22 +560,24 @@ pub(super) async fn enable(
 
 pub(super) async fn disable() -> Result<Option<String>, String> {
     let dir = directory()?;
-    let disabled = dir.join("disabled.json");
-    if enabled() {
-        let config = read_config()?;
-        let moved = disabled.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            system::ctl(&["stop", system::AGENT])?;
-            remove_wall(&dir, &config.migrations)?;
-            fs::rename(dir.join("agent.json"), moved).map_err(|err| err.to_string())?;
-            if let Ok(path) = status_path() {
-                let _ = fs::remove_file(path);
-            }
-            Ok::<_, String>(())
-        })
-        .await
-        .map_err(|err| err.to_string())??;
-    }
+    let disabled = dir.join(DISABLED);
+    let work = dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = work;
+        let _lock = lock_migration(&dir)?.ok_or("Another host controls migration is running.")?;
+        preparing(&dir)?;
+        let active = dir.join(ACTIVE);
+        if active.exists() {
+            let config = read_config()?;
+            check_restore(&dir, &config.migrations)?;
+            // Commit to disable before stopping the agent. If restoration
+            // subsequently fails, startup will not redirect into that service.
+            fs::rename(active, dir.join(DISABLING)).map_err(|err| err.to_string())?;
+        }
+        finish_disable(&dir)
+    })
+    .await
+    .map_err(|err| err.to_string())??;
     let bytes = match fs::read(&disabled) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -544,5 +654,45 @@ mod tests {
         assert_eq!(config.username, "agent");
         assert_eq!(config.discovery_prefix, "hass");
         assert_eq!(config.device_id, "device");
+    }
+
+    #[test]
+    fn old_agent_status_never_marks_a_new_process_connected() {
+        assert_eq!(
+            read_agent_status(br#"[123,true,null]"#, 123),
+            Some((true, None))
+        );
+        assert_eq!(read_agent_status(br#"[123,true,null]"#, 124), None);
+    }
+
+    #[test]
+    fn interrupted_migration_rolls_back_and_restore_preflights_user_edits() {
+        let root = env::temp_dir().join(format!(
+            "ruru-migration-{}",
+            crate::settings::new_device_id()
+        ));
+        fs::create_dir(&root).unwrap();
+        let first = root.join("first.desktop");
+        let second = root.join("second.desktop");
+        fs::write(&first, b"original first").unwrap();
+        fs::write(&second, b"original second").unwrap();
+        let changes = [
+            Migration::new(first.clone(), Replacement::HiddenAutostart),
+            Migration::new(second.clone(), Replacement::HiddenAutostart),
+        ];
+        migrate(&root, &changes[..1]).unwrap();
+        restore(&root, &changes).unwrap();
+        assert_eq!(fs::read(&first).unwrap(), b"original first");
+        assert_eq!(fs::read(&second).unwrap(), b"original second");
+        migrate(&root, &changes).unwrap();
+        fs::write(&first, b"edited replacement").unwrap();
+        assert!(restore(&root, &changes).is_err());
+        assert_eq!(fs::read(&second).unwrap(), HIDDEN);
+        assert_eq!(fs::read(&first).unwrap(), b"edited replacement");
+        fs::remove_file(&first).unwrap();
+        restore(&root, &changes).unwrap();
+        assert_eq!(fs::read(&first).unwrap(), b"original first");
+        assert_eq!(fs::read(&second).unwrap(), b"original second");
+        fs::remove_dir_all(&root).unwrap();
     }
 }

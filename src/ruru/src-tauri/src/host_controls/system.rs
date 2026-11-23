@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::{fs, os::unix::fs::OpenOptionsExt, path::Path, process::Command};
 
 pub(super) const WALL: &str = "ruru.service";
 pub(super) const AGENT: &str = "ruru-host-agent.service";
@@ -85,7 +85,15 @@ pub(super) fn change_wall(on: bool) -> Result<(), String> {
     if wall()?.phase == goal {
         return Ok(());
     }
-    ctl(&[if on { "start" } else { "stop" }, WALL])?;
+    // Share this lock with the updater through the entire systemd stop job.
+    // The updater fails before invoking the package manager if Stop won.
+    let _stop = if on {
+        None
+    } else {
+        Some(lock_wall_operation()?)
+    };
+    // Fail instead of replacing an already queued update restart.
+    ctl(&["--job-mode=fail", if on { "start" } else { "stop" }, WALL])?;
     let observed = wall()?;
     if observed.phase == goal {
         Ok(())
@@ -172,6 +180,47 @@ pub(super) fn check_managed_wall(packaged_unit: &std::path::Path) -> Result<(), 
     Ok(())
 }
 
+pub(super) fn agent_pid() -> Option<u32> {
+    ctl(&["show", "--property=MainPID", "--value", AGENT])
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+        .filter(|pid| *pid != 0)
+}
+
+pub(super) fn lock_wall_operation() -> Result<fs::File, String> {
+    let dir = std::env::var_os("XDG_RUNTIME_DIR")
+        .ok_or("Could not locate the session runtime directory.")?;
+    lock_path(&Path::new(&dir).join("ruru-wall-operation.lock"))
+}
+
+fn lock_path(path: &Path) -> Result<fs::File, String> {
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(path)
+        .map_err(|err| err.to_string())?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(fs::TryLockError::WouldBlock) => {
+            Err("Ruru is installing an update or stopping. Try again when it finishes.".into())
+        }
+        Err(fs::TryLockError::Error(err)) => Err(err.to_string()),
+    }
+}
+
+pub(super) fn in_wall_service() -> bool {
+    std::fs::read_to_string("/proc/self/cgroup").is_ok_and(|groups| {
+        groups
+            .lines()
+            .any(|entry| entry.split('/').any(|part| part == WALL))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,5 +245,18 @@ mod tests {
         assert_eq!(failed.phase, Phase::Stopped);
         assert_eq!(failed.failure.as_deref(), Some("Ruru service: exit-code"));
         assert!(Wall::parse("").is_err());
+    }
+
+    #[test]
+    fn wall_install_and_stop_cannot_both_hold_the_operation_lock() {
+        let path =
+            std::env::temp_dir().join(format!("ruru-lock-{}", crate::settings::new_device_id()));
+        let install = lock_path(&path).unwrap();
+        assert!(lock_path(&path).is_err());
+        drop(install);
+        let stop = lock_path(&path).unwrap();
+        assert!(lock_path(&path).is_err());
+        drop(stop);
+        fs::remove_file(path).unwrap();
     }
 }
