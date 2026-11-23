@@ -19,6 +19,8 @@ interface SettingsDialogProps {
   onMqttSaved: (settings: Settings) => void;
   /** Show activity was changed in Settings › Home Assistant. */
   onActivity: (on: boolean) => void;
+  /** Install updates automatically was turned on or off. */
+  onAutoUpdateSaved: (settings: Settings) => void;
   /** A check on the Updates page found an update, or found none. */
   onUpdate: (update: AvailableUpdate | null) => void;
   onClose: () => void;
@@ -38,8 +40,8 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Settings over the wall: Frigate holds the server's URL, Home Assistant the MQTT connection, Updates the version and update channel. */
-export default function SettingsDialog({ settings, info, onSaved, onChannelSaved, onMqttSaved, onActivity, onUpdate, onClose }: SettingsDialogProps) {
+/** Settings over the wall: Frigate holds the server's URL, Home Assistant the MQTT connection, Updates the version, update channel and automatic updates. */
+export default function SettingsDialog({ settings, info, onSaved, onChannelSaved, onAutoUpdateSaved, onMqttSaved, onActivity, onUpdate, onClose }: SettingsDialogProps) {
   const [page, setPage] = useState<Page>("frigate");
   const [url, setUrl] = useState(settings.frigateUrl ?? "");
   const [test, setTest] = useState<Test>({ kind: "idle" });
@@ -90,7 +92,15 @@ export default function SettingsDialog({ settings, info, onSaved, onChannelSaved
       </nav>
       {page === "homeassistant" && <HomeAssistantPage mqtt={settings.mqtt} activity={settings.wall.activity} onSaved={onMqttSaved} onActivity={onActivity} onClose={onClose} />}
       {page === "updates" && (
-        <UpdatesPage info={info} channel={settings.updateChannel} onChannelSaved={onChannelSaved} onUpdate={onUpdate} onClose={onClose} />
+        <UpdatesPage
+          info={info}
+          channel={settings.updateChannel}
+          autoUpdate={settings.autoUpdate}
+          onChannelSaved={onChannelSaved}
+          onAutoUpdateSaved={onAutoUpdateSaved}
+          onUpdate={onUpdate}
+          onClose={onClose}
+        />
       )}
       {page === "frigate" && (
         <form className="settings-body" onSubmit={save}>

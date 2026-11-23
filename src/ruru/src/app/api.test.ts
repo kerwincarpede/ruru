@@ -1,7 +1,7 @@
 import { emit } from "@tauri-apps/api/event";
 import { clearMocks } from "@tauri-apps/api/mocks";
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, appInfo, cameraActivity, getSettings, onCameraActivity, onOpenSettings, onWallCommand, saveFrigateUrl, saveLayout, saveWallOptions, setFullScreen, type Settings } from "./api";
+import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, appInfo, cameraActivity, getSettings, onCameraActivity, onOpenSettings, onWallCommand, saveFrigateUrl, saveLayout, saveWallOptions, setAutoUpdate, setFullScreen, type Settings } from "./api";
 import { mockCommands } from "../test/mockCommands";
 
 describe("appInfo", () => {
@@ -12,7 +12,7 @@ describe("appInfo", () => {
   });
 });
 
-const settings: Settings = { frigateUrl: "http://f", fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
+const settings: Settings = { frigateUrl: "http://f", fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
 
 describe("settings commands", () => {
   it("calls each command with camelCase arguments", async () => {
@@ -23,18 +23,21 @@ describe("settings commands", () => {
       set_full_screen: () => null,
       save_layout: () => null,
       save_wall_options: () => null,
+      set_auto_update: () => ({ ...settings, autoUpdate: true }),
     });
     await expect(getSettings()).resolves.toEqual(settings);
     await expect(saveFrigateUrl(" http://f/ ")).resolves.toEqual(settings);
     await setFullScreen(true);
     await saveLayout("http://f", layout);
     await saveWallOptions({ lockRatio: false, fitToWindow: true, streamInfo: true, activity: false });
+    await expect(setAutoUpdate(true)).resolves.toEqual({ ...settings, autoUpdate: true });
     expect(calls).toEqual([
       { cmd: "get_settings", payload: {} },
       { cmd: "save_frigate_url", payload: { url: " http://f/ " } },
       { cmd: "set_full_screen", payload: { fullScreen: true } },
       { cmd: "save_layout", payload: { server: "http://f", layout } },
       { cmd: "save_wall_options", payload: { options: { lockRatio: false, fitToWindow: true, streamInfo: true, activity: false } } },
+      { cmd: "set_auto_update", payload: { enabled: true } },
     ]);
   });
 });

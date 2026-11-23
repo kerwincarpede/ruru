@@ -39,6 +39,7 @@ pub fn run() {
         .setup(|app| {
             let full_screen = settings::manage(app);
             mqtt::manage(app);
+            app.manage(update::start_auto_updates(app.handle().clone()));
             menu::install(app)?;
             if let Some(window) = app.get_webview_window("main") {
                 webview::enable_webrtc(&window)?;
@@ -54,6 +55,7 @@ pub fn run() {
             update::fake_update,
             update::check_update,
             update::install_update,
+            update::set_auto_update,
             settings::get_settings,
             settings::save_frigate_url,
             settings::set_full_screen,

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { AppInfo, UpdateChannel } from "./api";
 
 /** An update this copy can install. */
@@ -42,6 +43,24 @@ export async function checkForUpdate(): Promise<AvailableUpdate | null> {
   if (!version) return null;
   // A real update restarts Ruru before install_update returns.
   return { version, install: () => invoke<void>("install_update") };
+}
+
+/** Mirrors `AutoUpdateStatus` in src-tauri/src/update.rs: what an automatic update is doing. */
+export type AutoUpdateStatus =
+  | { state: "installing"; version: string }
+  | { state: "failed"; version: string; message: string };
+
+/**
+ * Calls `handler` when an automatic update starts installing, or fails.
+ * Resolves to a function that stops listening; a backend without events
+ * gives a no-op.
+ */
+export async function onAutoUpdate(handler: (status: AutoUpdateStatus) => void): Promise<() => void> {
+  try {
+    return await listen<AutoUpdateStatus>("auto-update", (event) => handler(event.payload));
+  } catch {
+    return () => {};
+  }
 }
 
 /** The startup check: like `checkForUpdate`, but a failed check is null. */

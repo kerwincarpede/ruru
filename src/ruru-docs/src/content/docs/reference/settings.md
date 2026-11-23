@@ -36,6 +36,7 @@ Choose **Save** to connect, or to disconnect when **Connect to Home Assistant** 
 | Setting | What it does |
 | --- | --- |
 | **Update channel** | **Stable** or **Edge**. See [Updates](/ruru/get-started/updates/). |
+| **Install updates automatically** | Off by default. When on, Ruru checks at startup and every 6 hours, then installs a newer version and restarts without asking. See [Automatic updates](/ruru/get-started/updates/#automatic-updates). |
 | **Check for updates** | Checks the channel now. When there is a newer version, the button becomes **Install and restart**. |
 
 Changes on this page save as you make them.

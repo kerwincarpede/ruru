@@ -1,12 +1,16 @@
 import { useState } from "react";
-import { setUpdateChannel, type AppInfo, type Settings, type UpdateChannel } from "../app/api";
+import { setAutoUpdate, setUpdateChannel, type AppInfo, type Settings, type UpdateChannel } from "../app/api";
 import { checkForUpdate, UPDATE_CHANNELS, versionLabel, type AvailableUpdate } from "../app/updates";
 
 interface UpdatesPageProps {
   info: AppInfo | null;
   channel: UpdateChannel;
+  /** Install updates automatically is on. */
+  autoUpdate: boolean;
   /** The channel was saved; the window uses the new settings. */
   onChannelSaved: (settings: Settings) => void;
+  /** Install updates automatically was saved; the window uses the new settings. */
+  onAutoUpdateSaved: (settings: Settings) => void;
   /** A check found an update, for the window's prompt after Settings closes. */
   onUpdate: (update: AvailableUpdate | null) => void;
   onClose: () => void;
@@ -25,8 +29,8 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Settings › Updates: the version, the update channel and a check on demand. */
-export default function UpdatesPage({ info, channel, onChannelSaved, onUpdate, onClose }: UpdatesPageProps) {
+/** Settings › Updates: the version, the update channel, automatic updates and a check on demand. */
+export default function UpdatesPage({ info, channel, autoUpdate, onChannelSaved, onAutoUpdateSaved, onUpdate, onClose }: UpdatesPageProps) {
   const [check, setCheck] = useState<Check>({ kind: "idle" });
   const [saving, setSaving] = useState(false);
   const [toStable, setToStable] = useState(false);
@@ -59,6 +63,21 @@ export default function UpdatesPage({ info, channel, onChannelSaved, onUpdate, o
     }
     setSaving(false);
     await runCheck();
+  };
+
+  // Turning it on hands installing to the backend, which checks straight away.
+  const changeAutoUpdate = async (enabled: boolean) => {
+    setSaving(true);
+    try {
+      onAutoUpdateSaved(await setAutoUpdate(enabled));
+      if (enabled) {
+        onUpdate(null);
+        setCheck({ kind: "idle" });
+      }
+    } catch (error) {
+      setCheck({ kind: "failed", message: message(error) });
+    }
+    setSaving(false);
   };
 
   const install = async (update: AvailableUpdate) => {
@@ -102,6 +121,22 @@ export default function UpdatesPage({ info, channel, onChannelSaved, onUpdate, o
           <span id="update-channel-hint" className="field-hint">
             {hint}
             {toStable && channel === "stable" && " If you’re ahead of Stable, you keep your version until a newer Stable release is out."}
+          </span>
+        </div>
+        <div className="field-check">
+          <input
+            id="auto-update"
+            type="checkbox"
+            aria-describedby="auto-update-hint"
+            checked={autoUpdate}
+            disabled={busy}
+            onChange={(event) => void changeAutoUpdate(event.target.checked)}
+          />
+          <label className="field-label" htmlFor="auto-update">
+            Install updates automatically
+          </label>
+          <span id="auto-update-hint" className="field-hint">
+            Ruru checks at startup and every 6 hours, then installs the update and restarts without asking.
           </span>
         </div>
         <div className="settings-test" aria-live="polite">

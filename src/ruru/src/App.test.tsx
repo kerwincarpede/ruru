@@ -14,7 +14,7 @@ vi.mock("./app/updates", async (importOriginal) => ({ ...(await importOriginal<t
 const findUpdateMock = vi.mocked(findUpdate);
 
 const URL_SAVED = "http://frigate:5000";
-const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
+const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
 const connected: Settings = { ...empty, frigateUrl: URL_SAVED };
 const camera = (name: string): Camera => ({ name, enabled: true, mainStream: name, subStream: `${name}_sub` });
 const cameras = [camera("maingate"), camera("garage")];
@@ -138,6 +138,47 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Install and restart" }));
     expect(install).toHaveBeenCalledOnce();
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("leaves the startup check to the backend when updates install automatically", async () => {
+    backend({ get_settings: () => ({ ...empty, autoUpdate: true }) });
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "Connect to Frigate" })).toBeInTheDocument();
+    expect(findUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it("says when an automatic update installs, in place of the prompt", async () => {
+    backend();
+    findUpdateMock.mockResolvedValue({ version: "0.2.0", install: vi.fn() });
+    render(<App />);
+    expect(await screen.findByRole("dialog", { name: "Ruru 0.2.0 is ready. Install and restart?" })).toBeInTheDocument();
+    await act(() => emit("auto-update", { state: "installing", version: "0.2.0" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Installing Ruru 0.2.0.");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("puts away the notice of a failed automatic update", async () => {
+    backend();
+    render(<App />);
+    await waitFor(() => expect(findUpdateMock).toHaveBeenCalledOnce());
+    await act(() => emit("auto-update", { state: "failed", version: "0.2.0", message: "bad signature" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Ruru 0.2.0 could not be installed.");
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("turning on automatic updates in Settings puts away the startup prompt", async () => {
+    const calls = backend({ set_auto_update: ({ enabled }) => ({ ...empty, autoUpdate: enabled }) });
+    findUpdateMock.mockResolvedValue({ version: "0.2.0", install: vi.fn() });
+    render(<App />);
+    expect(await screen.findByRole("dialog", { name: "Ruru 0.2.0 is ready. Install and restart?" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Connect to Frigate" }));
+    fireEvent.click(screen.getByRole("button", { name: "Updates" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Install updates automatically" }));
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "Install updates automatically" })).toBeChecked());
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(calls).toContainEqual({ cmd: "set_auto_update", payload: { enabled: true } });
   });
 
   it("connects to Frigate from the empty state and shows its cameras", async () => {

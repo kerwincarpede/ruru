@@ -94,6 +94,22 @@
   font-size: 0.8rem;
 }
 
+.field-check {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+}
+
+.field-check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.field-check .field-hint {
+  grid-column: 2;
+}
+
 .settings-test {
   display: flex;
   flex-wrap: wrap;
