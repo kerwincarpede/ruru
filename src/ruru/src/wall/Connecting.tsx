@@ -21,7 +21,7 @@ function problemText(error: string, server: string) {
     case "waiting":
       return {
         title: "Waiting for Frigate…",
-        detail: `Frigate at ${server} isn't answering yet, as while it is still starting. If this lasts, check the address with Test connection in Settings.`,
+        detail: `Frigate at ${server} isn't answering yet. It may still be starting. If this lasts, check the address with Test connection in Settings.`,
       };
     case "status":
       return {
