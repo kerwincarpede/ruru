@@ -1,7 +1,7 @@
 import "./App.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { appInfo, type AppInfo } from "./app/api";
-import { cameraLabel, type Camera } from "./app/frigate";
+import { RETRY_DELAYS_MS, cameraLabel, type Camera } from "./app/frigate";
 import { isMac, shortcutFor } from "./app/keys";
 import Owl from "./app/Owl";
 import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, cameraActivity, frigateCameras, getSettings, onCameraActivity, onFullScreenChanged, onOpenSettings, onWallCommand, reportTileProblem, reportWallState, saveLayout, saveWallOptions, setFullScreen, type Activity, type SavedLayout, type Settings, type WallOptions } from "./app/api";
@@ -21,11 +21,6 @@ import WallMenu from "./wall/WallMenu";
 /** How long the toolbar stays after the pointer stops moving. */
 export const TOOLBAR_HIDE_MS = 2500;
 
-/**
- * How long Ruru waits before asking Frigate for its cameras again after each
- * failure in a row; the last wait repeats for as long as the failures last.
- */
-export const RETRY_DELAYS_MS = [2_000, 5_000, 10_000, 30_000];
 /** The longest the wall stays covered while its tiles start their streams. */
 export const CONNECTING_MS = 20_000;
 const NO_SETTINGS: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
@@ -132,9 +127,11 @@ function App() {
 
   // Cameras come from Frigate at startup, after Save, and whenever the window regains focus.
   // A discovery still running for a server that is no longer saved is ignored.
-  // `failures` counts the failed discoveries in a row for the saved server.
+  // `failures` counts the failed discoveries in a row for the saved server;
+  // keyed by server, so another server starts again from none.
   const currentUrl = useRef<string | null>(null);
-  const [failures, setFailures] = useState(0);
+  const [failed, setFailed] = useState<{ server: string | null; count: number }>({ server: null, count: 0 });
+  const failures = failed.server === url ? failed.count : 0;
   const discover = useCallback(
     (server: string) =>
       frigateCameras(server)
@@ -143,12 +140,12 @@ function App() {
             if (currentUrl.current !== server) return;
             setCameras(found);
             setDiscoveryError(null);
-            setFailures(0);
+            setFailed({ server, count: 0 });
           },
           (error: unknown) => {
             if (currentUrl.current !== server) return;
             setDiscoveryError(String(error));
-            setFailures((count) => count + 1);
+            setFailed((last) => ({ server, count: last.server === server ? last.count + 1 : 1 }));
           },
         )
         .then(() => setRefresh((count) => count + 1)),
@@ -157,7 +154,6 @@ function App() {
 
   useEffect(() => {
     currentUrl.current = url;
-    setFailures(0);
     if (!url) return;
     void discover(url);
     const onFocus = () => void discover(url);

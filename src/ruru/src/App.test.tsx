@@ -2,8 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach } from "vitest";
 import { emit } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import App, { CONNECTING_MS, RETRY_DELAYS_MS } from "./App";
-import type { Camera } from "./app/frigate";
+import App, { CONNECTING_MS } from "./App";
+import { RETRY_DELAYS_MS, type Camera } from "./app/frigate";
 import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, type Activity, type SavedLayout, type Settings } from "./app/api";
 import { findUpdate } from "./app/updates";
 import { mockCommands, type CommandHandlers } from "./test/mockCommands";
@@ -519,6 +519,42 @@ describe("App", () => {
     });
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not reach Frigate");
     expect(screen.getByRole("figure", { name: "Garage" })).toBeInTheDocument();
+  });
+
+  it("restarts the backoff for a newly saved server and stops retrying the old one", async () => {
+    vi.useFakeTimers();
+    try {
+      const other = "http://other:5000";
+      const calls = wall({
+        frigate_cameras: () => {
+          throw "Waiting for Frigate…";
+        },
+        save_frigate_url: () => ({ ...connected, frigateUrl: other }),
+      });
+      const attemptsAt = (server: string) => calls.filter((call) => call.cmd === "frigate_cameras" && (call.payload as { url?: string } | undefined)?.url === server).length;
+      const advance = (ms: number) =>
+        act(async () => {
+          await vi.advanceTimersByTimeAsync(ms);
+        });
+      render(<App />);
+      await advance(0);
+      // Past the 10 s step, so the old server would next wait 30 s.
+      for (const delay of RETRY_DELAYS_MS.slice(0, 3)) await advance(delay);
+      expect(attemptsAt(URL_SAVED)).toBe(4);
+      fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+      fireEvent.change(screen.getByLabelText("Frigate URL"), { target: { value: other } });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await advance(0);
+      expect(attemptsAt(other)).toBe(1);
+      await advance(RETRY_DELAYS_MS[0] - 1);
+      expect(attemptsAt(other)).toBe(1);
+      await advance(1);
+      expect(attemptsAt(other)).toBe(2);
+      await advance(RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1] * 2);
+      expect(attemptsAt(URL_SAVED)).toBe(4);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("retries a failed discovery once the wall is up and clears the error when Frigate answers", async () => {

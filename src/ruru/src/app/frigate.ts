@@ -30,3 +30,9 @@ export function cameraLabel(name: string): string {
   const words = name.replace(/[_-]+/g, " ").trim();
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
+
+/**
+ * How long the wall waits before asking Frigate for its cameras again after
+ * each failure in a row; the last wait repeats for as long as the failures last.
+ */
+export const RETRY_DELAYS_MS = [2_000, 5_000, 10_000, 30_000];
