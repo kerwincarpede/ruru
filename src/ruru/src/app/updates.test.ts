@@ -1,7 +1,7 @@
 import { emit } from "@tauri-apps/api/event";
 import { clearMocks } from "@tauri-apps/api/mocks";
 import { describe, expect, it, vi } from "vitest";
-import { checkForUpdate, fakeUpdate, findUpdate, onAutoUpdate, versionLabel } from "./updates";
+import { checkForUpdate, fakeUpdate, findUpdate, onUpdateStatus, versionLabel } from "./updates";
 import { mockCommands } from "../test/mockCommands";
 
 describe("fakeUpdate", () => {
@@ -89,19 +89,19 @@ describe("findUpdate", () => {
   });
 });
 
-describe("onAutoUpdate", () => {
-  it("hands over what the automatic update is doing", async () => {
+describe("onUpdateStatus", () => {
+  it("hands over what the update is doing", async () => {
     mockCommands({});
     const handler = vi.fn();
-    const stop = await onAutoUpdate(handler);
-    await emit("auto-update", { state: "installing", version: "0.4.1" });
-    expect(handler).toHaveBeenCalledWith({ state: "installing", version: "0.4.1" });
+    const stop = await onUpdateStatus(handler);
+    await emit("update-status", { state: "downloading", version: "0.4.1", percent: 7 });
+    expect(handler).toHaveBeenCalledWith({ state: "downloading", version: "0.4.1", percent: 7 });
     stop();
   });
 
   it("gives a no-op without a backend", async () => {
     clearMocks();
-    const stop = await onAutoUpdate(vi.fn());
+    const stop = await onUpdateStatus(vi.fn());
     expect(() => stop()).not.toThrow();
   });
 });

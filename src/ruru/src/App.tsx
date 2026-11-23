@@ -5,9 +5,9 @@ import { RETRY_DELAYS_MS, cameraLabel, type Camera } from "./app/frigate";
 import { isMac, shortcutFor } from "./app/keys";
 import Owl from "./app/Owl";
 import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, cameraActivity, frigateCameras, getSettings, onCameraActivity, onFullScreenChanged, onOpenSettings, onWallCommand, reportTileProblem, reportWallState, saveLayout, saveWallOptions, setFullScreen, type Activity, type SavedLayout, type Settings, type WallOptions } from "./app/api";
-import AutoUpdateNotice from "./app/AutoUpdateNotice";
+import UpdateNotice from "./app/UpdateNotice";
 import UpdatePrompt from "./app/UpdatePrompt";
-import { findUpdate, onAutoUpdate, versionLabel, type AutoUpdateStatus, type AvailableUpdate } from "./app/updates";
+import { findUpdate, onUpdateStatus, versionLabel, type AvailableUpdate, type UpdateStatus } from "./app/updates";
 import SettingsDialog from "./settings/SettingsDialog";
 import { EMPTY_LAYOUT, hideCamera, showCamera, wallPlacements } from "./wall/layout";
 import { tileMenu, type MenuItem, type MenuSection } from "./wall/menu";
@@ -37,7 +37,7 @@ function GearIcon() {
 function App() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [update, setUpdate] = useState<AvailableUpdate | null>(null);
-  const [autoStatus, setAutoStatus] = useState<AutoUpdateStatus | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [cameras, setCameras] = useState<Camera[] | null>(null);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
@@ -102,13 +102,15 @@ function App() {
     });
   }, [askToUpdate]);
 
-  // The backend says when an automatic update installs; Ruru restarts after.
+  // The backend says how an update is going, whether the prompt, Home
+  // Assistant or automatic updates started it; Ruru restarts after.
   useEffect(() => {
     let current = true;
     let stop = () => {};
-    void onAutoUpdate((status) => {
-      setUpdate(null);
-      setAutoStatus(status);
+    // The notice takes the prompt's place; the offer stays, so putting away
+    // a failed install brings back Install and restart.
+    void onUpdateStatus((status) => {
+      setUpdateStatus(status);
     }).then((unlisten) => {
       if (current) stop = unlisten;
       else unlisten();
@@ -521,8 +523,8 @@ function App() {
           onClose={() => setSettingsOpen(false)}
         />
       )}
-      {autoStatus ? (
-        <AutoUpdateNotice status={autoStatus} onClose={() => setAutoStatus(null)} />
+      {updateStatus ? (
+        <UpdateNotice status={updateStatus} onClose={() => setUpdateStatus(null)} />
       ) : (
         update && <UpdatePrompt update={update} onClose={() => setUpdate(null)} />
       )}

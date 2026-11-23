@@ -208,18 +208,104 @@ pub async fn check(app: &AppHandle) -> Result<Option<String>, String> {
 }
 
 /// Takes the pending update, if the channel has not changed since it was
-/// found, and downloads it, returning the channel too. A failed download
-/// keeps it pending.
-async fn download(app: &AppHandle) -> Result<(UpdateChannel, Update, Vec<u8>), String> {
+/// found, and downloads it, returning the channel too. The page hears how
+/// far the download is, then that the update is installing. A failed
+/// download keeps it pending, and the page hears why.
+async fn download(
+    app: &AppHandle,
+    automatic: bool,
+) -> Result<(UpdateChannel, Update, Vec<u8>, Announcer<'_>), String> {
     let channel = saved_channel(&app.state::<SharedSettings>());
     let pending = app.state::<PendingUpdate>();
     let update = pending.take(channel)?;
-    match update.download(|_, _| {}, || {}).await {
-        Ok(bytes) => Ok((channel, update, bytes)),
+    let announcer = Announcer {
+        app,
+        version: update.version.clone(),
+        automatic,
+    };
+    announcer.downloading(None);
+    let mut progress = Progress::default();
+    let downloaded = update
+        .download(
+            |chunk, total| {
+                if let Some(percent) = progress.add(chunk, total) {
+                    announcer.downloading(Some(percent));
+                }
+            },
+            || {},
+        )
+        .await;
+    match downloaded {
+        Ok(bytes) => {
+            announcer.installing();
+            Ok((channel, update, bytes, announcer))
+        }
         Err(err) => {
             pending.put_back(channel, update);
-            Err(format!("The update could not be downloaded: {err}"))
+            let message = format!("The update could not be downloaded: {err}");
+            announcer.failed(&message);
+            Err(message)
         }
+    }
+}
+
+/// How much of a download has arrived, as a whole percentage.
+#[derive(Debug, Default)]
+struct Progress {
+    received: u64,
+    percent: Option<u8>,
+}
+
+impl Progress {
+    /// Counts a chunk of `chunk` bytes out of `total`, returning the new
+    /// percentage when it moved on. Without a total there is none.
+    fn add(&mut self, chunk: usize, total: Option<u64>) -> Option<u8> {
+        self.received = self
+            .received
+            .saturating_add(u64::try_from(chunk).unwrap_or(u64::MAX));
+        let total = total.filter(|total| *total > 0)?;
+        let percent = u8::try_from((self.received.min(total) * 100) / total).unwrap_or(100);
+        if self.percent == Some(percent) {
+            return None;
+        }
+        self.percent = Some(percent);
+        Some(percent)
+    }
+}
+
+/// Tells the page what one install of `version` is doing, whoever started
+/// it.
+struct Announcer<'a> {
+    app: &'a AppHandle,
+    version: String,
+    automatic: bool,
+}
+
+impl Announcer<'_> {
+    fn announce(&self, status: UpdateStatus) {
+        // A page that is not listening misses nothing it can act on.
+        let _ = self.app.emit(UPDATE_STATUS_EVENT, status);
+    }
+
+    fn downloading(&self, percent: Option<u8>) {
+        self.announce(UpdateStatus::Downloading {
+            version: self.version.clone(),
+            percent,
+        });
+    }
+
+    fn installing(&self) {
+        self.announce(UpdateStatus::Installing {
+            version: self.version.clone(),
+        });
+    }
+
+    fn failed(&self, message: &str) {
+        self.announce(UpdateStatus::Failed {
+            version: self.version.clone(),
+            message: message.into(),
+            automatic: self.automatic,
+        });
     }
 }
 
@@ -234,10 +320,13 @@ pub async fn check_update(app: AppHandle) -> Result<Option<String>, String> {
 /// Ruru on it. Refused when the channel changed since that check.
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
-    let (_, update, bytes) = download(&app).await?;
-    update
-        .install(bytes)
-        .map_err(|err| format!("The update could not be installed: {err}"))?;
+    let (channel, update, bytes, announcer) = download(&app, false).await?;
+    if let Err(err) = update.install(bytes) {
+        app.state::<PendingUpdate>().put_back(channel, update);
+        let message = format!("The update could not be installed: {err}");
+        announcer.failed(&message);
+        return Err(message);
+    }
     app.restart()
 }
 
@@ -351,33 +440,48 @@ pub async fn install_for_home_assistant(app: &AppHandle) -> Result<Installed, St
     if fake_update().is_some() {
         return fake_install(&mut AppRelaunch { app, update: None });
     }
-    let (channel, update, bytes) = download(app).await?;
-    relaunch_full_screen(
+    let (channel, update, bytes, announcer) = download(app, false).await?;
+    let installed = relaunch_full_screen(
         &mut AppRelaunch {
             app,
             update: Some((channel, update)),
         },
         bytes,
-    )
+    );
+    if let Err(message) = &installed {
+        announcer.failed(message);
+    }
+    installed
 }
 
 /// How often automatic updates check, after the check at startup.
 pub const AUTO_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
-/// The event the page hears while an automatic update installs, or after one
-/// failed.
-pub const AUTO_UPDATE_EVENT: &str = "auto-update";
+/// The event the page hears while an update downloads and installs, or
+/// after one failed, whether the user, Home Assistant or Install updates
+/// automatically started it.
+pub const UPDATE_STATUS_EVENT: &str = "update-status";
 
-/// What an automatic update is doing, for the page's notice.
+/// What an install is doing, for the page's notice.
 ///
-/// Mirrored by `AutoUpdateStatus` in `src/app/updates.ts`.
+/// Mirrored by `UpdateStatus` in `src/app/updates.ts`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
-pub enum AutoUpdateStatus {
-    /// Downloading and installing; Ruru restarts when it is done.
+pub enum UpdateStatus {
+    /// Downloading, `percent` of the way when the size is known.
+    Downloading {
+        version: String,
+        percent: Option<u8>,
+    },
+    /// Downloaded and installing; Ruru restarts when it is done.
     Installing { version: String },
-    /// The install failed. The next check tries again.
-    Failed { version: String, message: String },
+    /// The install failed and the update stays pending. An automatic one is
+    /// tried again at the next check.
+    Failed {
+        version: String,
+        message: String,
+        automatic: bool,
+    },
 }
 
 /// Wakes the automatic-update thread so it checks straight away, such as
@@ -434,40 +538,22 @@ pub fn start_auto_updates(app: AppHandle) -> AutoUpdater {
 /// the next try. The pending update is taken to install it, so the user,
 /// Home Assistant and this thread never install the same update twice.
 async fn auto_update(app: &AppHandle) -> Result<(), String> {
-    let announce = |status: AutoUpdateStatus| {
-        let _ = app.emit(AUTO_UPDATE_EVENT, status);
-    };
     if let Some(version) = fake_update() {
         // Nothing to install: the notice shows and Ruru keeps running.
-        announce(AutoUpdateStatus::Installing { version });
+        let _ = app.emit(UPDATE_STATUS_EVENT, UpdateStatus::Installing { version });
         return Ok(());
     }
-    let Some(version) = check(app).await? else {
+    if check(app).await?.is_none() {
         return Ok(());
-    };
-    announce(AutoUpdateStatus::Installing {
-        version: version.clone(),
-    });
-    let installed = match download(app).await {
-        Ok((channel, update, bytes)) => match update.install(bytes) {
-            Ok(()) => Ok(()),
-            Err(err) => {
-                app.state::<PendingUpdate>().put_back(channel, update);
-                Err(format!("The update could not be installed: {err}"))
-            }
-        },
-        Err(err) => Err(err),
-    };
-    match installed {
-        Ok(()) => app.restart(),
-        Err(message) => {
-            announce(AutoUpdateStatus::Failed {
-                version,
-                message: message.clone(),
-            });
-            Err(message)
-        }
     }
+    let (channel, update, bytes, announcer) = download(app, true).await?;
+    if let Err(err) = update.install(bytes) {
+        app.state::<PendingUpdate>().put_back(channel, update);
+        let message = format!("The update could not be installed: {err}");
+        announcer.failed(&message);
+        return Err(message);
+    }
+    app.restart()
 }
 
 /// Saves whether updates install by themselves and returns the settings with
@@ -552,22 +638,58 @@ mod tests {
     }
 
     #[test]
-    fn automatic_update_status_serialises_as_the_page_expects() {
+    fn update_status_serialises_as_the_page_expects() {
         assert_eq!(
-            serde_json::to_value(AutoUpdateStatus::Installing {
+            serde_json::to_value(UpdateStatus::Downloading {
+                version: "0.4.1".into(),
+                percent: Some(42)
+            })
+            .unwrap(),
+            serde_json::json!({ "state": "downloading", "version": "0.4.1", "percent": 42 })
+        );
+        assert_eq!(
+            serde_json::to_value(UpdateStatus::Downloading {
+                version: "0.4.1".into(),
+                percent: None
+            })
+            .unwrap(),
+            serde_json::json!({ "state": "downloading", "version": "0.4.1", "percent": null })
+        );
+        assert_eq!(
+            serde_json::to_value(UpdateStatus::Installing {
                 version: "0.4.1".into()
             })
             .unwrap(),
             serde_json::json!({ "state": "installing", "version": "0.4.1" })
         );
         assert_eq!(
-            serde_json::to_value(AutoUpdateStatus::Failed {
+            serde_json::to_value(UpdateStatus::Failed {
                 version: "0.4.1".into(),
-                message: "No disk space".into()
+                message: "No disk space".into(),
+                automatic: true
             })
             .unwrap(),
-            serde_json::json!({ "state": "failed", "version": "0.4.1", "message": "No disk space" })
+            serde_json::json!({ "state": "failed", "version": "0.4.1", "message": "No disk space", "automatic": true })
         );
+    }
+
+    #[test]
+    fn progress_moves_on_whole_percentages() {
+        let mut progress = Progress::default();
+        assert_eq!(progress.add(0, Some(1000)), Some(0));
+        assert_eq!(progress.add(4, Some(1000)), None);
+        assert_eq!(progress.add(6, Some(1000)), Some(1));
+        assert_eq!(progress.add(490, Some(1000)), Some(50));
+        assert_eq!(progress.add(600, Some(1000)), Some(100));
+        assert_eq!(progress.add(10, Some(1000)), None);
+    }
+
+    #[test]
+    fn progress_without_a_size_has_no_percentage() {
+        let mut progress = Progress::default();
+        assert_eq!(progress.add(500, None), None);
+        assert_eq!(progress.add(500, Some(0)), None);
+        assert_eq!(progress.add(0, Some(2000)), Some(50));
     }
 
     fn releases(json: &str) -> Vec<GithubRelease> {

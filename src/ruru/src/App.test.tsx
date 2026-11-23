@@ -148,21 +148,32 @@ describe("App", () => {
     expect(findUpdateMock).not.toHaveBeenCalled();
   });
 
-  it("says when an automatic update installs, in place of the prompt", async () => {
+  it("says how an update is going, in place of the prompt", async () => {
     backend();
     findUpdateMock.mockResolvedValue({ version: "0.2.0", install: vi.fn() });
     render(<App />);
     expect(await screen.findByRole("dialog", { name: "Ruru 0.2.0 is ready. Install and restart?" })).toBeInTheDocument();
-    await act(() => emit("auto-update", { state: "installing", version: "0.2.0" }));
+    await act(() => emit("update-status", { state: "installing", version: "0.2.0" }));
     expect(screen.getByRole("status")).toHaveTextContent("Installing Ruru 0.2.0.");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("puts away the notice of a failed automatic update", async () => {
+  it("brings back the prompt after a failed install is put away", async () => {
+    backend();
+    findUpdateMock.mockResolvedValue({ version: "0.2.0", install: vi.fn() });
+    render(<App />);
+    expect(await screen.findByRole("dialog", { name: "Ruru 0.2.0 is ready. Install and restart?" })).toBeInTheDocument();
+    await act(() => emit("update-status", { state: "failed", version: "0.2.0", message: "Download failed", automatic: false }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    expect(screen.getByRole("button", { name: "Install and restart" })).toBeEnabled();
+  });
+
+  it("puts away the notice of a failed update", async () => {
     backend();
     render(<App />);
     await waitFor(() => expect(findUpdateMock).toHaveBeenCalledOnce());
-    await act(() => emit("auto-update", { state: "failed", version: "0.2.0", message: "bad signature" }));
+    await act(() => emit("update-status", { state: "failed", version: "0.2.0", message: "bad signature", automatic: true }));
     expect(screen.getByRole("alert")).toHaveTextContent("Ruru 0.2.0 could not be installed.");
     fireEvent.click(screen.getByRole("button", { name: "OK" }));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
