@@ -216,3 +216,22 @@ export async function onCameraActivity(handler: (activity: Activity) => void): P
 export function reportTileProblem(camera: string, problem: boolean): Promise<void> {
   return invoke<void>("report_tile_problem", { camera, problem });
 }
+
+/** Mirrors `WallCommand` in src-tauri/src/mqtt/commands.rs: a change Home Assistant asks the wall for. */
+export type WallCommand =
+  | { kind: "maximise"; camera: string }
+  | { kind: "restore" }
+  | { kind: "fullScreen"; on: boolean }
+  | { kind: "reconnect"; camera: string };
+
+/**
+ * Calls `handler` with each command Home Assistant sends the wall. Resolves
+ * to a function that stops listening; a backend without events gives a no-op.
+ */
+export async function onWallCommand(handler: (command: WallCommand) => void): Promise<() => void> {
+  try {
+    return await listen<WallCommand>("wall-command", (event) => handler(event.payload));
+  } catch {
+    return () => {};
+  }
+}

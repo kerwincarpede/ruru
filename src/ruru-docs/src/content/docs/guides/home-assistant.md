@@ -1,6 +1,6 @@
 ---
 title: Home Assistant
-description: Show the wall in Home Assistant as a device, with its state and a problem sensor for each camera, and show Frigate's activity on the tiles.
+description: Show the wall in Home Assistant as a device, with its state, a problem sensor for each camera and controls for the wall and updates, and show Frigate's activity on the tiles.
 sidebar:
   order: 2
 ---
@@ -34,7 +34,23 @@ The device is called **Ruru on** and the computer's name, such as **Ruru on kitc
 | **Window shown** | Off while the window is minimised or hidden. |
 | A **problem** sensor for each camera, such as **Front door problem** | On when the camera's tile can't play its stream, or has been frozen or reconnecting for 30 seconds. |
 
-Every entity shows as unavailable while Ruru is not connected, such as when the computer is off. Problem sensors follow the cameras on the wall: hiding a camera removes its sensor, and showing it adds the sensor back.
+It also has controls:
+
+| Entity | What it does |
+| --- | --- |
+| **Maximise** | A select: pick a camera to fill the window with it, or `none` to show the whole wall. |
+| **Restore** | A button that shows the whole wall again. |
+| **Full screen** | A switch that turns full screen on and off. |
+| A **Reconnect** button for each camera, such as **Reconnect Front door** | Drops the tile's stream and connects it again. |
+| **Update** | Shows when a newer version is out on your update channel, and installs it. |
+
+Every entity shows as unavailable while Ruru is not connected, such as when the computer is off. Problem sensors and Reconnect buttons follow the cameras on the wall: hiding a camera removes them, and showing it adds them back. **Maximise** offers only the cameras on the wall.
+
+## Updates from Home Assistant
+
+While connected, Ruru checks the update channel picked in **Settings → Updates** when it connects and then every 6 hours, and the **Update** entity shows what it found. Choose **Install** in Home Assistant to download and install it. Ruru then restarts on the new version full screen, ready for a wall display. If the install fails, Ruru keeps running as it was.
+
+On Linux, a `.deb` or `.rpm` install may ask for your password on the computer running Ruru before it can finish. The AppImage updates without asking.
 
 If the connection drops, Ruru connects again on its own, waiting a little longer after each failure, up to a minute.
 
@@ -59,6 +75,19 @@ Ruru publishes under `ruru/<device id>/`, where the device id is made once for e
 | `ruru/<device id>/availability` | `online`, or `offline` when Ruru goes away. |
 | `ruru/<device id>/state` | JSON with `version`, `maximised`, `full_screen` and `window_shown`. |
 | `ruru/<device id>/problem/<camera>` | `ON` or `OFF`. |
+| `ruru/<device id>/update` | JSON with `installed_version`, `latest_version`, `title`, `release_url` and `in_progress`, for the update entity. |
+
+Home Assistant sends commands to `ruru/<device id>/command/<command>`:
+
+| Command | Payload |
+| --- | --- |
+| `maximise` | A camera's name, or `none` to restore. |
+| `restore` | Anything. |
+| `full_screen` | `ON` or `OFF`. |
+| `reconnect` | A camera's name. |
+| `install` | Anything. |
+
+Ruru ignores retained commands, unknown commands, and cameras that are not on the wall.
 
 Discovery configs are retained under `<discovery prefix>/<component>/<device id>/<object id>/config`. Change **Discovery prefix** only if you changed it in Home Assistant's MQTT settings.
 

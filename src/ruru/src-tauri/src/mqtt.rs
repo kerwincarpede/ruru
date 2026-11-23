@@ -4,6 +4,12 @@
 //! a problem sensor per camera. It also follows Frigate's topics on the same
 //! broker, so each tile can show its camera's motion, objects and alerts.
 //!
+//! Home Assistant controls the wall through the device's select, buttons and
+//! switch: each command is checked here and handed to the page, which
+//! carries it out. The device's update entity offers the update a check of
+//! the saved channel finds, every six hours while connected, and installs it
+//! when asked, restarting Ruru full screen.
+//!
 //! The page reports the wall's state and each tile's problems; this module
 //! keeps the latest and publishes it whenever it changes or the connection
 //! comes back. The connection retries on its own, waiting longer after each
@@ -12,6 +18,7 @@
 
 mod activity;
 mod client;
+mod commands;
 mod discovery;
 mod password;
 mod topics;
@@ -20,6 +27,7 @@ use std::{
     collections::BTreeSet,
     fmt,
     sync::{Mutex, MutexGuard},
+    time::{Duration, Instant},
 };
 
 use rumqttc::{AsyncClient, Event, LastWill, Packet, QoS};
@@ -29,9 +37,11 @@ use tauri::{AppHandle, Emitter, Manager, State, async_runtime::JoinHandle};
 use crate::settings::{
     self, MAX_TILES, MqttSettings, Settings, SettingsError, SharedSettings, valid_camera_name,
 };
+use crate::update::{self, Installed};
 use activity::{Activity, FrigateTopics};
 use client::Broker;
-use discovery::{Device, Message, WallState};
+use commands::Command;
+use discovery::{Device, Message, UpdateInfo, WallState};
 use password::{Keychain, PasswordChange};
 use topics::Topics;
 
@@ -41,6 +51,14 @@ const MAX_HOST: usize = 253;
 const MAX_PREFIX: usize = 100;
 /// The longest username or password Ruru accepts.
 const MAX_LOGIN: usize = 1024;
+/// The problem sensors' discovery component and object id suffix.
+const PROBLEM: (&str, &str) = ("binary_sensor", discovery::PROBLEM_SUFFIX);
+/// The Reconnect buttons' discovery component and object id suffix.
+const RECONNECT: (&str, &str) = ("button", discovery::RECONNECT_SUFFIX);
+/// How often the update entity checks for a newer version while connected.
+const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+/// How often Ruru looks whether a check is due.
+const CHECK_TICK: Duration = Duration::from_secs(10 * 60);
 
 /// Why the broker could not be reached or the settings saved.
 #[derive(Debug)]
@@ -180,7 +198,7 @@ fn checked_password(password: Option<String>) -> Result<Option<String>, MqttErro
     }
 }
 
-/// The wall as the page last reported it.
+/// The wall as the page last reported it, and what the update check found.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Wall {
     state: WallState,
@@ -191,6 +209,7 @@ struct Wall {
     /// The page has reported the cameras at least once, so a problem sensor
     /// for a camera not in `cameras` is really stale.
     reported: bool,
+    update: UpdateInfo,
 }
 
 impl Wall {
@@ -207,11 +226,14 @@ struct Session {
     /// Connected to the broker now. Nothing is queued while it is not:
     /// everything is published again on connecting.
     connected: bool,
-    /// The cameras whose problem sensor has been announced.
+    /// The cameras whose problem sensor and Reconnect button have been
+    /// announced.
     announced: BTreeSet<String>,
-    /// The problem sensors' object ids the broker holds a config for, from
-    /// this or an earlier run.
-    on_broker: BTreeSet<String>,
+    /// The problem sensors and Reconnect buttons the broker holds a config
+    /// for, from this or an earlier run, as (component, object id).
+    on_broker: BTreeSet<(String, String)>,
+    /// The cameras the Maximise select offers, in order, once announced.
+    options: Option<Vec<String>>,
 }
 
 impl Session {
@@ -222,12 +244,14 @@ impl Session {
             connected: false,
             announced: BTreeSet::new(),
             on_broker: BTreeSet::new(),
+            options: None,
         }
     }
 
     /// Everything Home Assistant needs on connecting, or when it restarts:
-    /// online, the device's sensors, each camera's problem sensor, removals
-    /// for cameras that are gone, and the current state.
+    /// online, the device's sensors and controls, each camera's problem
+    /// sensor and Reconnect button, removals for cameras that are gone, and
+    /// the current state.
     fn announce(&mut self, wall: &Wall) -> Vec<Message> {
         if !self.connected {
             return Vec::new();
@@ -238,12 +262,19 @@ impl Session {
             retain: true,
         }];
         messages.extend(discovery::device_configs(&self.topics, &self.device));
+        messages.extend(discovery::control_configs(&self.topics, &self.device));
         messages.extend(self.cameras_changed(wall, true));
         messages.push(discovery::state(&self.topics, &self.device, &wall.state));
+        messages.push(discovery::update_state(
+            &self.topics,
+            &self.device,
+            &wall.update,
+        ));
         messages
     }
 
-    /// The problem sensors for cameras that are new, with their state, and
+    /// The Maximise select when its cameras changed, the problem sensors and
+    /// Reconnect buttons for cameras that are new, with their state, and
     /// removals for cameras that are gone. With `all`, every camera counts
     /// as new.
     fn cameras_changed(&mut self, wall: &Wall, all: bool) -> Vec<Message> {
@@ -252,9 +283,21 @@ impl Session {
         }
         let current: BTreeSet<String> = wall.cameras.iter().cloned().collect();
         let mut messages = Vec::new();
+        if all || self.options.as_ref() != Some(&wall.cameras) {
+            messages.push(discovery::maximise_config(
+                &self.topics,
+                &self.device,
+                &wall.cameras,
+            ));
+            self.options = Some(wall.cameras.clone());
+        }
         for camera in self.announced.difference(&current) {
             messages.extend(discovery::camera_removal(&self.topics, camera));
-            self.on_broker.remove(&discovery::problem_object(camera));
+            messages.push(discovery::reconnect_removal(&self.topics, camera));
+            self.on_broker
+                .remove(&(PROBLEM.0.to_string(), discovery::problem_object(camera)));
+            self.on_broker
+                .remove(&(RECONNECT.0.to_string(), discovery::reconnect_object(camera)));
         }
         for camera in &wall.cameras {
             if all || !self.announced.contains(camera) {
@@ -264,6 +307,11 @@ impl Session {
                     camera,
                     wall.problem(camera),
                 ));
+                messages.push(discovery::reconnect_config(
+                    &self.topics,
+                    &self.device,
+                    camera,
+                ));
             }
         }
         self.announced = current;
@@ -271,40 +319,69 @@ impl Session {
     }
 
     /// Notes a discovery config the broker sent, and removes it if it is a
-    /// problem sensor for a camera no longer on the wall.
+    /// problem sensor or Reconnect button for a camera no longer on the wall.
     fn config_seen(&mut self, topic: &str, payload: &[u8], wall: &Wall) -> Vec<Message> {
-        let Some(object) = self.topics.config_object(topic, "binary_sensor") else {
+        let Some((component, object)) =
+            [PROBLEM, RECONNECT]
+                .into_iter()
+                .find_map(|(component, suffix)| {
+                    self.topics
+                        .config_object(topic, component)
+                        .filter(|object| object.ends_with(suffix))
+                        .map(|object| (component, object))
+                })
+        else {
             return Vec::new();
         };
-        if !object.ends_with(discovery::PROBLEM_SUFFIX) {
-            return Vec::new();
-        }
+        let key = (component.to_string(), object.to_string());
         if payload.is_empty() {
-            self.on_broker.remove(object);
+            self.on_broker.remove(&key);
         } else {
-            self.on_broker.insert(object.to_string());
+            self.on_broker.insert(key);
         }
         self.prune(wall)
     }
 
-    /// Removes problem sensors the broker still holds for cameras that are
-    /// not on the wall, such as one hidden while Ruru was disconnected.
+    /// Removes problem sensors and Reconnect buttons the broker still holds
+    /// for cameras that are not on the wall, such as one hidden while Ruru
+    /// was disconnected.
     fn prune(&mut self, wall: &Wall) -> Vec<Message> {
         if !self.connected || !wall.reported {
             return Vec::new();
         }
-        let wanted: BTreeSet<String> = wall
+        let wanted: BTreeSet<(String, String)> = wall
             .cameras
             .iter()
-            .map(|camera| discovery::problem_object(camera))
+            .flat_map(|camera| {
+                [
+                    (PROBLEM.0.to_string(), discovery::problem_object(camera)),
+                    (RECONNECT.0.to_string(), discovery::reconnect_object(camera)),
+                ]
+            })
             .collect();
-        let stale: Vec<String> = self.on_broker.difference(&wanted).cloned().collect();
+        let stale: Vec<(String, String)> = self.on_broker.difference(&wanted).cloned().collect();
         let mut messages = Vec::new();
-        for object in stale {
-            messages.extend(discovery::stale_problem(&self.topics, &object));
-            self.on_broker.remove(&object);
+        for key in stale {
+            let (component, object) = &key;
+            if component == PROBLEM.0 {
+                messages.extend(discovery::stale_problem(&self.topics, object));
+            } else {
+                messages.push(discovery::stale_reconnect(&self.topics, object));
+            }
+            self.on_broker.remove(&key);
         }
         messages
+    }
+
+    fn update(&self, wall: &Wall) -> Vec<Message> {
+        if !self.connected {
+            return Vec::new();
+        }
+        vec![discovery::update_state(
+            &self.topics,
+            &self.device,
+            &wall.update,
+        )]
     }
 
     fn state(&self, wall: &Wall) -> Vec<Message> {
@@ -351,7 +428,13 @@ struct Inner {
     /// touching the state.
     generation: u64,
     task: Option<JoinHandle<()>>,
+    /// Looks every so often whether an update check is due.
+    ticker: Option<JoinHandle<()>>,
     link: Option<Link>,
+    /// When the update entity last checked, kept across connections.
+    last_check: Option<Instant>,
+    /// A check is running now.
+    checking: bool,
     /// What Frigate last said about each camera, while connected.
     activity: Activity,
 }
@@ -368,6 +451,28 @@ impl Inner {
         }
         self.link.as_mut().map(|link| (link, &self.wall))
     }
+
+    /// Connected to the broker now.
+    fn connected(&self) -> bool {
+        self.link
+            .as_ref()
+            .is_some_and(|link| link.session.connected)
+    }
+
+    /// Publishes the update entity's state on the current connection.
+    fn publish_update(&mut self) {
+        let generation = self.generation;
+        if let Some((link, wall)) = self.link(generation) {
+            let messages = link.session.update(wall);
+            link.send(messages);
+        }
+    }
+}
+
+/// Whether the update entity should check again: never checked, or
+/// `CHECK_EVERY` has passed since the last check at `now`.
+fn check_due(last_check: Option<Instant>, now: Instant) -> bool {
+    last_check.is_none_or(|last| now.saturating_duration_since(last) >= CHECK_EVERY)
 }
 
 /// The wall's latest state and the connection, as the app manages them.
@@ -419,7 +524,10 @@ pub fn restart(app: &AppHandle) {
     let state = app.state::<MqttState>();
     let mut inner = state.lock();
     inner.generation += 1;
-    if let Some(task) = inner.task.take() {
+    for task in [inner.task.take(), inner.ticker.take()]
+        .into_iter()
+        .flatten()
+    {
         task.abort();
     }
     inner.link = None;
@@ -432,6 +540,13 @@ pub fn restart(app: &AppHandle) {
     }
     let generation = inner.generation;
     let app = app.clone();
+    let ticking = app.clone();
+    inner.ticker = Some(tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(CHECK_TICK).await;
+            check_if_due(&ticking);
+        }
+    }));
     inner.task = Some(tauri::async_runtime::spawn(async move {
         let saved = mqtt.clone();
         let password =
@@ -481,7 +596,9 @@ async fn run(
     };
     let (client, mut events) = AsyncClient::new(options, client::QUEUE);
     let home_assistant = topics.home_assistant_status();
-    let problem_configs = topics.configs("binary_sensor");
+    let problem_configs = topics.configs(PROBLEM.0);
+    let reconnect_configs = topics.configs(RECONNECT.0);
+    let own = topics.clone();
     {
         let state = app.state::<MqttState>();
         let mut inner = state.lock();
@@ -513,11 +630,18 @@ async fn run(
                 if let Err(err) = client.try_subscribe(home_assistant.clone(), QoS::AtLeastOnce) {
                     eprintln!("Ruru: could not follow Home Assistant's status: {err}");
                 }
-                // The retained configs show sensors left from earlier runs.
-                if let Err(err) = client.try_subscribe(problem_configs.clone(), QoS::AtLeastOnce) {
-                    eprintln!("Ruru: could not read the device's discovery configs: {err}");
+                // The retained configs show sensors and buttons left from
+                // earlier runs.
+                for configs in [&problem_configs, &reconnect_configs] {
+                    if let Err(err) = client.try_subscribe(configs.clone(), QoS::AtLeastOnce) {
+                        eprintln!("Ruru: could not read the device's discovery configs: {err}");
+                    }
+                }
+                if let Err(err) = client.try_subscribe(own.commands(), QoS::AtLeastOnce) {
+                    eprintln!("Ruru: could not follow Home Assistant's commands: {err}");
                 }
                 follow_frigate(&client, &frigate);
+                check_if_due(&app);
             }
             // Home Assistant restarted and forgot its devices.
             Ok(Event::Incoming(Packet::Publish(publish)))
@@ -526,6 +650,13 @@ async fn run(
                 announce(true);
             }
             Ok(Event::Incoming(Packet::Publish(publish))) => {
+                if let Some(name) = own.command_name(&publish.topic) {
+                    // A retained command would run again on every connect.
+                    if !publish.retain {
+                        take_command(&app, generation, name, &publish.payload);
+                    }
+                    continue;
+                }
                 if let Some(update) = frigate.parse(&publish.topic, &publish.payload) {
                     take_activity(&app, generation, update);
                     continue;
@@ -582,6 +713,89 @@ fn take_activity(app: &AppHandle, generation: u64, update: activity::Update) {
     if let Some(activity) = changed {
         emit_activity(app, &activity);
     }
+}
+
+/// Carries out one command from Home Assistant, if it is valid: a change to
+/// the wall goes to the page, and Install starts installing the update.
+fn take_command(app: &AppHandle, generation: u64, name: &str, payload: &[u8]) {
+    let parsed = {
+        let state = app.state::<MqttState>();
+        let inner = state.lock();
+        if !inner.current(generation) {
+            return;
+        }
+        commands::parse(name, payload, &inner.wall.cameras)
+    };
+    match parsed {
+        Ok(Command::Wall(command)) => {
+            if let Err(err) = app.emit(commands::EVENT, command) {
+                eprintln!("Ruru: a Home Assistant command could not reach the page: {err}");
+            }
+        }
+        Ok(Command::Install) => {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move { install_from_home_assistant(app).await });
+        }
+        Err(err) => eprintln!("Ruru: a Home Assistant command was ignored: {err}"),
+    }
+}
+
+/// Starts an update check for the update entity when connected and one is
+/// due, unless one is running.
+fn check_if_due(app: &AppHandle) {
+    {
+        let state = app.state::<MqttState>();
+        let mut inner = state.lock();
+        if inner.checking || !inner.connected() || !check_due(inner.last_check, Instant::now()) {
+            return;
+        }
+        inner.checking = true;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move { check_for_update(app).await });
+}
+
+/// Checks for a newer version and tells Home Assistant what was found. A
+/// failed check keeps what the last one found.
+async fn check_for_update(app: AppHandle) {
+    let found = update::check_for_home_assistant(&app).await;
+    let state = app.state::<MqttState>();
+    let mut inner = state.lock();
+    inner.checking = false;
+    inner.last_check = Some(Instant::now());
+    match found {
+        Ok(latest) if latest != inner.wall.update.latest => {
+            inner.wall.update.latest = latest;
+            inner.publish_update();
+        }
+        Ok(_) => {}
+        Err(err) => eprintln!("Ruru: {err}"),
+    }
+}
+
+/// Installs the update because Home Assistant asked, showing it in progress
+/// meanwhile. A real update restarts Ruru full screen; the fake one leaves
+/// it running, as though it were up to date.
+async fn install_from_home_assistant(app: AppHandle) {
+    {
+        let state = app.state::<MqttState>();
+        let mut inner = state.lock();
+        if inner.wall.update.installing {
+            return;
+        }
+        inner.wall.update.installing = true;
+        inner.publish_update();
+    }
+    let installed = update::install_for_home_assistant(&app).await;
+    let state = app.state::<MqttState>();
+    let mut inner = state.lock();
+    inner.wall.update.installing = false;
+    match installed {
+        Ok(Installed::Faked) => inner.wall.update.latest = None,
+        Ok(Installed::Restarting) => {}
+        Err(err) => eprintln!("Ruru: {err}"),
+    }
+    inner.publish_update();
 }
 
 /// What the page reports about the wall.
@@ -892,16 +1106,23 @@ mod tests {
                 "homeassistant/sensor/0123456789ab/maximised/config",
                 "homeassistant/binary_sensor/0123456789ab/full_screen/config",
                 "homeassistant/binary_sensor/0123456789ab/window_shown/config",
+                "homeassistant/button/0123456789ab/restore/config",
+                "homeassistant/switch/0123456789ab/full_screen/config",
+                "homeassistant/update/0123456789ab/update/config",
+                "homeassistant/select/0123456789ab/maximise/config",
                 "homeassistant/binary_sensor/0123456789ab/front_door_problem/config",
                 "ruru/0123456789ab/problem/front_door",
+                "homeassistant/button/0123456789ab/front_door_reconnect/config",
                 "homeassistant/binary_sensor/0123456789ab/garage_problem/config",
                 "ruru/0123456789ab/problem/garage",
+                "homeassistant/button/0123456789ab/garage_reconnect/config",
                 "ruru/0123456789ab/state",
+                "ruru/0123456789ab/update",
             ]
         );
         assert_eq!(messages[0].payload, "online");
-        assert_eq!(messages[6].payload, "OFF");
-        assert_eq!(messages[8].payload, "ON");
+        assert_eq!(messages[10].payload, "OFF");
+        assert_eq!(messages[13].payload, "ON");
         assert!(messages.iter().all(|message| message.retain));
     }
 
@@ -914,6 +1135,7 @@ mod tests {
         assert!(session.cameras_changed(&wall, false).is_empty());
         assert!(session.state(&wall).is_empty());
         assert!(session.problem("front_door", true).is_empty());
+        assert!(session.update(&wall).is_empty());
     }
 
     #[test]
@@ -924,14 +1146,18 @@ mod tests {
         assert_eq!(
             topics(&messages),
             [
+                "homeassistant/select/0123456789ab/maximise/config",
                 "homeassistant/binary_sensor/0123456789ab/front_door_problem/config",
                 "ruru/0123456789ab/problem/front_door",
+                "homeassistant/button/0123456789ab/front_door_reconnect/config",
                 "homeassistant/binary_sensor/0123456789ab/yard_problem/config",
                 "ruru/0123456789ab/problem/yard",
+                "homeassistant/button/0123456789ab/yard_reconnect/config",
             ]
         );
-        // The hidden camera loses its config and its retained state.
-        assert!(messages[0].payload.is_empty() && messages[1].payload.is_empty());
+        assert!(messages[0].payload.contains(r#"["none","garage","yard"]"#));
+        // The hidden camera loses its config, its retained state and its button.
+        assert!(messages[1..4].iter().all(|m| m.payload.is_empty()));
         // A camera Home Assistant has not been told about gets no problem state.
         assert!(session.problem("front_door", true).is_empty());
         assert_eq!(session.problem("yard", true)[0].payload, "ON");
@@ -965,6 +1191,69 @@ mod tests {
         let messages = session.prune(&wall(&[]));
         assert_eq!(topics(&messages)[0], front);
         assert!(session.config_seen(front, b"", &wall(&[])).is_empty());
+    }
+
+    #[test]
+    fn reconnect_buttons_left_from_an_earlier_run_are_removed_too() {
+        let mut session = session();
+        let shown = wall(&["front_door"]);
+        session.announce(&shown);
+        let stale = "homeassistant/button/0123456789ab/garage_reconnect/config";
+        let messages = session.config_seen(stale, b"{}", &shown);
+        assert_eq!(topics(&messages), [stale]);
+        assert!(messages[0].retain && messages[0].payload.is_empty());
+        // The camera's own button and the Restore button stay.
+        let front = "homeassistant/button/0123456789ab/front_door_reconnect/config";
+        assert!(session.config_seen(front, b"{}", &shown).is_empty());
+        let restore = "homeassistant/button/0123456789ab/restore/config";
+        assert!(session.config_seen(restore, b"{}", &shown).is_empty());
+        // Hiding the camera removes its button without pruning it twice.
+        let messages = session.cameras_changed(&wall(&[]), false);
+        assert!(topics(&messages).contains(&front));
+        assert!(session.prune(&wall(&[])).is_empty());
+    }
+
+    #[test]
+    fn the_maximise_select_follows_the_wall_s_order() {
+        let mut session = session();
+        session.announce(&wall(&["front_door", "garage"]));
+        assert!(
+            session
+                .cameras_changed(&wall(&["front_door", "garage"]), false)
+                .is_empty()
+        );
+        let messages = session.cameras_changed(&wall(&["garage", "front_door"]), false);
+        assert_eq!(
+            topics(&messages),
+            ["homeassistant/select/0123456789ab/maximise/config"]
+        );
+        assert!(
+            messages[0]
+                .payload
+                .contains(r#"["none","garage","front_door"]"#)
+        );
+    }
+
+    #[test]
+    fn the_update_entity_hears_what_the_check_found() {
+        let session = session();
+        let mut wall = wall(&[]);
+        wall.update.latest = Some("9.9.9".into());
+        let messages = session.update(&wall);
+        assert_eq!(topics(&messages), ["ruru/0123456789ab/update"]);
+        assert!(messages[0].payload.contains(r#""latest_version":"9.9.9""#));
+    }
+
+    #[test]
+    fn the_update_check_is_due_every_six_hours() {
+        let now = Instant::now();
+        assert!(check_due(None, now));
+        assert!(!check_due(Some(now), now));
+        let later = now + CHECK_EVERY;
+        assert!(check_due(Some(now), later));
+        assert!(!check_due(Some(now), later - Duration::from_secs(1)));
+        // A clock that seems to go backwards never makes a check due.
+        assert!(!check_due(Some(later), now));
     }
 
     #[test]

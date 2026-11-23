@@ -61,6 +61,33 @@ impl Topics {
         self.own(&format!("problem/{}", object_id(camera)))
     }
 
+    /// What the update check found, as one JSON object, read by the update
+    /// entity.
+    pub fn update(&self) -> String {
+        self.own("update")
+    }
+
+    /// Where Home Assistant sends command `name`, such as `maximise`.
+    pub fn command(&self, name: &str) -> String {
+        self.own(&format!("command/{name}"))
+    }
+
+    /// Every command topic, to subscribe to.
+    pub fn commands(&self) -> String {
+        self.command("+")
+    }
+
+    /// The command a message on `topic` carries, if it is one of this
+    /// install's command topics.
+    pub fn command_name<'a>(&self, topic: &'a str) -> Option<&'a str> {
+        topic
+            .strip_prefix(ROOT)?
+            .strip_prefix('/')?
+            .strip_prefix(self.device_id.as_str())?
+            .strip_prefix("/command/")
+            .filter(|name| !name.is_empty() && !name.contains('/'))
+    }
+
     /// Where one entity's discovery config is retained.
     pub fn discovery(&self, component: &str, object: &str) -> String {
         format!(
@@ -114,6 +141,31 @@ mod tests {
             "ruru/0123456789ab/problem/front_door"
         );
         assert_eq!(topics.home_assistant_status(), "homeassistant/status");
+        assert_eq!(topics.update(), "ruru/0123456789ab/update");
+        assert_eq!(
+            topics.command("maximise"),
+            "ruru/0123456789ab/command/maximise"
+        );
+        assert_eq!(topics.commands(), "ruru/0123456789ab/command/+");
+    }
+
+    #[test]
+    fn only_this_install_s_command_topics_carry_commands() {
+        let topics = Topics::new("0123456789ab", "homeassistant");
+        assert_eq!(
+            topics.command_name("ruru/0123456789ab/command/restore"),
+            Some("restore")
+        );
+        for other in [
+            "ruru/ba9876543210/command/restore",
+            "ruru/0123456789ab/command/",
+            "ruru/0123456789ab/command/a/b",
+            "ruru/0123456789ab/state",
+            "ruru/0123456789abc/command/restore",
+            "frigate/garage/motion",
+        ] {
+            assert_eq!(topics.command_name(other), None, "{other}");
+        }
     }
 
     #[test]

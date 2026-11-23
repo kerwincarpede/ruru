@@ -1,7 +1,7 @@
 import { emit } from "@tauri-apps/api/event";
 import { clearMocks } from "@tauri-apps/api/mocks";
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, appInfo, cameraActivity, getSettings, onCameraActivity, onOpenSettings, saveFrigateUrl, saveLayout, saveWallOptions, setFullScreen, type Settings } from "./api";
+import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, appInfo, cameraActivity, getSettings, onCameraActivity, onOpenSettings, onWallCommand, saveFrigateUrl, saveLayout, saveWallOptions, setFullScreen, type Settings } from "./api";
 import { mockCommands } from "../test/mockCommands";
 
 describe("appInfo", () => {
@@ -72,6 +72,23 @@ describe("camera activity", () => {
   it("gives a no-op without a backend", async () => {
     clearMocks();
     const stop = await onCameraActivity(vi.fn());
+    expect(() => stop()).not.toThrow();
+  });
+});
+
+describe("wall commands", () => {
+  it("hears each command Home Assistant sends", async () => {
+    mockCommands({});
+    const handler = vi.fn();
+    const stop = await onWallCommand(handler);
+    await emit("wall-command", { kind: "maximise", camera: "garage" });
+    expect(handler).toHaveBeenCalledWith({ kind: "maximise", camera: "garage" });
+    stop();
+  });
+
+  it("gives a no-op without a backend", async () => {
+    clearMocks();
+    const stop = await onWallCommand(vi.fn());
     expect(() => stop()).not.toThrow();
   });
 });
