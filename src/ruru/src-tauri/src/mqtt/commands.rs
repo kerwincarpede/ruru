@@ -1,7 +1,8 @@
 //! The commands Home Assistant sends on Ruru's command topics: maximise a
-//! camera, restore the wall, turn full screen on or off, reconnect a tile,
-//! install the pending update and turn the display off or on. Each one is checked before it is carried out,
-//! since anything on the broker can publish to these topics.
+//! camera, restore the wall, turn full screen on or off, stop or start every
+//! stream, reconnect a tile, install the pending update and turn the display
+//! off or on. Each one is checked before it is carried out, since anything on
+//! the broker can publish to these topics.
 
 use serde::Serialize;
 
@@ -15,6 +16,8 @@ pub const MAXIMISE: &str = "maximise";
 pub const RESTORE: &str = "restore";
 /// The switch that turns full screen on and off.
 pub const FULL_SCREEN: &str = "full_screen";
+/// The switch that stops and starts every camera's stream.
+pub const STREAMS: &str = "streams";
 /// The buttons that reconnect a tile, each sending its camera's name.
 pub const RECONNECT: &str = "reconnect";
 /// The update entity's Install.
@@ -44,6 +47,8 @@ pub enum WallCommand {
     Restore,
     /// Enter or leave full screen.
     FullScreen { on: bool },
+    /// Start every tile's stream, or stop them all and leave the snapshots.
+    Streams { on: bool },
     /// Drop a tile's stream and connect it again.
     Reconnect { camera: String },
 }
@@ -112,6 +117,7 @@ pub fn parse(name: &str, payload: &[u8], cameras: &[String]) -> Result<Command, 
         },
         RESTORE => WallCommand::Restore,
         FULL_SCREEN => WallCommand::FullScreen { on: on_or_off()? },
+        STREAMS => WallCommand::Streams { on: on_or_off()? },
         RECONNECT => WallCommand::Reconnect {
             camera: on_wall(payload)?,
         },
@@ -189,6 +195,22 @@ mod tests {
     }
 
     #[test]
+    fn the_switch_stops_and_starts_the_streams() {
+        assert_eq!(
+            wall("streams", "OFF"),
+            Ok(Command::Wall(WallCommand::Streams { on: false }))
+        );
+        assert_eq!(
+            wall("streams", "on"),
+            Ok(Command::Wall(WallCommand::Streams { on: true }))
+        );
+        assert_eq!(
+            wall("streams", PRESS),
+            Err(Refused::NotOnOrOff(PRESS.into()))
+        );
+    }
+
+    #[test]
     fn the_switch_turns_the_display_off_and_on() {
         assert_eq!(wall("display", "OFF"), Ok(Command::Display { on: false }));
         assert_eq!(wall("display", " on"), Ok(Command::Display { on: true }));
@@ -239,6 +261,10 @@ mod tests {
         assert_eq!(
             json(WallCommand::FullScreen { on: true }),
             serde_json::json!({ "kind": "fullScreen", "on": true })
+        );
+        assert_eq!(
+            json(WallCommand::Streams { on: false }),
+            serde_json::json!({ "kind": "streams", "on": false })
         );
         assert_eq!(
             json(WallCommand::Reconnect {

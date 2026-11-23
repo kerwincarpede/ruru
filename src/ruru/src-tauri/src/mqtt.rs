@@ -5,7 +5,7 @@
 //! broker, so each tile can show its camera's motion, objects and alerts.
 //!
 //! Home Assistant controls the wall through the device's select, buttons and
-//! switch: each command is checked here and handed to the page, which
+//! switches: each command is checked here and handed to the page, which
 //! carries it out. The device's update entity offers the update a check of
 //! the saved channel finds, every six hours while connected, and installs it
 //! when asked, restarting Ruru full screen. Where this computer can turn its
@@ -938,6 +938,8 @@ pub struct WallReport {
     pub maximised: Option<String>,
     pub full_screen: bool,
     pub window_shown: bool,
+    /// The tiles play their streams, rather than showing snapshots.
+    pub streams: bool,
     /// Every camera on the Frigate server, in Frigate's order.
     pub cameras: Vec<String>,
 }
@@ -965,6 +967,7 @@ impl Wall {
             maximised: report.maximised,
             full_screen: report.full_screen,
             window_shown: report.window_shown,
+            streams: report.streams,
         };
         self.reported = true;
         let changed = self.cameras != report.cameras;
@@ -1243,6 +1246,7 @@ mod tests {
                 "homeassistant/binary_sensor/0123456789ab/window_shown/config",
                 "homeassistant/button/0123456789ab/restore/config",
                 "homeassistant/switch/0123456789ab/full_screen/config",
+                "homeassistant/switch/0123456789ab/streams/config",
                 "homeassistant/update/0123456789ab/update/config",
                 "homeassistant/switch/0123456789ab/display/config",
                 "ruru/0123456789ab/display",
@@ -1258,14 +1262,14 @@ mod tests {
             ]
         );
         assert_eq!(messages[0].payload, "online");
-        assert_eq!(messages[12].payload, "OFF");
-        assert_eq!(messages[15].payload, "ON");
+        assert_eq!(messages[13].payload, "OFF");
+        assert_eq!(messages[16].payload, "ON");
         assert!(messages.iter().all(|message| message.retain));
         // Without a way to turn the screen off, the Display switch is
         // removed rather than offered, and its state an earlier run left
         // is cleared too.
-        assert!(messages[8].payload.is_empty());
         assert!(messages[9].payload.is_empty());
+        assert!(messages[10].payload.is_empty());
     }
 
     #[test]
@@ -1478,12 +1482,13 @@ mod tests {
             maximised: Some("garage".into()),
             full_screen: true,
             window_shown: false,
+            streams: false,
             cameras: vec!["garage".into(), "yard".into()],
         };
         assert!(wall.report(report.clone()));
         assert!(!wall.report(report.clone()));
         assert_eq!(wall.state.maximised.as_deref(), Some("garage"));
-        assert!(wall.state.full_screen && !wall.state.window_shown);
+        assert!(wall.state.full_screen && !wall.state.window_shown && !wall.state.streams);
         assert!(wall.set_problem("yard", true));
         assert!(!wall.set_problem("yard", true));
         assert!(wall.report(WallReport {
@@ -1500,6 +1505,7 @@ mod tests {
             maximised: None,
             full_screen: false,
             window_shown: true,
+            streams: true,
             cameras: vec!["garage".into()],
         };
         assert!(validate_report(&good).is_ok());

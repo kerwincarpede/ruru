@@ -181,6 +181,8 @@ export interface WallReport {
   maximised: string | null;
   fullScreen: boolean;
   windowShown: boolean;
+  /** The tiles play their streams, rather than showing snapshots. */
+  streams: boolean;
   /** Every camera on the Frigate server, in Frigate's order. */
   cameras: string[];
 }
@@ -232,6 +234,7 @@ export type WallCommand =
   | { kind: "maximise"; camera: string }
   | { kind: "restore" }
   | { kind: "fullScreen"; on: boolean }
+  | { kind: "streams"; on: boolean }
   | { kind: "reconnect"; camera: string };
 
 /**

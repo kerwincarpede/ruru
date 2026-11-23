@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 
 use super::commands::{
     DISPLAY, FULL_SCREEN, INSTALL, INSTALL_PAYLOAD, MAXIMISE, NONE, PRESS, RECONNECT, RESTORE,
+    STREAMS,
 };
 use super::topics::{Topics, object_id};
 
@@ -184,7 +185,7 @@ pub fn device_configs(topics: &Topics, device: &Device) -> Vec<Message> {
 pub const PROBLEM_SUFFIX: &str = "_problem";
 
 /// The wall's controls that do not depend on the cameras: the Restore button,
-/// the Full screen switch and the update entity.
+/// the Full screen and Streams switches and the update entity.
 pub fn control_configs(topics: &Topics, device: &Device) -> Vec<Message> {
     let mut restore = base(topics, device, RESTORE, "Restore");
     restore.insert("command_topic".into(), topics.command(RESTORE).into());
@@ -212,6 +213,21 @@ pub fn control_configs(topics: &Topics, device: &Device) -> Vec<Message> {
                 "state_on": "ON",
                 "state_off": "OFF",
                 "icon": "mdi:fullscreen",
+            }),
+        ),
+        state_entity(
+            topics,
+            device,
+            "switch",
+            STREAMS,
+            "Streams",
+            json!({
+                "command_topic": topics.command(STREAMS),
+                "payload_on": "ON",
+                "payload_off": "OFF",
+                "state_on": "ON",
+                "state_off": "OFF",
+                "icon": "mdi:cctv",
             }),
         ),
         Message::retained(
@@ -363,6 +379,9 @@ pub struct WallState {
     pub full_screen: bool,
     /// The window is on screen: not minimised or hidden.
     pub window_shown: bool,
+    /// The tiles play their streams; off, they show snapshots and use no
+    /// network.
+    pub streams: bool,
 }
 
 impl Default for WallState {
@@ -371,6 +390,7 @@ impl Default for WallState {
             maximised: None,
             full_screen: false,
             window_shown: true,
+            streams: true,
         }
     }
 }
@@ -382,6 +402,7 @@ pub fn state(topics: &Topics, device: &Device, wall: &WallState) -> Message {
         "maximised": wall.maximised.as_deref().unwrap_or("none"),
         "full_screen": on_off(wall.full_screen),
         "window_shown": on_off(wall.window_shown),
+        "streams": on_off(wall.streams),
     });
     Message::retained(topics.state(), payload.to_string())
 }
@@ -496,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn the_wall_has_restore_full_screen_and_update_controls() {
+    fn the_wall_has_restore_full_screen_streams_and_update_controls() {
         let configs = control_configs(&topics(), &device());
         let topics: Vec<&str> = configs.iter().map(|m| m.topic.as_str()).collect();
         assert_eq!(
@@ -504,6 +525,7 @@ mod tests {
             [
                 "homeassistant/button/0123456789ab/restore/config",
                 "homeassistant/switch/0123456789ab/full_screen/config",
+                "homeassistant/switch/0123456789ab/streams/config",
                 "homeassistant/update/0123456789ab/update/config",
             ]
         );
@@ -518,6 +540,10 @@ mod tests {
         );
         assert_eq!(
             payload(&configs[2]),
+            fixture(include_str!("fixtures/discovery-streams.json"))
+        );
+        assert_eq!(
+            payload(&configs[3]),
             fixture(include_str!("fixtures/discovery-update.json"))
         );
     }
@@ -616,17 +642,19 @@ mod tests {
             maximised: Some("front_door".into()),
             full_screen: true,
             window_shown: false,
+            streams: false,
         };
         let message = state(&topics, &device(), &wall);
         assert_eq!(message.topic, "ruru/0123456789ab/state");
         assert!(message.retain);
         assert_eq!(
             payload(&message),
-            json!({"version": "1.2.3", "maximised": "front_door", "full_screen": "ON", "window_shown": "OFF"})
+            json!({"version": "1.2.3", "maximised": "front_door", "full_screen": "ON", "window_shown": "OFF", "streams": "OFF"})
         );
         let idle = state(&topics, &device(), &WallState::default());
         assert_eq!(payload(&idle)["maximised"], "none");
         assert_eq!(payload(&idle)["window_shown"], "ON");
+        assert_eq!(payload(&idle)["streams"], "ON");
     }
 
     #[test]
