@@ -76,6 +76,24 @@ impl fmt::Display for FrigateError {
 
 impl std::error::Error for FrigateError {}
 
+/// What the wall says while Frigate is down or still starting.
+///
+/// Matched by `WAITING_FOR_FRIGATE` in `src/wall/frigateProblem.ts`.
+pub const WAITING_FOR_FRIGATE: &str = "Waiting for Frigate…";
+
+/// The message the wall shows for a failed camera discovery. No answer, or
+/// an HTTP 5xx, usually means Frigate is still starting, so the wall waits
+/// for it rather than showing the raw error.
+pub fn wall_message(error: &FrigateError) -> String {
+    match error {
+        FrigateError::Unreachable { .. } => WAITING_FOR_FRIGATE.to_owned(),
+        FrigateError::Status { status, .. } if (500..600).contains(status) => {
+            WAITING_FOR_FRIGATE.to_owned()
+        }
+        _ => error.to_string(),
+    }
+}
+
 /// The parts of `/api/config` Ruru reads.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -365,7 +383,7 @@ pub async fn test_frigate(url: String) -> Result<FrigateStatus, String> {
 pub async fn frigate_cameras(url: String) -> Result<Vec<Camera>, String> {
     cameras(&base_url(&url)?)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(|err| wall_message(&err))
 }
 
 #[cfg(test)]
@@ -386,6 +404,34 @@ mod tests {
 
     fn fixture_cameras(go2rtc: Option<&HashSet<String>>) -> Vec<Camera> {
         cameras_from(parse_config(CONFIG).unwrap(), go2rtc)
+    }
+
+    fn http_error(status: u16) -> FrigateError {
+        FrigateError::Status {
+            url: "http://frigate:5000/api/config".into(),
+            status,
+        }
+    }
+
+    #[test]
+    fn the_wall_waits_for_frigate_when_it_is_unreachable_or_failing() {
+        let unreachable = FrigateError::Unreachable {
+            url: "http://frigate:5000/api/config".into(),
+            message: "connection refused".into(),
+        };
+        assert_eq!(wall_message(&unreachable), WAITING_FOR_FRIGATE);
+        assert_eq!(wall_message(&http_error(500)), WAITING_FOR_FRIGATE);
+        assert_eq!(wall_message(&http_error(502)), WAITING_FOR_FRIGATE);
+    }
+
+    #[test]
+    fn the_wall_shows_other_errors_as_they_are() {
+        assert_eq!(
+            wall_message(&http_error(404)),
+            "Frigate at http://frigate:5000/api/config answered with HTTP 404."
+        );
+        let parse = FrigateError::Parse("expected value".into());
+        assert_eq!(wall_message(&parse), parse.to_string());
     }
 
     #[test]

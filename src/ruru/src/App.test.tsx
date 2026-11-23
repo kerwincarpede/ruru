@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach } from "vitest";
 import { emit } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import App, { CONNECTING_MS, RETRY_MS } from "./App";
+import App, { CONNECTING_MS, RETRY_DELAYS_MS } from "./App";
 import type { Camera } from "./app/frigate";
 import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, type Activity, type SavedLayout, type Settings } from "./app/api";
 import { findUpdate } from "./app/updates";
@@ -415,41 +415,71 @@ describe("App", () => {
     expect(screen.queryByRole("status", { name: "Looking for cameras" })).not.toBeInTheDocument();
   });
 
-  it("says why cameras could not be found and keeps trying until Frigate answers", async () => {
+  it("says why cameras could not be found and keeps trying on a backoff until Frigate answers", async () => {
     vi.useFakeTimers();
     try {
-      let reachable = false;
+      let failing = 2;
       const calls = wall({
         frigate_cameras: () => {
-          if (!reachable) throw "Could not reach Frigate at http://frigate:5000: timed out";
+          if (failing > 0) {
+            failing -= 1;
+            throw "Could not reach Frigate at http://frigate:5000: timed out";
+          }
           return cameras;
         },
       });
+      const attempts = () => calls.filter((call) => call.cmd === "frigate_cameras").length;
+      const advance = (ms: number) =>
+        act(async () => {
+          await vi.advanceTimersByTimeAsync(ms);
+        });
       render(<App />);
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(0);
-      });
+      await advance(0);
       const status = screen.getByRole("status", { name: "Ruru can't reach Frigate" });
       expect(status).toHaveTextContent("Nothing answered at http://frigate:5000.");
       expect(status).toHaveTextContent("Could not reach Frigate at http://frigate:5000: timed out");
-      const attempts = () => calls.filter((call) => call.cmd === "frigate_cameras").length;
-      const before = attempts();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(RETRY_MS);
-      });
-      expect(attempts()).toBe(before + 1);
-      reachable = true;
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(RETRY_MS);
-      });
+      expect(attempts()).toBe(1);
+      // No focus event: the retries come on their own, 2 s then 5 s apart.
+      await advance(RETRY_DELAYS_MS[0] - 1);
+      expect(attempts()).toBe(1);
+      await advance(1);
+      expect(attempts()).toBe(2);
+      await advance(RETRY_DELAYS_MS[1] - 1);
+      expect(attempts()).toBe(2);
+      await advance(1);
+      expect(attempts()).toBe(3);
       expect(screen.getByRole("figure", { name: "Garage" })).toBeInTheDocument();
       expect(screen.queryByRole("status", { name: "Ruru can't reach Frigate" })).not.toBeInTheDocument();
       // Once found, Ruru stops asking until the window comes back into focus.
-      const found = attempts();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(RETRY_MS * 3);
+      await advance(RETRY_DELAYS_MS.reduce((sum, ms) => sum + ms, 0) * 2);
+      expect(attempts()).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits longer after each failure, then every 30 seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const calls = wall({
+        frigate_cameras: () => {
+          throw "Waiting for Frigate…";
+        },
       });
-      expect(attempts()).toBe(found);
+      const attempts = () => calls.filter((call) => call.cmd === "frigate_cameras").length;
+      const advance = (ms: number) =>
+        act(async () => {
+          await vi.advanceTimersByTimeAsync(ms);
+        });
+      render(<App />);
+      await advance(0);
+      expect(screen.getByRole("status", { name: "Waiting for Frigate…" })).toBeInTheDocument();
+      for (const [index, delay] of [2_000, 5_000, 10_000, 30_000, 30_000, 30_000].entries()) {
+        await advance(delay - 1);
+        expect(attempts()).toBe(index + 1);
+        await advance(1);
+        expect(attempts()).toBe(index + 2);
+      }
     } finally {
       vi.useRealTimers();
     }
@@ -489,6 +519,42 @@ describe("App", () => {
     });
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not reach Frigate");
     expect(screen.getByRole("figure", { name: "Garage" })).toBeInTheDocument();
+  });
+
+  it("retries a failed discovery once the wall is up and clears the error when Frigate answers", async () => {
+    vi.useFakeTimers();
+    try {
+      let reachable = true;
+      const calls = wall({
+        frigate_cameras: () => {
+          if (!reachable) throw "Waiting for Frigate…";
+          return cameras;
+        },
+      });
+      const attempts = () => calls.filter((call) => call.cmd === "frigate_cameras").length;
+      const advance = (ms: number) =>
+        act(async () => {
+          await vi.advanceTimersByTimeAsync(ms);
+        });
+      render(<App />);
+      await advance(0);
+      expect(screen.getByRole("figure", { name: "Garage" })).toBeInTheDocument();
+      reachable = false;
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      await advance(0);
+      expect(screen.getByRole("alert")).toHaveTextContent("Waiting for Frigate…");
+      const failed = attempts();
+      reachable = true;
+      await advance(RETRY_DELAYS_MS[0]);
+      expect(attempts()).toBe(failed + 1);
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      await advance(RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1] * 2);
+      expect(attempts()).toBe(failed + 1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("says when Frigate has no cameras", async () => {

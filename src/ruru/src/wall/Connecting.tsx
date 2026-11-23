@@ -18,6 +18,11 @@ type ConnectingProps =
 function problemText(error: string, server: string) {
   const problem = frigateProblem(error);
   switch (problem.kind) {
+    case "waiting":
+      return {
+        title: "Waiting for Frigate…",
+        detail: `Frigate at ${server} isn't answering yet, as while it is still starting. If this lasts, check the address with Test connection in Settings.`,
+      };
     case "status":
       return {
         title: "Frigate turned Ruru away",
@@ -77,8 +82,8 @@ export default function Connecting(props: ConnectingProps) {
   return (
     <WallNotice mood="drowsy" owlKey={attempt} title={title}>
       <p>{detail}</p>
-      <p className="wall-notice-small">Ruru tries again every few seconds.</p>
-      <code className="wall-notice-error">{error}</code>
+      <p className="wall-notice-small">Ruru keeps trying on its own.</p>
+      {error !== title && <code className="wall-notice-error">{error}</code>}
       <div className="wall-notice-buttons">
         <button type="button" className="primary" onClick={onRetry}>
           Try again
