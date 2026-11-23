@@ -59,7 +59,7 @@ Ruru plays video through GStreamer, which decodes on the graphics card only with
 
 ## Home Assistant's entities keep flipping
 
-If the **Streams** switch, **Version** or **Update** in Home Assistant keep changing back and forth, two copies of Ruru are sharing one device id. Both connect to the broker under the same name, so each keeps pushing the other off. Opening Ruru again on the same computer only brings the running copy to the front, so the other copy is on another computer, usually one whose `settings.json` was copied, such as from a cloned SD card. On that computer, quit Ruru, delete `deviceId` under `mqtt` in [`settings.json`](/ruru/reference/settings/#where-settings-are-kept), then start Ruru and choose **Save** in **Settings → Home Assistant**. Ruru makes a new device id, and that computer shows up in Home Assistant as a device of its own.
+If the **Streams** switch, **Version** or **Update** in Home Assistant keep changing back and forth, two copies of Ruru are sharing one device id. Both connect to the broker under the same name, so each keeps pushing the other off. Opening Ruru again on the same computer only brings the running copy to the front, so look for a copy on another computer whose `settings.json` was copied, such as from a cloned SD card. On that computer, quit Ruru, delete `deviceId` under `mqtt` in [`settings.json`](/ruru/reference/settings/#where-settings-are-kept), then start Ruru and choose **Save** in **Settings → Home Assistant**. Ruru makes a new device id, and that computer shows up in Home Assistant as a device of its own.
 
 ## Windows or macOS warns about the app
 
