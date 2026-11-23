@@ -15,6 +15,8 @@ Ruru is built with Rust and [Tauri 2](https://tauri.app/), with a React + TypeSc
 | `.github/workflows/promote.yml` | Makes a chosen Edge release Stable |
 | `AGENTS.md` | The rules every change follows, and which standard to read for which task |
 | `docs/standards/` | The Rust, frontend, writing and PR standards |
+| `docs/issues/` | Known problems being investigated, such as [Linux playback](issues/linux-playback.md) |
+| `docs/raspberry-pi.md` | [Running Ruru on a Raspberry Pi 5](raspberry-pi.md) beside Frigate |
 
 ## Prerequisites
 
