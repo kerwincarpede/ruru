@@ -307,7 +307,7 @@ describe("App", () => {
   });
 
   it("shows stream info on every tile from the menu at any time, and saves the wall options", async () => {
-    const calls = wall({ get_settings: () => ({ ...connected, wall: { lockRatio: false, fitToWindow: true, streamInfo: false, activity: true } }) });
+    const calls = wall({ get_settings: () => ({ ...connected, wall: { ...DEFAULT_WALL_OPTIONS, lockRatio: false, fitToWindow: true, streamInfo: false, activity: true } }) });
     render(<App />);
     fireEvent.contextMenu(await screen.findByRole("figure", { name: "Garage" }));
     expect(screen.queryByRole("complementary", { name: "Stream info" })).not.toBeInTheDocument();
@@ -323,9 +323,9 @@ describe("App", () => {
     expect(screen.getByRole("checkbox", { name: "Fit to window" })).not.toBeChecked();
     fireEvent.click(screen.getByRole("checkbox", { name: "Lock to 16:9" }));
     await waitFor(() => expect(calls.filter((call) => call.cmd === "save_wall_options").map((call) => call.payload)).toEqual([
-      { options: { lockRatio: false, fitToWindow: true, streamInfo: true, activity: true } },
-      { options: { lockRatio: false, fitToWindow: false, streamInfo: true, activity: true } },
-      { options: { lockRatio: true, fitToWindow: false, streamInfo: true, activity: true } },
+      { options: { lockRatio: false, fitToWindow: true, streamInfo: true, activity: true, activityStyle: "ring" } },
+      { options: { lockRatio: false, fitToWindow: false, streamInfo: true, activity: true, activityStyle: "ring" } },
+      { options: { lockRatio: true, fitToWindow: false, streamInfo: true, activity: true, activityStyle: "ring" } },
     ]));
   });
 
@@ -338,6 +338,9 @@ describe("App", () => {
     expect(garage).not.toHaveClass("has-motion");
     await act(() => emit("camera-activity", { garage: { motion: true, objects: { car: 2, person: 1 }, review: "alert" } }));
     expect(garage).toHaveClass("has-motion", "is-alert");
+    // The default style draws in the gap around the tile, so its cell knows too.
+    expect(garage.parentElement).toHaveClass("wall-cell", "has-motion", "is-alert");
+    expect(garage.closest(".wall")).toHaveClass("activity-ring");
     expect(within(garage).getByRole("list", { name: "Objects in view" })).toHaveTextContent("Car ×2Person");
     expect(within(garage).getByText("· Alert")).toBeInTheDocument();
     // Each event holds every camera's activity, so the maingate is quiet now.

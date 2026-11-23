@@ -225,25 +225,116 @@
   outline: none;
 }
 
-/* Frigate's activity: an outline while there is motion, a stronger one
-   while Frigate has an alert, and a chip for each kind of object moving. */
+/* Frigate's activity, drawn in the style chosen in Settings › Home
+   Assistant: yellow while there is motion, red during an alert. No style
+   covers more than a few pixels of the picture. */
 .tile::after {
   content: "";
   position: absolute;
   inset: 0;
-  border: 2px solid transparent;
+  border: 0 solid transparent;
   pointer-events: none;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 
-.tile.has-motion::after {
+/* Outline between tiles: drawn in the gap, outside the picture. The gap
+   between rows is little more than 2px, so the outline is no wider. A
+   maximised tile has no gap around it, so it gets the thin outline. */
+.wall.activity-ring .wall-cell.has-motion {
+  box-shadow: 0 0 0 2px var(--motion);
+}
+
+.wall.activity-ring .wall-cell.is-alert {
+  box-shadow: 0 0 0 2px var(--alert);
+}
+
+/* Thin outline, just inside the picture's edge. Name only outlines motion
+   the same way. */
+.wall.activity-outline .tile.has-motion::after,
+.wall.activity-caption .tile.has-motion::after,
+.wall.activity-ring .tile.is-maximised.has-motion::after {
+  border-width: 2px;
   border-color: var(--motion);
 }
 
-.tile.is-alert::after {
-  border-width: 4px;
+.wall.activity-outline .tile.is-alert::after,
+.wall.activity-ring .tile.is-maximised.is-alert::after {
+  border-width: 2px;
   border-color: var(--alert);
-  box-shadow: inset 0 0 1.5rem var(--alert);
+}
+
+.wall.activity-caption .tile.is-alert::after {
+  border-color: transparent;
+}
+
+/* Corner marks, larger during an alert. */
+.wall.activity-corners .tile::after {
+  --mark: transparent;
+  --arm: 14px;
+  --weight: 2px;
+
+  background:
+    linear-gradient(var(--mark), var(--mark)) top left / var(--arm) var(--weight),
+    linear-gradient(var(--mark), var(--mark)) top left / var(--weight) var(--arm),
+    linear-gradient(var(--mark), var(--mark)) top right / var(--arm) var(--weight),
+    linear-gradient(var(--mark), var(--mark)) top right / var(--weight) var(--arm),
+    linear-gradient(var(--mark), var(--mark)) bottom left / var(--arm) var(--weight),
+    linear-gradient(var(--mark), var(--mark)) bottom left / var(--weight) var(--arm),
+    linear-gradient(var(--mark), var(--mark)) bottom right / var(--arm) var(--weight),
+    linear-gradient(var(--mark), var(--mark)) bottom right / var(--weight) var(--arm);
+  background-repeat: no-repeat;
+}
+
+.wall.activity-corners .tile.has-motion::after {
+  --mark: var(--motion);
+}
+
+.wall.activity-corners .tile.is-alert::after {
+  --mark: var(--alert);
+  --arm: 22px;
+  --weight: 3px;
+}
+
+/* Top edge: a bar along the top of the picture. */
+.wall.activity-strip .tile::after {
+  bottom: auto;
+  height: 3px;
+}
+
+.wall.activity-strip .tile.has-motion::after {
+  background-color: var(--motion);
+}
+
+.wall.activity-strip .tile.is-alert::after {
+  height: 4px;
+  background-color: var(--alert);
+}
+
+/* The name turns red during an alert, and in Name only gets a pulsing dot. */
+.wall:is(.activity-ring, .activity-outline, .activity-caption) .tile.is-alert .tile-name {
+  background: var(--alert);
+}
+
+.wall:is(.activity-ring, .activity-outline, .activity-caption) .tile.is-alert .tile-status {
+  color: inherit;
+}
+
+.wall.activity-caption .tile.is-alert .tile-name::before {
+  content: "";
+  display: inline-block;
+  width: 0.45em;
+  height: 0.45em;
+  margin-right: 0.35em;
+  border-radius: 50%;
+  background: currentcolor;
+  vertical-align: middle;
+  animation: tile-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes tile-pulse {
+  50% {
+    opacity: 0.25;
+  }
 }
 
 .tile-objects {
@@ -280,5 +371,9 @@
 @media (prefers-reduced-motion: reduce) {
   .tile::after {
     transition: none;
+  }
+
+  .wall.activity-caption .tile.is-alert .tile-name::before {
+    animation: none;
   }
 }

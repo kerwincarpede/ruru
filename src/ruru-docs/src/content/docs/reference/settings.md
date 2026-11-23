@@ -27,6 +27,7 @@ Choose **Save** to use the address. See [Connect to Frigate](/ruru/get-started/c
 | **Discovery prefix** | Where Home Assistant looks for new devices. Usually `homeassistant`. |
 | **Frigate prefix** | The topic prefix set in Frigate's `mqtt` settings. Usually `frigate`. |
 | **Show activity** | Shows Frigate's motion, objects and alerts on each tile. On by default. Also in the wall's right-click menu. |
+| **Activity style** | How a tile is marked for motion and alerts: **Outline between tiles** (the default), **Thin outline**, **Corner marks**, **Top edge** or **Name only**. See [Activity on the tiles](/ruru/guides/home-assistant/#activity-on-the-tiles). |
 | **Test connection** | Connects to the broker once, and says whether it worked. |
 
 Choose **Save** to connect, or to disconnect when **Connect to Home Assistant** is off. See [Home Assistant](/ruru/guides/home-assistant/).

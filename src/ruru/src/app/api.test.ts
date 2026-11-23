@@ -29,14 +29,14 @@ describe("settings commands", () => {
     await expect(saveFrigateUrl(" http://f/ ")).resolves.toEqual(settings);
     await setFullScreen(true);
     await saveLayout("http://f", layout);
-    await saveWallOptions({ lockRatio: false, fitToWindow: true, streamInfo: true, activity: false });
+    await saveWallOptions({ lockRatio: false, fitToWindow: true, streamInfo: true, activity: false, activityStyle: "strip" });
     await expect(setAutoUpdate(true)).resolves.toEqual({ ...settings, autoUpdate: true });
     expect(calls).toEqual([
       { cmd: "get_settings", payload: {} },
       { cmd: "save_frigate_url", payload: { url: " http://f/ " } },
       { cmd: "set_full_screen", payload: { fullScreen: true } },
       { cmd: "save_layout", payload: { server: "http://f", layout } },
-      { cmd: "save_wall_options", payload: { options: { lockRatio: false, fitToWindow: true, streamInfo: true, activity: false } } },
+      { cmd: "save_wall_options", payload: { options: { lockRatio: false, fitToWindow: true, streamInfo: true, activity: false, activityStyle: "strip" } } },
       { cmd: "set_auto_update", payload: { enabled: true } },
     ]);
   });

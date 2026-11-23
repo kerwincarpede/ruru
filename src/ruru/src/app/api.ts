@@ -36,10 +36,15 @@ export interface WallOptions {
   streamInfo: boolean;
   /** Tiles show Frigate's motion, objects and alerts. */
   activity: boolean;
+  /** How a tile marks motion and alerts. */
+  activityStyle: ActivityStyle;
 }
 
+/** Mirrors `ActivityStyle` in src-tauri/src/settings.rs: how a tile marks motion and alerts. */
+export type ActivityStyle = "ring" | "outline" | "corners" | "strip" | "caption";
+
 /** The wall options before any are saved, as Rust defaults them. */
-export const DEFAULT_WALL_OPTIONS: WallOptions = { lockRatio: true, fitToWindow: true, streamInfo: false, activity: true };
+export const DEFAULT_WALL_OPTIONS: WallOptions = { lockRatio: true, fitToWindow: true, streamInfo: false, activity: true, activityStyle: "ring" };
 
 /** Mirrors `UpdateChannel` in src-tauri/src/settings.rs: which releases Ruru updates to. */
 export type UpdateChannel = "stable" | "edge";
@@ -119,7 +124,7 @@ export function saveLayout(server: string, layout: SavedLayout): Promise<void> {
   return invoke<void>("save_layout", { server, layout });
 }
 
-/** Saves how the wall is drawn: Lock to 16:9, Fit to window, stream info and activity. */
+/** Saves how the wall is drawn: Lock to 16:9, Fit to window, stream info, activity and its style. */
 export function saveWallOptions(options: WallOptions): Promise<void> {
   return invoke<void>("save_wall_options", { options });
 }

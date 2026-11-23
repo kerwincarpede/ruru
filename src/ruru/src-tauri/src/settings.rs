@@ -78,6 +78,29 @@ pub struct WallOptions {
     /// Each tile shows Frigate's motion, objects and alerts, heard over the
     /// Home Assistant connection.
     pub activity: bool,
+    /// How a tile marks motion and alerts, chosen in Settings › Home Assistant.
+    #[serde(deserialize_with = "lenient")]
+    pub activity_style: ActivityStyle,
+}
+
+/// How a tile marks Frigate's motion and alerts. Each keeps the picture as
+/// clear as it can; they differ in how much they stand out.
+///
+/// Mirrored by `ActivityStyle` in `src/app/api.ts`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ActivityStyle {
+    /// An outline in the gap between tiles, outside the picture.
+    #[default]
+    Ring,
+    /// A thin outline just inside the picture's edge.
+    Outline,
+    /// Marks on the picture's four corners only.
+    Corners,
+    /// A thin bar along the picture's top edge.
+    Strip,
+    /// Only the tile's name and object chips change colour.
+    Caption,
 }
 
 impl Default for WallOptions {
@@ -87,6 +110,7 @@ impl Default for WallOptions {
             fit_to_window: true,
             stream_info: false,
             activity: true,
+            activity_style: ActivityStyle::Ring,
         }
     }
 }
@@ -704,6 +728,7 @@ mod tests {
                 fit_to_window: true,
                 stream_info: true,
                 activity: true,
+                activity_style: ActivityStyle::Ring,
             }
         );
     }
@@ -717,9 +742,28 @@ mod tests {
             fit_to_window: false,
             stream_info: true,
             activity: false,
+            activity_style: ActivityStyle::Corners,
         };
         assert_eq!(store.set_wall_options(wall).unwrap().wall, wall);
         assert_eq!(SettingsStore::open(Some(dir.file())).current().wall, wall);
+    }
+
+    #[test]
+    fn an_unknown_activity_style_reads_as_the_ring() {
+        for stored in [r#""glow""#, "3", "null"] {
+            let settings: Settings = serde_json::from_str(&format!(
+                r#"{{"wall": {{"activity": false, "activityStyle": {stored}}}}}"#
+            ))
+            .unwrap();
+            assert_eq!(
+                settings.wall.activity_style,
+                ActivityStyle::Ring,
+                "{stored}"
+            );
+            assert!(!settings.wall.activity, "{stored}");
+        }
+        let strip: WallOptions = serde_json::from_str(r#"{"activityStyle": "strip"}"#).unwrap();
+        assert_eq!(strip.activity_style, ActivityStyle::Strip);
     }
 
     #[test]
@@ -832,7 +876,7 @@ mod tests {
             serde_json::json!({
                 "frigateUrl": "http://a",
                 "fullScreen": true,
-                "wall": {"lockRatio": true, "fitToWindow": true, "streamInfo": false, "activity": true},
+                "wall": {"lockRatio": true, "fitToWindow": true, "streamInfo": false, "activity": true, "activityStyle": "ring"},
                 "updateChannel": "edge",
                 "autoUpdate": true,
                 "mqtt": {

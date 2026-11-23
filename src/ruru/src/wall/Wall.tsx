@@ -4,7 +4,7 @@ import "./wall.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import GridLayout from "react-grid-layout";
 import type { Camera } from "../app/frigate";
-import type { Activity, SavedLayout } from "../app/api";
+import type { Activity, ActivityStyle, SavedLayout } from "../app/api";
 import { COLUMNS, GAP, ROW_RATIO, fitWidth, fromGridItems, gridRows, hideCamera, rowHeight, toGridItems, wallPlacements, type GridItem } from "./layout";
 import type { StreamKind } from "./streams";
 import Tile from "./Tile";
@@ -22,6 +22,8 @@ interface WallProps {
   streamInfo?: boolean;
   /** What Frigate says is happening on each camera; undefined draws no activity. */
   activity?: Activity;
+  /** How a tile marks motion and alerts. */
+  activityStyle?: ActivityStyle;
   refresh: number;
   /** The camera filling the window, if any. */
   maximised?: string | null;
@@ -66,6 +68,7 @@ export default function Wall({
   fitToWindow = false,
   streamInfo = false,
   activity,
+  activityStyle = "ring",
   refresh,
   maximised = null,
   onMaximise,
@@ -95,7 +98,7 @@ export default function Wall({
   const choiceFor = (camera: Camera) => layout?.tiles.find((tile) => tile.camera === camera.name)?.stream;
 
   return (
-    <div ref={box} className={`wall${editing ? " is-editing" : ""}${fitToWindow ? " is-fit" : ""}`}>
+    <div ref={box} className={`wall activity-${activityStyle}${editing ? " is-editing" : ""}${fitToWindow ? " is-fit" : ""}`}>
       <div className="wall-fit" style={fitToWindow ? { width } : undefined}>
         <GridLayout
           className={lockRatio ? "wall-grid lock-ratio" : "wall-grid"}
@@ -120,8 +123,11 @@ export default function Wall({
         >
           {items.map((item) => {
             const camera = byName.get(item.i) as Camera;
+            // The cell carries the activity too: the Outline between tiles style draws in the gap around it.
+            const seen = activity?.[camera.name];
+            const cell = ["wall-cell", item.i === open && "is-maximised", seen?.motion && "has-motion", seen?.review === "alert" && "is-alert"].filter(Boolean).join(" ");
             return (
-              <div key={item.i} className={`wall-cell${item.i === open ? " is-maximised" : ""}`}>
+              <div key={item.i} className={cell}>
                 <Tile
                   base={base}
                   camera={camera}

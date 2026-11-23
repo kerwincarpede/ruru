@@ -249,7 +249,7 @@ function App() {
     void saveLayout(url, next).catch(() => {});
   };
 
-  // Lock to 16:9, Fit to window, stream info and activity are saved as soon as they change.
+  // Lock to 16:9, Fit to window, stream info, activity and its style are saved as soon as they change.
   const wallOptions = settings?.wall ?? DEFAULT_WALL_OPTIONS;
   const changeWall = (change: Partial<WallOptions>) => {
     const next = { ...wallOptions, ...change };
@@ -403,6 +403,7 @@ function App() {
           fitToWindow={wallOptions.fitToWindow}
           streamInfo={wallOptions.streamInfo}
           activity={wallOptions.activity ? activity : undefined}
+          activityStyle={wallOptions.activityStyle}
           refresh={refresh}
           maximised={maximised}
           onMaximise={setMaximised}
@@ -423,7 +424,7 @@ function App() {
             setSettings(saved);
           }}
           onMqttSaved={setSettings}
-          onActivity={(on) => changeWall({ activity: on })}
+          onWall={changeWall}
           onAutoUpdateSaved={(saved) => {
             channelSwitches.current += 1;
             setSettings(saved);
