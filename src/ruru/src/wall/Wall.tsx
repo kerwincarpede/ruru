@@ -28,6 +28,8 @@ interface WallProps {
   reconnects?: Record<string, number>;
   /** Told what Automatic plays on each camera's tile. */
   onAutomatic?: (camera: string, stream: StreamKind) => void;
+  /** Told whether each camera's tile has a problem, while the window is shown. */
+  onProblem?: (camera: string, problem: boolean) => void;
   /** The layout changed in Edit layout mode and should be saved. */
   onLayout: (layout: SavedLayout) => void;
 }
@@ -66,6 +68,7 @@ export default function Wall({
   onMaximise,
   reconnects = {},
   onAutomatic,
+  onProblem,
   onLayout,
 }: WallProps) {
   const [box, size] = useSize();
@@ -129,6 +132,7 @@ export default function Wall({
                   onOpen={() => onMaximise?.(item.i === open ? null : camera.name)}
                   onHide={() => onLayout(hideCamera(fromGridItems(items, hidden, layout), camera.name))}
                   onAutomatic={onAutomatic && ((stream) => onAutomatic(camera.name, stream))}
+                  onProblem={onProblem && ((problem) => onProblem(camera.name, problem))}
                 />
               </div>
             );

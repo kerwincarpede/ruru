@@ -1,6 +1,7 @@
 //! Ruru's settings, stored as `settings.json` in the app config folder: the
 //! Frigate URL, whether the window is full screen, how the wall is drawn,
-//! the update channel, and one wall layout per Frigate server.
+//! the update channel, the Home Assistant (MQTT) connection, and one wall
+//! layout per Frigate server.
 //!
 //! Missing keys fall back to their defaults and unknown keys are ignored, so
 //! settings files from other versions still load.
@@ -99,13 +100,102 @@ pub enum UpdateChannel {
     Edge,
 }
 
-/// Reads a stored channel leniently: anything Ruru does not know, such as a
-/// channel from a newer version, is Stable rather than a broken file.
-fn lenient_channel<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<UpdateChannel, D::Error> {
+/// Reads a stored choice leniently: anything Ruru does not know, such as a
+/// channel from a newer version, is the default rather than a broken file.
+fn lenient<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned + Default,
+{
     let value = serde_json::Value::deserialize(deserializer)?;
     Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
+/// Where the MQTT broker's password is kept.
+///
+/// Mirrored by `PasswordStorage` in `src/app/api.ts`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PasswordStorage {
+    /// No password is saved.
+    #[default]
+    None,
+    /// The system keychain holds it.
+    Keychain,
+    /// No keychain could take it, so it is in `settings.json`.
+    File,
+}
+
+/// The MQTT broker port when none is saved.
+pub const DEFAULT_MQTT_PORT: u16 = 1883;
+/// Home Assistant's default MQTT discovery prefix.
+pub const DEFAULT_DISCOVERY_PREFIX: &str = "homeassistant";
+/// Frigate's default MQTT topic prefix.
+pub const DEFAULT_FRIGATE_PREFIX: &str = "frigate";
+
+/// The connection to the MQTT broker in Home Assistant, set in
+/// Settings › Home Assistant. Off until the user turns it on.
+///
+/// Mirrored by `MqttSettings` in `src/app/api.ts`, which never sees
+/// `password`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MqttSettings {
+    /// Ruru connects to the broker.
+    pub enabled: bool,
+    /// The broker's host name or IP address.
+    pub host: String,
+    pub port: u16,
+    /// Connect over TLS, checking the broker's certificate.
+    pub tls: bool,
+    /// Empty for a broker without a login.
+    pub username: String,
+    /// Where Home Assistant looks for discovery messages.
+    pub discovery_prefix: String,
+    /// Where Frigate publishes its topics.
+    pub frigate_prefix: String,
+    /// This install's id in topics and in Home Assistant, made once by
+    /// [`new_device_id`] and kept.
+    pub device_id: String,
+    /// Where the password is kept.
+    #[serde(deserialize_with = "lenient")]
+    pub password_storage: PasswordStorage,
+    /// The password, only when no keychain could take it. Never sent to the
+    /// page: see [`Settings::for_page`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+}
+
+impl Default for MqttSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            host: String::new(),
+            port: DEFAULT_MQTT_PORT,
+            tls: false,
+            username: String::new(),
+            discovery_prefix: DEFAULT_DISCOVERY_PREFIX.into(),
+            frigate_prefix: DEFAULT_FRIGATE_PREFIX.into(),
+            device_id: String::new(),
+            password_storage: PasswordStorage::None,
+            password: None,
+        }
+    }
+}
+
+/// A new device id: twelve lowercase hex digits, random enough that two
+/// installs on one broker never share one.
+pub fn new_device_id() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    // RandomState is seeded from the system's randomness; the time and
+    // process id only add to it.
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    hasher.write_u128(now.as_nanos());
+    hasher.write_u32(std::process::id());
+    format!("{:012x}", hasher.finish() & 0xffff_ffff_ffff)
 }
 
 /// Everything Ruru remembers between launches.
@@ -122,10 +212,22 @@ pub struct Settings {
     /// How the wall is drawn.
     pub wall: WallOptions,
     /// Which releases the update check offers.
-    #[serde(deserialize_with = "lenient_channel")]
+    #[serde(deserialize_with = "lenient")]
     pub update_channel: UpdateChannel,
+    /// The Home Assistant (MQTT) connection.
+    pub mqtt: MqttSettings,
     /// Layouts by normalised Frigate URL.
     pub layouts: BTreeMap<String, SavedLayout>,
+}
+
+impl Settings {
+    /// The settings as the page may see them: without a password kept in
+    /// the file.
+    pub fn for_page(&self) -> Settings {
+        let mut settings = self.clone();
+        settings.mqtt.password = None;
+        settings
+    }
 }
 
 /// Why settings could not be read, written or changed.
@@ -179,6 +281,11 @@ pub fn normalise_frigate_url(input: &str) -> Result<String, SettingsError> {
     Ok(url.as_str().trim_end_matches('/').to_string())
 }
 
+/// A camera name the page may send: not blank and not too long.
+pub fn valid_camera_name(name: &str) -> bool {
+    !name.trim().is_empty() && name.len() <= MAX_CAMERA_NAME
+}
+
 /// Checks a layout sent by the page before it is saved.
 pub fn validate_layout(layout: &SavedLayout) -> Result<(), SettingsError> {
     if layout.tiles.len() > MAX_TILES || layout.hidden.len() > MAX_TILES {
@@ -186,7 +293,7 @@ pub fn validate_layout(layout: &SavedLayout) -> Result<(), SettingsError> {
             "A layout can hold at most {MAX_TILES} cameras."
         )));
     }
-    let bad_name = |name: &str| name.trim().is_empty() || name.len() > MAX_CAMERA_NAME;
+    let bad_name = |name: &str| !valid_camera_name(name);
     if layout.hidden.iter().any(|name| bad_name(name)) {
         return Err(SettingsError::Invalid(
             "The layout names a camera that is not valid.".into(),
@@ -314,6 +421,18 @@ impl SettingsStore {
         self.update(|settings| settings.update_channel = channel)
     }
 
+    /// Saves the Home Assistant connection, giving it a device id the first
+    /// time. A saved id is never replaced, so Home Assistant keeps seeing the
+    /// same device.
+    pub fn set_mqtt(&mut self, mut mqtt: MqttSettings) -> Result<&Settings, SettingsError> {
+        mqtt.device_id = match self.current.mqtt.device_id.as_str() {
+            "" if mqtt.device_id.is_empty() => new_device_id(),
+            "" => mqtt.device_id,
+            saved => saved.to_string(),
+        };
+        self.update(|settings| settings.mqtt = mqtt)
+    }
+
     /// Saves the layout for the Frigate server at `server`.
     pub fn set_layout(
         &mut self,
@@ -378,7 +497,7 @@ pub(crate) fn lock(state: &SharedSettings) -> std::sync::MutexGuard<'_, Settings
 /// The saved settings.
 #[tauri::command]
 pub fn get_settings(state: State<'_, SharedSettings>) -> Settings {
-    lock(&state).current().clone()
+    lock(&state).current().for_page()
 }
 
 /// Saves the Frigate URL the user entered and returns the settings with it.
@@ -389,7 +508,7 @@ pub async fn save_frigate_url(
 ) -> Result<Settings, String> {
     lock(&state)
         .set_frigate_url(&url)
-        .cloned()
+        .map(Settings::for_page)
         .map_err(|err| err.to_string())
 }
 
@@ -443,7 +562,7 @@ pub async fn set_update_channel(
 ) -> Result<Settings, String> {
     lock(&state)
         .set_update_channel(channel)
-        .cloned()
+        .map(Settings::for_page)
         .map_err(|err| err.to_string())
 }
 
@@ -666,6 +785,12 @@ mod tests {
             full_screen: true,
             wall: WallOptions::default(),
             update_channel: UpdateChannel::Edge,
+            mqtt: MqttSettings {
+                device_id: "0123456789ab".into(),
+                password_storage: PasswordStorage::File,
+                password: Some("secret".into()),
+                ..MqttSettings::default()
+            },
             layouts: BTreeMap::new(),
         };
         settings.layouts.insert(
@@ -676,15 +801,82 @@ mod tests {
             },
         );
         assert_eq!(
-            serde_json::to_value(&settings).unwrap(),
+            serde_json::to_value(settings.for_page()).unwrap(),
             serde_json::json!({
                 "frigateUrl": "http://a",
                 "fullScreen": true,
                 "wall": {"lockRatio": true, "fitToWindow": true, "streamInfo": false},
                 "updateChannel": "edge",
+                "mqtt": {
+                    "enabled": false,
+                    "host": "",
+                    "port": 1883,
+                    "tls": false,
+                    "username": "",
+                    "discoveryPrefix": "homeassistant",
+                    "frigatePrefix": "frigate",
+                    "deviceId": "0123456789ab",
+                    "passwordStorage": "file"
+                },
                 "layouts": {"http://a": {"tiles": [{"camera": "cam", "x": 1, "y": 2, "w": 3, "h": 4}], "hidden": []}}
             })
         );
+        // The file keeps the password the page never sees.
+        assert_eq!(
+            serde_json::to_value(&settings).unwrap()["mqtt"]["password"],
+            "secret"
+        );
+    }
+
+    #[test]
+    fn mqtt_is_off_with_home_assistant_and_frigate_prefixes_by_default() {
+        let mqtt = Settings::default().mqtt;
+        assert!(!mqtt.enabled);
+        assert_eq!(mqtt.port, DEFAULT_MQTT_PORT);
+        assert_eq!(mqtt.discovery_prefix, "homeassistant");
+        assert_eq!(mqtt.frigate_prefix, "frigate");
+        assert_eq!(mqtt.password_storage, PasswordStorage::None);
+        assert!(mqtt.device_id.is_empty() && mqtt.password.is_none());
+        // A file from before MQTT, or with only some of it, keeps the rest.
+        let partial: Settings = serde_json::from_str(
+            r#"{"mqtt": {"enabled": true, "host": "ha.local", "passwordStorage": "vault"}}"#,
+        )
+        .unwrap();
+        assert!(partial.mqtt.enabled);
+        assert_eq!(partial.mqtt.host, "ha.local");
+        assert_eq!(partial.mqtt.port, DEFAULT_MQTT_PORT);
+        assert_eq!(partial.mqtt.password_storage, PasswordStorage::None);
+    }
+
+    #[test]
+    fn mqtt_settings_get_one_device_id_that_is_kept() {
+        let dir = TempDir::new("mqtt");
+        let mut store = SettingsStore::open(Some(dir.file()));
+        let mqtt = MqttSettings {
+            enabled: true,
+            host: "ha.local".into(),
+            ..MqttSettings::default()
+        };
+        let id = store.set_mqtt(mqtt.clone()).unwrap().mqtt.device_id.clone();
+        assert_eq!(id.len(), 12);
+        assert!(
+            id.chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        );
+        // Saving again, even with another id, keeps the first one.
+        let again = MqttSettings {
+            device_id: "ffffffffffff".into(),
+            ..mqtt
+        };
+        assert_eq!(store.set_mqtt(again).unwrap().mqtt.device_id, id);
+        let reopened = SettingsStore::open(Some(dir.file()));
+        assert_eq!(reopened.current().mqtt.device_id, id);
+        assert_eq!(reopened.current().mqtt.host, "ha.local");
+    }
+
+    #[test]
+    fn device_ids_differ() {
+        assert_ne!(new_device_id(), new_device_id());
     }
 
     #[test]

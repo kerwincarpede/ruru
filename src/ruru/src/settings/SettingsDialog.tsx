@@ -4,6 +4,7 @@ import Dialog from "../app/Dialog";
 import type { FrigateStatus } from "../app/frigate";
 import { saveFrigateUrl, testFrigate, type AppInfo, type Settings } from "../app/api";
 import type { AvailableUpdate } from "../app/updates";
+import HomeAssistantPage from "./HomeAssistantPage";
 import UpdatesPage from "./UpdatesPage";
 
 interface SettingsDialogProps {
@@ -14,14 +15,17 @@ interface SettingsDialogProps {
   onSaved: (settings: Settings) => void;
   /** The update channel was saved. */
   onChannelSaved: (settings: Settings) => void;
+  /** The Home Assistant connection was saved. */
+  onMqttSaved: (settings: Settings) => void;
   /** A check on the Updates page found an update, or found none. */
   onUpdate: (update: AvailableUpdate | null) => void;
   onClose: () => void;
 }
 
-type Page = "frigate" | "updates";
+type Page = "frigate" | "homeassistant" | "updates";
 const PAGES: { page: Page; title: string }[] = [
   { page: "frigate", title: "Frigate" },
+  { page: "homeassistant", title: "Home Assistant" },
   { page: "updates", title: "Updates" },
 ];
 
@@ -32,8 +36,8 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Settings over the wall: Frigate holds the server's URL, Updates the version and update channel. */
-export default function SettingsDialog({ settings, info, onSaved, onChannelSaved, onUpdate, onClose }: SettingsDialogProps) {
+/** Settings over the wall: Frigate holds the server's URL, Home Assistant the MQTT connection, Updates the version and update channel. */
+export default function SettingsDialog({ settings, info, onSaved, onChannelSaved, onMqttSaved, onUpdate, onClose }: SettingsDialogProps) {
   const [page, setPage] = useState<Page>("frigate");
   const [url, setUrl] = useState(settings.frigateUrl ?? "");
   const [test, setTest] = useState<Test>({ kind: "idle" });
@@ -82,6 +86,7 @@ export default function SettingsDialog({ settings, info, onSaved, onChannelSaved
           </button>
         ))}
       </nav>
+      {page === "homeassistant" && <HomeAssistantPage mqtt={settings.mqtt} onSaved={onMqttSaved} onClose={onClose} />}
       {page === "updates" && (
         <UpdatesPage info={info} channel={settings.updateChannel} onChannelSaved={onChannelSaved} onUpdate={onUpdate} onClose={onClose} />
       )}

@@ -1,7 +1,7 @@
 import { emit } from "@tauri-apps/api/event";
 import { clearMocks } from "@tauri-apps/api/mocks";
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_WALL_OPTIONS, appInfo, getSettings, onOpenSettings, saveFrigateUrl, saveLayout, saveWallOptions, setFullScreen, type Settings } from "./api";
+import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, appInfo, getSettings, onOpenSettings, saveFrigateUrl, saveLayout, saveWallOptions, setFullScreen, type Settings } from "./api";
 import { mockCommands } from "../test/mockCommands";
 
 describe("appInfo", () => {
@@ -12,7 +12,7 @@ describe("appInfo", () => {
   });
 });
 
-const settings: Settings = { frigateUrl: "http://f", fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", layouts: {} };
+const settings: Settings = { frigateUrl: "http://f", fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
 
 describe("settings commands", () => {
   it("calls each command with camelCase arguments", async () => {

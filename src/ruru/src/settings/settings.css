@@ -148,3 +148,34 @@
   color: var(--text-muted);
   font-size: 0.8rem;
 }
+
+.field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.field-grow {
+  flex: 1 1 12rem;
+}
+
+.field-port {
+  flex: 0 0 6rem;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 550;
+}
+
+.check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.settings-content > .field-hint {
+  margin: -0.6rem 0 0;
+}

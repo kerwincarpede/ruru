@@ -10,10 +10,11 @@ Ruru is a [Tauri](https://tauri.app/) desktop app: a Rust backend and a React an
 
 ## What Ruru talks to
 
-Only two places:
+Only these places:
 
 1. **Your Frigate server**, at the address you enter.
 2. **GitHub**, to check for a newer release of Ruru on your update channel.
+3. **Your MQTT broker**, only if you turn on **Connect to Home Assistant** in **Settings → Home Assistant**. Ruru connects to the broker you enter and nowhere else. See [Home Assistant](/ruru/guides/home-assistant/).
 
 No analytics, no telemetry, no cloud account.
 
@@ -22,7 +23,8 @@ No analytics, no telemetry, no cloud account.
 - **Discovery:** the backend reads your cameras and their streams from Frigate's HTTP API (`/api/version`, `/api/config` and `/api/go2rtc/streams`) when Ruru starts and whenever its window comes back into focus.
 - **Playback:** each tile connects to the camera's stream on Frigate's go2rtc restreamer over WebRTC, the same path Frigate's own live view uses, and falls back to MSE. It shows the camera's latest snapshot until the video starts, reconnects on its own, and stops while the window is hidden.
 - **Video stays between Frigate and the screen:** it goes from Frigate to the tile without passing through Ruru's backend. Ruru never records, copies or re-encodes it.
-- **Settings:** the Frigate address, full screen, the wall options, the update channel, and each server's tile positions and sizes are saved in `settings.json` on your computer. See [Settings](/ruru/reference/settings/#where-settings-are-kept).
+- **Home Assistant:** over MQTT, Ruru publishes its version, the maximised camera, whether it is full screen and shown, and whether each camera's tile has a problem. It sends no video or snapshots.
+- **Settings:** the Frigate address, full screen, the wall options, the update channel, the Home Assistant connection, and each server's tile positions and sizes are saved in `settings.json` on your computer. The broker password goes in your computer's keychain, or in `settings.json` when there is no keychain Ruru can use. See [Settings](/ruru/reference/settings/#where-settings-are-kept).
 
 ## Open source
 

@@ -4,7 +4,7 @@ import { appInfo, type AppInfo } from "./app/api";
 import { cameraLabel, type Camera } from "./app/frigate";
 import { isMac, shortcutFor } from "./app/keys";
 import Logo from "./app/Logo";
-import { DEFAULT_WALL_OPTIONS, frigateCameras, getSettings, onFullScreenChanged, onOpenSettings, saveLayout, saveWallOptions, setFullScreen, type SavedLayout, type Settings, type WallOptions } from "./app/api";
+import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, frigateCameras, getSettings, onFullScreenChanged, onOpenSettings, reportTileProblem, reportWallState, saveLayout, saveWallOptions, setFullScreen, type SavedLayout, type Settings, type WallOptions } from "./app/api";
 import UpdatePrompt from "./app/UpdatePrompt";
 import { findUpdate, versionLabel, type AvailableUpdate } from "./app/updates";
 import SettingsDialog from "./settings/SettingsDialog";
@@ -17,7 +17,7 @@ import WallMenu from "./wall/WallMenu";
 /** How long the toolbar stays after the pointer stops moving. */
 export const TOOLBAR_HIDE_MS = 2500;
 
-const NO_SETTINGS: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", layouts: {} };
+const NO_SETTINGS: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
 
 function GearIcon() {
   return (
@@ -177,6 +177,21 @@ function App() {
     void saveWallOptions(next).catch(() => {});
   };
 
+  // Home Assistant hears the wall's state and every tile's problems. The
+  // backend only publishes them while Settings › Home Assistant is on.
+  const fullScreenNow = settings?.fullScreen ?? false;
+  const onWall = url && cameras ? wallPlacements(cameras.map((camera) => camera.name), layout).map((tile) => tile.camera) : null;
+  const onWallKey = onWall ? JSON.stringify(onWall) : null;
+  const shownMaximised = maximised && onWall?.includes(maximised) ? maximised : null;
+  useEffect(() => {
+    if (onWallKey === null) return;
+    const report = { maximised: shownMaximised, fullScreen: fullScreenNow, windowShown: live, cameras: JSON.parse(onWallKey) as string[] };
+    void reportWallState(report).catch(() => {});
+  }, [onWallKey, shownMaximised, fullScreenNow, live]);
+  const onProblem = useCallback((camera: string, problem: boolean) => {
+    void reportTileProblem(camera, problem).catch(() => {});
+  }, []);
+
   const onAutomatic = useCallback((camera: string, stream: StreamKind) => {
     setAutomatic((now) => (now[camera] === stream ? now : { ...now, [camera]: stream }));
   }, []);
@@ -308,6 +323,7 @@ function App() {
           onMaximise={setMaximised}
           reconnects={reconnects}
           onAutomatic={onAutomatic}
+          onProblem={onProblem}
           onLayout={changeLayout}
         />
       )}
@@ -321,6 +337,7 @@ function App() {
             channelSwitches.current += 1;
             setSettings(saved);
           }}
+          onMqttSaved={setSettings}
           onUpdate={setUpdate}
           onSaved={(saved) => {
             setSettings(saved);

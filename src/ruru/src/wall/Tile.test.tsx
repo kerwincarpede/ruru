@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Camera } from "../app/frigate";
 import { forgetFailures, retryDelay, STALE_MS, STALL_CHECK_MS, STALL_MS } from "./player";
 import { AUTO_SETTLE_MS, forgetWidths } from "./streams";
-import Tile from "./Tile";
+import Tile, { PROBLEM_AFTER_MS } from "./Tile";
 
 class FakeSocket {
   static all: FakeSocket[] = [];
@@ -132,6 +132,37 @@ describe("Tile", () => {
     fire(videoFor("cam_sub"), "playing");
     expect(figure).not.toHaveClass("is-stale");
     expect(figure).toHaveTextContent(/^Cam$/);
+  });
+
+  it("reports a problem once a tile has been frozen or reconnecting for a while", () => {
+    const onProblem = vi.fn();
+    render(<Tile base={base} camera={camera} live onProblem={onProblem} />);
+    expect(onProblem).toHaveBeenLastCalledWith(false);
+    fire(videoFor("cam_sub"), "playing");
+    act(() => vi.advanceTimersByTime(STALL_MS));
+    expect(onProblem).not.toHaveBeenCalledWith(true);
+    act(() => vi.advanceTimersByTime(PROBLEM_AFTER_MS));
+    expect(onProblem).toHaveBeenLastCalledWith(true);
+    // A new frame ends it, and the next spell of trouble waits again.
+    fire(videoFor("cam_sub"), "playing");
+    expect(onProblem).toHaveBeenLastCalledWith(false);
+    act(() => vi.advanceTimersByTime(STALL_MS));
+    expect(onProblem).toHaveBeenLastCalledWith(false);
+  });
+
+  it("reports a problem at once when a tile can't play, and nothing while the window is hidden", () => {
+    const onProblem = vi.fn();
+    const only = { ...camera, subStream: "cam" };
+    const { rerender } = render(<Tile base={base} camera={only} live onProblem={onProblem} />);
+    const video = videoFor("cam");
+    Object.defineProperty(video, "error", { configurable: true, value: { code: 3 } });
+    fire(video, "error");
+    act(() => vi.advanceTimersByTime(retryDelay(0)));
+    fire(video, "error");
+    expect(onProblem).toHaveBeenLastCalledWith(true);
+    onProblem.mockClear();
+    rerender(<Tile base={base} camera={only} live={false} onProblem={onProblem} />);
+    expect(onProblem).not.toHaveBeenCalled();
   });
 
   it("chooses the stream for the tile's size once the size settles", () => {
