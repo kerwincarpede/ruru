@@ -43,13 +43,14 @@ It also has controls:
 | **Full screen** | A switch that turns full screen on and off. |
 | **Streams** | A switch that stops every tile's stream and starts them again. See [Streams](#streams). |
 | **Update** | Shows when a newer version is out on your update channel, and installs it. |
+| **Check for updates** | A button that checks your update channel now, rather than waiting for the next check. |
 | **Display** | A switch that turns the screen off and on. Only where Ruru can do it: see [Display](#display). |
 
 Every entity shows as unavailable while Ruru is not connected, such as when the computer is off. Problem sensors follow the cameras on the wall: hiding a camera removes its sensor, and showing it adds it back. Tiles reconnect on their own, so there are no Reconnect buttons; Ruru removes any an earlier version added. **Maximise** offers only the cameras on the wall.
 
 ## Updates from Home Assistant
 
-While connected, Ruru checks the update channel picked in **Settings → Updates** when it connects and then every 6 hours, and the **Update** entity shows what it found. Choose **Install** in Home Assistant to download and install it. Ruru then restarts on the new version full screen, ready for a wall display. If the install fails, such as when its password prompt is cancelled, Ruru keeps running as it was and checks again, so **Install** can be tried again.
+While connected, Ruru checks the update channel picked in **Settings → Updates** when it connects and then every 6 hours, and the **Update** entity shows what it found. Press **Check for updates** to check now, such as just after a new release is out. Choose **Install** in Home Assistant to download and install it. Ruru then restarts on the new version full screen, ready for a wall display. If the install fails, such as when its password prompt is cancelled, Ruru keeps running as it was and checks again, so **Install** can be tried again.
 
 On Linux, a `.deb` or `.rpm` install may ask for your password on the computer running Ruru before it can finish. The AppImage updates without asking.
 
@@ -120,6 +121,7 @@ Home Assistant sends commands to `ruru/<device id>/command/<command>`:
 | `restore` | Anything. |
 | `full_screen` | `ON` or `OFF`. |
 | `streams` | `ON` or `OFF`. |
+| `check_for_updates` | Anything. |
 | `install` | Anything. |
 | `display` | `ON` or `OFF`. |
 

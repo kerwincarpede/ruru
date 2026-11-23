@@ -13,7 +13,7 @@ Ruru is a [Tauri](https://tauri.app/) desktop app: a Rust backend and a React an
 Only these places:
 
 1. **Your Frigate server**, at the address you enter.
-2. **GitHub**, to check for a newer release of Ruru on your update channel: at startup, when you ask, and every 6 hours while Ruru is connected to Home Assistant.
+2. **GitHub**, to check for a newer release of Ruru on your update channel: at startup, when you ask, and every 6 hours while Ruru is connected to Home Assistant, and when **Check for updates** is pressed there.
 3. **Your MQTT broker**, only if you turn on **Connect to Home Assistant** in **Settings → Home Assistant**. Ruru connects to the broker you enter and nowhere else. See [Home Assistant](/ruru/guides/home-assistant/).
 
 No analytics, no telemetry, no cloud account.

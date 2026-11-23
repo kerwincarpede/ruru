@@ -7,8 +7,9 @@
 //! Home Assistant controls the wall through the device's select, buttons and
 //! switches: each command is checked here and handed to the page, which
 //! carries it out. The device's update entity offers the update a check of
-//! the saved channel finds, every six hours while connected, and installs it
-//! when asked, restarting Ruru full screen. Where this computer can turn its
+//! the saved channel finds, every six hours while connected or at once when
+//! its Check for updates button is pressed, and installs it when asked,
+//! restarting Ruru full screen. Where this computer can turn its
 //! screen off, the device also has a Display switch, carried out here.
 //!
 //! The page reports the wall's state and each tile's problems; this module
@@ -518,6 +519,12 @@ impl Inner {
         }
     }
 
+    /// Makes a check due now, as the Check for updates button asked. A check
+    /// already running counts: it is as fresh as a new one.
+    fn check_requested(&mut self) {
+        self.last_check = None;
+    }
+
     /// Records that the display was turned on, or off, and tells Home
     /// Assistant on the current connection.
     fn display_done(&mut self, on: bool) {
@@ -801,8 +808,8 @@ fn take_activity(app: &AppHandle, generation: u64, update: activity::Update) {
 }
 
 /// Carries out one command from Home Assistant, if it is valid: a change to
-/// the wall goes to the page, Install starts installing the update, and the
-/// Display switch turns the screen off or on where it is offered.
+/// the wall goes to the page, Check for updates checks the update channel
+/// now, Install starts installing the update, and the Display switch turns the screen off or on where it is offered.
 fn take_command(app: &AppHandle, generation: u64, name: &str, payload: &[u8]) {
     let (parsed, display) = {
         let state = app.state::<MqttState>();
@@ -818,6 +825,10 @@ fn take_command(app: &AppHandle, generation: u64, name: &str, payload: &[u8]) {
             if let Err(err) = app.emit(commands::EVENT, command) {
                 eprintln!("Ruru: a Home Assistant command could not reach the page: {err}");
             }
+        }
+        Ok(Command::CheckForUpdates) => {
+            app.state::<MqttState>().lock().check_requested();
+            check_if_due(app);
         }
         Ok(Command::Install) => {
             let app = app.clone();
@@ -1239,6 +1250,7 @@ mod tests {
                 "homeassistant/switch/0123456789ab/full_screen/config",
                 "homeassistant/switch/0123456789ab/streams/config",
                 "homeassistant/update/0123456789ab/update/config",
+                "homeassistant/button/0123456789ab/check_for_updates/config",
                 "homeassistant/switch/0123456789ab/display/config",
                 "ruru/0123456789ab/display",
                 "homeassistant/select/0123456789ab/maximise/config",
@@ -1251,14 +1263,14 @@ mod tests {
             ]
         );
         assert_eq!(messages[0].payload, "online");
-        assert_eq!(messages[13].payload, "OFF");
-        assert_eq!(messages[15].payload, "ON");
+        assert_eq!(messages[14].payload, "OFF");
+        assert_eq!(messages[16].payload, "ON");
         assert!(messages.iter().all(|message| message.retain));
         // Without a way to turn the screen off, the Display switch is
         // removed rather than offered, and its state an earlier run left
         // is cleared too.
-        assert!(messages[9].payload.is_empty());
         assert!(messages[10].payload.is_empty());
+        assert!(messages[11].payload.is_empty());
     }
 
     #[test]
@@ -1475,6 +1487,17 @@ mod tests {
         assert!(!check_due(Some(now), later - Duration::from_secs(1)));
         // A clock that seems to go backwards never makes a check due.
         assert!(!check_due(Some(later), now));
+    }
+
+    #[test]
+    fn the_check_for_updates_button_makes_a_check_due_now() {
+        let mut inner = Inner {
+            last_check: Some(Instant::now()),
+            ..Inner::default()
+        };
+        assert!(!check_due(inner.last_check, Instant::now()));
+        inner.check_requested();
+        assert!(check_due(inner.last_check, Instant::now()));
     }
 
     #[test]

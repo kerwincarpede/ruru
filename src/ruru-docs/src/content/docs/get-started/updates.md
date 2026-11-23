@@ -9,7 +9,7 @@ Ruru checks for a newer release each time it starts. When there is one, it says 
 
 To check by hand, open **Settings → Updates** and choose **Check for updates**. The page also shows the version you have.
 
-With **Settings → Home Assistant** on, Ruru also checks every 6 hours while connected, and Home Assistant can install the update. Ruru then restarts full screen. See [Home Assistant](/ruru/guides/home-assistant/#updates-from-home-assistant).
+With **Settings → Home Assistant** on, Ruru also checks every 6 hours while connected, or at once when you press **Check for updates** in Home Assistant, and Home Assistant can install the update. Ruru then restarts full screen. See [Home Assistant](/ruru/guides/home-assistant/#updates-from-home-assistant).
 
 ## Stable and Edge
 

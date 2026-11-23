@@ -1,12 +1,14 @@
 //! Home Assistant MQTT discovery: the retained configs that make one install
 //! a device with its state sensors, a problem sensor per camera, the wall's
-//! controls, an update entity and, where Ruru can turn the
+//! controls, an update entity with a button that checks for one now and,
+//! where Ruru can turn the
 //! screen off, a Display switch, and the state they read.
 
 use serde_json::{Value, json};
 
 use super::commands::{
-    DISPLAY, FULL_SCREEN, INSTALL, INSTALL_PAYLOAD, MAXIMISE, NONE, PRESS, RESTORE, STREAMS,
+    CHECK_FOR_UPDATES, DISPLAY, FULL_SCREEN, INSTALL, INSTALL_PAYLOAD, MAXIMISE, NONE, PRESS,
+    RESTORE, STREAMS,
 };
 use super::topics::{Topics, object_id};
 
@@ -184,7 +186,8 @@ pub fn device_configs(topics: &Topics, device: &Device) -> Vec<Message> {
 pub const PROBLEM_SUFFIX: &str = "_problem";
 
 /// The wall's controls that do not depend on the cameras: the Restore button,
-/// the Full screen and Streams switches and the update entity.
+/// the Full screen and Streams switches, the update entity and the Check for
+/// updates button.
 pub fn control_configs(topics: &Topics, device: &Device) -> Vec<Message> {
     let mut restore = base(topics, device, RESTORE, "Restore");
     restore.insert("command_topic".into(), topics.command(RESTORE).into());
@@ -194,6 +197,14 @@ pub fn control_configs(topics: &Topics, device: &Device) -> Vec<Message> {
     update.insert("state_topic".into(), topics.update().into());
     update.insert("command_topic".into(), topics.command(INSTALL).into());
     update.insert("payload_install".into(), INSTALL_PAYLOAD.into());
+    let mut check = base(topics, device, CHECK_FOR_UPDATES, "Check for updates");
+    check.insert(
+        "command_topic".into(),
+        topics.command(CHECK_FOR_UPDATES).into(),
+    );
+    check.insert("payload_press".into(), PRESS.into());
+    check.insert("entity_category".into(), "config".into());
+    check.insert("icon".into(), "mdi:cloud-refresh".into());
     vec![
         Message::retained(
             topics.discovery("button", RESTORE),
@@ -232,6 +243,10 @@ pub fn control_configs(topics: &Topics, device: &Device) -> Vec<Message> {
         Message::retained(
             topics.discovery("update", "update"),
             Value::Object(update).to_string(),
+        ),
+        Message::retained(
+            topics.discovery("button", CHECK_FOR_UPDATES),
+            Value::Object(check).to_string(),
         ),
     ]
 }
@@ -489,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn the_wall_has_restore_full_screen_streams_and_update_controls() {
+    fn the_wall_has_restore_full_screen_streams_update_and_check_controls() {
         let configs = control_configs(&topics(), &device());
         let topics: Vec<&str> = configs.iter().map(|m| m.topic.as_str()).collect();
         assert_eq!(
@@ -499,6 +514,7 @@ mod tests {
                 "homeassistant/switch/0123456789ab/full_screen/config",
                 "homeassistant/switch/0123456789ab/streams/config",
                 "homeassistant/update/0123456789ab/update/config",
+                "homeassistant/button/0123456789ab/check_for_updates/config",
             ]
         );
         assert!(configs.iter().all(|m| m.retain));
@@ -517,6 +533,10 @@ mod tests {
         assert_eq!(
             payload(&configs[3]),
             fixture(include_str!("fixtures/discovery-update.json"))
+        );
+        assert_eq!(
+            payload(&configs[4]),
+            fixture(include_str!("fixtures/discovery-check-for-updates.json"))
         );
     }
 

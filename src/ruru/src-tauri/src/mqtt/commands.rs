@@ -1,7 +1,8 @@
 //! The commands Home Assistant sends on Ruru's command topics: maximise a
 //! camera, restore the wall, turn full screen on or off, stop or start every
-//! stream, install the pending update and turn the display off or on. Each one is checked before it is carried out, since anything on
-//! the broker can publish to these topics.
+//! stream, check for an update, install the pending update and turn the
+//! display off or on. Each one is checked before it is carried out, since
+//! anything on the broker can publish to these topics.
 
 use serde::Serialize;
 
@@ -17,6 +18,8 @@ pub const RESTORE: &str = "restore";
 pub const FULL_SCREEN: &str = "full_screen";
 /// The switch that stops and starts every camera's stream.
 pub const STREAMS: &str = "streams";
+/// The button that checks for an update now.
+pub const CHECK_FOR_UPDATES: &str = "check_for_updates";
 /// The update entity's Install.
 pub const INSTALL: &str = "install";
 /// The switch that turns the display off and on.
@@ -52,6 +55,9 @@ pub enum WallCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Wall(WallCommand),
+    /// Check the update channel now, rather than waiting for the next
+    /// scheduled check.
+    CheckForUpdates,
     /// Install the pending update and restart full screen.
     Install,
     /// Turn the display on, or off.
@@ -113,6 +119,7 @@ pub fn parse(name: &str, payload: &[u8], cameras: &[String]) -> Result<Command, 
         RESTORE => WallCommand::Restore,
         FULL_SCREEN => WallCommand::FullScreen { on: on_or_off()? },
         STREAMS => WallCommand::Streams { on: on_or_off()? },
+        CHECK_FOR_UPDATES => return Ok(Command::CheckForUpdates),
         INSTALL => return Ok(Command::Install),
         DISPLAY => return Ok(Command::Display { on: on_or_off()? }),
         other => return Err(Refused::Unknown(other.to_string())),
@@ -152,10 +159,14 @@ mod tests {
     }
 
     #[test]
-    fn the_buttons_restore_and_install() {
+    fn the_buttons_restore_check_for_updates_and_install() {
         assert_eq!(
             wall("restore", PRESS),
             Ok(Command::Wall(WallCommand::Restore))
+        );
+        assert_eq!(
+            wall("check_for_updates", PRESS),
+            Ok(Command::CheckForUpdates)
         );
         assert_eq!(wall("install", INSTALL_PAYLOAD), Ok(Command::Install));
         // Tiles reconnect on their own: Home Assistant has no Reconnect.
