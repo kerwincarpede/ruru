@@ -1,0 +1,87 @@
+---
+// The MQTT messages behind the hero's story, as `mosquitto_sub -v` would show
+// them: Frigate's activity topics and Ruru's own. The newest message scrolls
+// in at the bottom in step with the wall (see HeroWall.astro).
+---
+
+<div class="fdp" role="log" aria-label="MQTT messages between Frigate, Home Assistant and Ruru">
+	<div class="fdp-h"><span class="ru-dot"></span><b>MQTT</b><span>homeassistant.local:1883</span><span class="fdp-sub">frigate/# · ruru/#</span></div>
+	<div class="fdp-win">
+		<div class="fdp-new"></div>
+		<div class="fdp-list">
+			<div class="fr"><span class="fr-who w-ru">Ruru</span><span class="fr-t"><i>ruru/</i>7c2e91a4f05b/availability</span><span class="fr-p p-v">online</span></div>
+			<div class="fr"><span class="fr-who w-fr">Frigate</span><span class="fr-t"><i>frigate/</i>camera_activity</span><span class="fr-p p-off">&#123;…&#125;</span></div>
+			<div class="fr"><span class="fr-who w-ru">Ruru</span><span class="fr-t"><i>ruru/</i>7c2e91a4f05b/state</span><span class="fr-p p-off">&#123;"streams":"ON"…&#125;</span></div>
+			<div class="fr"><span class="fr-who w-fr">Frigate</span><span class="fr-t"><i>frigate/</i>driveway/motion</span><span class="fr-p p-off">OFF</span></div>
+			<div class="fr"><span class="fr-who w-ru">Ruru</span><span class="fr-t"><i>ruru/</i>7c2e91a4f05b/problem/garage</span><span class="fr-p p-off">OFF</span></div>
+			<div class="fr"><span class="fr-who w-fr">Frigate</span><span class="fr-t"><i>frigate/</i>street/motion</span><span class="fr-p p-off">OFF</span></div>
+			<div class="fr"><span class="fr-who w-fr">Frigate</span><span class="fr-t"><i>frigate/</i>back_yard/motion</span><span class="fr-p p-on">ON</span></div>
+			<div class="fr"><span class="fr-who w-fr">Frigate</span><span class="fr-t"><i>frigate/</i>back_yard/cat/active</span><span class="fr-p p-v">1</span></div>
+			<div class="fr"><span class="fr-who w-fr">Frigate</span><span class="fr-t"><i>frigate/</i>back_yard/cat/active</span><span class="fr-p p-off">0</span></div>
+			<div class="fr"><span class="fr-who w-fr">Frigate</span><span class="fr-t"><i>frigate/</i>back_yard/motion</span><span class="fr-p p-off">OFF</span></div>
+			<div class="fr"><span class="fr-who w-fr">Frigate</span><span class="fr-t"><i>frigate/</i>front_door/motion</span><span class="fr-p p-on">ON</span></div>
+			<div class="fr"><span class="fr-who w-fr">Frigate</span><span class="fr-t"><i>frigate/</i>front_door/person/active</span><span class="fr-p p-v">1</span></div>
+			<div class="fr"><span class="fr-who w-fr">Frigate</span><span class="fr-t"><i>frigate/</i>front_door/review_status</span><span class="fr-p p-al">ALERT</span></div>
+			<div class="fr"><span class="fr-who w-ha">HA</span><span class="fr-t"><i>ruru/</i>7c2e91a4f05b/command/maximise</span><span class="fr-p p-v">front_door</span></div>
+			<div class="fr"><span class="fr-who w-ru">Ruru</span><span class="fr-t"><i>ruru/</i>7c2e91a4f05b/state</span><span class="fr-p p-v">&#123;"maximised":"front_door"…&#125;</span></div>
+			<div class="fr"><span class="fr-who w-fr">Frigate</span><span class="fr-t"><i>frigate/</i>front_door/review_status</span><span class="fr-p p-off">NONE</span></div>
+			<div class="fr"><span class="fr-who w-ha">HA</span><span class="fr-t"><i>ruru/</i>7c2e91a4f05b/command/restore</span><span class="fr-p p-v">PRESS</span></div>
+			<div class="fr"><span class="fr-who w-fr">Frigate</span><span class="fr-t"><i>frigate/</i>front_door/person/active</span><span class="fr-p p-off">0</span></div>
+			<div class="fr"><span class="fr-who w-fr">Frigate</span><span class="fr-t"><i>frigate/</i>front_door/motion</span><span class="fr-p p-off">OFF</span></div>
+		</div>
+	</div>
+</div>
+
+<style>
+	/* ---------- MQTT feed ---------- */
+
+	.fdp { box-sizing: border-box; width: 100%; overflow: hidden; border: 1px solid var(--ru-hair-strong); border-radius: 14px; background: rgba(12, 14, 18, 0.88); backdrop-filter: blur(14px); box-shadow: 0 30px 80px -24px rgba(0, 0, 0, 0.85); font-family: var(--ru-font-mono); color: var(--ru-text); }
+	.fdp-h { display: flex; align-items: center; gap: 9px; padding: 11px 14px; border-bottom: 1px solid var(--ru-hair); font-size: 11.5px; color: var(--ru-muted); white-space: nowrap; }
+	.fdp-h b { color: var(--ru-text); font-weight: 600; letter-spacing: 0.04em; }
+	.fdp-h .fdp-sub { margin-left: auto; opacity: 0.75; }
+	.fdp-win { position: relative; height: 182px; overflow: hidden; -webkit-mask-image: linear-gradient(transparent, #000 45%); mask-image: linear-gradient(transparent, #000 45%); }
+	.fdp-list { position: absolute; left: 0; right: 0; bottom: 0; animation: cr-feed-scroll var(--loop) linear infinite; }
+	.fdp-new { position: absolute; left: 0; right: 0; bottom: 0; height: 26px; background: linear-gradient(90deg, rgba(224, 164, 88, 0.16), rgba(224, 164, 88, 0.02)); box-shadow: inset 2px 0 0 #e0a458; opacity: 0; animation: cr-feed-flash var(--loop) linear infinite; }
+	.fr { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; align-items: center; gap: 10px; height: 26px; padding: 0 14px; font-size: 11.5px; white-space: nowrap; }
+	.fr-who { font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
+	.w-fr { color: #e0a458; } .w-ha { color: #8fb8ff; } .w-ru { color: #7fd6c2; }
+	.fr-t { overflow: hidden; text-overflow: ellipsis; color: #cfc9bf; }
+	.fr-t i { font-style: normal; color: #7c776f; }
+	.fr-p { font-weight: 600; }
+	.p-on { color: #e8b73f; } .p-al { color: #ff6b70; } .p-off { color: #7c776f; } .p-v { color: #ece9e3; }
+
+	/* Rows are 26 px; the newest row sits at the bottom of the window. */
+	@keyframes cr-feed-scroll {
+		0%, 1.6% { transform: translateY(338px); }
+		2%, 3.6% { transform: translateY(312px); }
+		4%, 7.6% { transform: translateY(286px); }
+		8%, 9.6% { transform: translateY(234px); }
+		10%, 17.6% { transform: translateY(208px); }
+		18%, 25.6% { transform: translateY(182px); }
+		26%, 33.6% { transform: translateY(156px); }
+		34%, 35.1% { transform: translateY(130px); }
+		35.5%, 55.6% { transform: translateY(104px); }
+		56%, 57.6% { transform: translateY(78px); }
+		58%, 63.6% { transform: translateY(52px); }
+		64%, 69.6% { transform: translateY(26px); }
+		70%, 98.2% { transform: translateY(0); opacity: 1; }
+		99% { transform: translateY(0); opacity: 0; }
+		99.4% { transform: translateY(338px); opacity: 0; }
+		100% { transform: translateY(338px); opacity: 1; }
+	}
+	@keyframes cr-feed-flash {
+		0%, 1.9% { opacity: 0; } 2.2% { opacity: 1; } 3.9% { opacity: 0.2; } 4.2% { opacity: 1; } 6.5% { opacity: 0; }
+		7.9% { opacity: 0; } 8.2% { opacity: 1; } 9.9% { opacity: 0.2; } 10.2% { opacity: 1; } 13% { opacity: 0; }
+		17.9% { opacity: 0; } 18.2% { opacity: 1; } 21% { opacity: 0; }
+		25.9% { opacity: 0; } 26.2% { opacity: 1; } 29% { opacity: 0; }
+		33.9% { opacity: 0; } 34.2% { opacity: 1; } 35.4% { opacity: 0.2; } 35.7% { opacity: 1; } 38.5% { opacity: 0; }
+		55.9% { opacity: 0; } 56.2% { opacity: 1; } 57.9% { opacity: 0.2; } 58.2% { opacity: 1; } 61% { opacity: 0; }
+		63.9% { opacity: 0; } 64.2% { opacity: 1; } 67% { opacity: 0; }
+		69.9% { opacity: 0; } 70.2% { opacity: 1; } 73% { opacity: 0; }
+		100% { opacity: 0; }
+	}
+
+
+	.ru-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: #4ade80; box-shadow: 0 0 8px #4ade80; animation: cr-ru-live 2.8s ease-in-out infinite; }
+	@keyframes cr-ru-live { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+</style>

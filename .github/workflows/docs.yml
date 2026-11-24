@@ -1,20 +1,26 @@
 name: Docs
 
-# Builds the Starlight site in src/ruru-docs on pull requests that touch it,
-# and deploys it to GitHub Pages (https://kerwincarpede.github.io/ruru/)
-# when such a change reaches main. Pages must use "GitHub Actions" as its
-# source:
+# Builds the Starlight site in src/ruru-docs on pull requests that touch it
+# or the app's owl, and deploys it to GitHub Pages
+# (https://kerwincarpede.github.io/ruru/) when such a change reaches main.
+# Pages must use "GitHub Actions" as its source:
 #   gh api -X POST repos/kerwincarpede/ruru/pages -f build_type=workflow
 on:
   pull_request:
     paths:
       - src/ruru-docs/**
+      # The site draws the app's owl, and its build checks they match.
+      - src/ruru/src/app/Owl.tsx
+      - src/ruru/src/app/owl.css
       - package-lock.json
       - .github/workflows/docs.yml
   push:
     branches: [main]
     paths:
       - src/ruru-docs/**
+      # The site draws the app's owl, and its build checks they match.
+      - src/ruru/src/app/Owl.tsx
+      - src/ruru/src/app/owl.css
       - package-lock.json
       - .github/workflows/docs.yml
   workflow_dispatch:
