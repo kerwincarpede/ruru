@@ -255,6 +255,8 @@ export async function onWallCommand(handler: (command: WallCommand) => void): Pr
 
 /** Mirrors `HostControlsCredentials` in src-tauri/src/host_controls.rs. */
 export interface HostControlsCredentials {
+  /** Sign in with Ruru’s saved Home Assistant account; the others are ignored. */
+  shared: boolean;
   username: string;
   password: string;
 }

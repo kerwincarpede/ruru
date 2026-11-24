@@ -11,10 +11,11 @@ import {
 
 type Action = "test" | "enable" | "disable" | "toggle-reboot" | "authorise-reboot";
 
-/** Sets up the independent Ubuntu service with its own MQTT account. */
+/** Sets up the independent Ubuntu service, signed in with Ruru’s Home Assistant account or its own. */
 export default function HostControls({ mqttEnabled }: { mqttEnabled: boolean }) {
   const [status, setStatus] = useState<HostControlsStatus>();
   const [setup, setSetup] = useState(false);
+  const [shared, setShared] = useState(true);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [consent, setConsent] = useState(false);
@@ -44,13 +45,13 @@ export default function HostControls({ mqttEnabled }: { mqttEnabled: boolean }) 
 
   if (!status || !(status.supported || status.enabled || status.cleanupPending)) return null;
 
-  const ready = username.trim() !== "" && password !== "" && busy === undefined;
+  const ready = busy === undefined && (shared || (username.trim() !== "" && password !== ""));
 
   const perform = async (action: Action) => {
     setBusy(action);
     setError(undefined);
     setTested(false);
-    const credentials = { username, password };
+    const credentials = shared ? { shared, username: "", password: "" } : { shared, username, password };
     try {
       switch (action) {
         case "test":
@@ -153,45 +154,64 @@ export default function HostControls({ mqttEnabled }: { mqttEnabled: boolean }) 
       )}
       {setup && !status.enabled && !status.cleanupPending && (
         <>
-          <div className="field-row" onKeyDown={testOnEnter}>
-            <div className="field field-grow">
-              <label className="field-label" htmlFor="host-controls-username">
-                Host controls MQTT username
-              </label>
-              <input
-                id="host-controls-username"
-                type="text"
-                value={username}
-                autoComplete="off"
-                spellCheck={false}
-                disabled={busy !== undefined}
-                onChange={(event) => {
-                  setUsername(event.target.value);
-                  setTested(false);
-                }}
-              />
-            </div>
-            <div className="field field-grow">
-              <label className="field-label" htmlFor="host-controls-password">
-                Host controls MQTT password
-              </label>
-              <input
-                id="host-controls-password"
-                type="password"
-                aria-describedby="host-controls-password-hint"
-                value={password}
-                autoComplete="off"
-                disabled={busy !== undefined}
-                onChange={(event) => {
-                  setPassword(event.target.value);
-                  setTested(false);
-                }}
-              />
-            </div>
+          <div className="field-check">
+            <input
+              id="host-controls-shared"
+              type="checkbox"
+              aria-describedby="host-controls-shared-hint"
+              checked={shared}
+              disabled={busy !== undefined}
+              onChange={(event) => {
+                setShared(event.target.checked);
+                setTested(false);
+              }}
+            />
+            <label className="field-label" htmlFor="host-controls-shared">
+              Use Ruru’s Home Assistant account
+            </label>
+            <span id="host-controls-shared-hint" className="field-hint">
+              {shared
+                ? "The host agent signs in with the saved account above. Ruru copies its password to a file readable only by your desktop account, so the agent can connect while the wall is closed."
+                : "Enter another MQTT account on the saved broker. Ruru stores it in a file readable only by your desktop account."}
+            </span>
           </div>
-          <span id="host-controls-password-hint" className="field-hint">
-            Use an MQTT account dedicated to host controls on the saved broker. Ruru stores its credentials in a file readable only by your desktop account.
-          </span>
+          {!shared && (
+            <div className="field-row" onKeyDown={testOnEnter}>
+              <div className="field field-grow">
+                <label className="field-label" htmlFor="host-controls-username">
+                  Host controls MQTT username
+                </label>
+                <input
+                  id="host-controls-username"
+                  type="text"
+                  value={username}
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={busy !== undefined}
+                  onChange={(event) => {
+                    setUsername(event.target.value);
+                    setTested(false);
+                  }}
+                />
+              </div>
+              <div className="field field-grow">
+                <label className="field-label" htmlFor="host-controls-password">
+                  Host controls MQTT password
+                </label>
+                <input
+                  id="host-controls-password"
+                  type="password"
+                  value={password}
+                  autoComplete="off"
+                  disabled={busy !== undefined}
+                  onChange={(event) => {
+                    setPassword(event.target.value);
+                    setTested(false);
+                  }}
+                />
+              </div>
+            </div>
+          )}
           <div className="field-check">
             <input
               id="host-controls-consent"
@@ -217,7 +237,7 @@ export default function HostControls({ mqttEnabled }: { mqttEnabled: boolean }) 
             </button>
             {tested && (
               <p className="test-ok" role="status">
-                Connected with the host controls account.
+                {shared ? "Connected with Ruru’s Home Assistant account." : "Connected with the host controls account."}
               </p>
             )}
           </div>

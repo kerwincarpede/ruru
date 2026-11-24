@@ -17,7 +17,7 @@ const available: HostControlsStatus = {
 };
 
 describe("Settings, host controls", () => {
-  it("tests separate credentials and requires consent before enabling the service", async () => {
+  it("uses Ruru’s Home Assistant account by default and requires consent before enabling the service", async () => {
     const calls = mockCommands({
       host_controls_status: () => available,
       test_host_controls: () => null,
@@ -25,8 +25,34 @@ describe("Settings, host controls", () => {
     });
     render(<HostControls mqttEnabled />);
     fireEvent.click(await screen.findByRole("button", { name: "Enable host controls" }));
+    expect(screen.getByRole("checkbox", { name: /Use Ruru’s Home Assistant account/ })).toBeChecked();
+    expect(screen.queryByLabelText("Host controls MQTT username")).toBeNull();
     const enable = screen.getByRole("button", { name: "Enable and restart Ruru" });
     expect(enable).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Test host controls connection" }));
+    expect(await screen.findByText("Connected with Ruru’s Home Assistant account.")).toBeVisible();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Let Ruru manage its user service/ }));
+    fireEvent.click(enable);
+    const shared = { shared: true, username: "", password: "" };
+    await waitFor(() => expect(calls).toContainEqual({
+      cmd: "enable_host_controls",
+      payload: { credentials: shared, consent: true },
+    }));
+    expect(calls).toContainEqual({ cmd: "test_host_controls", payload: { credentials: shared } });
+  });
+
+  it("tests a separate account when the user chooses one", async () => {
+    const calls = mockCommands({
+      host_controls_status: () => available,
+      test_host_controls: () => null,
+      enable_host_controls: () => null,
+    });
+    render(<HostControls mqttEnabled />);
+    fireEvent.click(await screen.findByRole("button", { name: "Enable host controls" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Use Ruru’s Home Assistant account/ }));
+    const enable = screen.getByRole("button", { name: "Enable and restart Ruru" });
+    expect(enable).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Test host controls connection" })).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Host controls MQTT username"), { target: { value: "agent" } });
     fireEvent.change(screen.getByLabelText("Host controls MQTT password"), { target: { value: "password" } });
     fireEvent.click(screen.getByRole("button", { name: "Test host controls connection" }));
@@ -36,11 +62,11 @@ describe("Settings, host controls", () => {
     fireEvent.click(enable);
     await waitFor(() => expect(calls).toContainEqual({
       cmd: "enable_host_controls",
-      payload: { credentials: { username: "agent", password: "password" }, consent: true },
+      payload: { credentials: { shared: false, username: "agent", password: "password" }, consent: true },
     }));
     expect(calls).toContainEqual({
       cmd: "test_host_controls",
-      payload: { credentials: { username: "agent", password: "password" } },
+      payload: { credentials: { shared: false, username: "agent", password: "password" } },
     });
   });
 
