@@ -6,6 +6,7 @@ import { AUTO_SETTLE_MS, automaticStream, knownWidth, recordWidth, type StreamKi
 import { objectChip } from "./activity";
 import Owl from "../app/Owl";
 import TileDiagnostics from "./TileDiagnostics";
+import { useLasting } from "../app/useLasting";
 
 interface TileProps {
   base: string;
@@ -32,10 +33,18 @@ interface TileProps {
   onProblem?: (problem: boolean) => void;
   /** Told each time the tile starts playing video. */
   onPlaying?: () => void;
+  /** Told whether the tile is reconnecting or frozen right now, as soon as that changes. */
+  onReconnecting?: (reconnecting: boolean) => void;
 }
 
 /** How long a tile reconnects, or stays frozen, before it counts as a problem. */
 export const PROBLEM_AFTER_MS = 30_000;
+/**
+ * How long a reconnecting tile keeps its dimmed last frame. After that, or
+ * at once when it has no frame of its own, the tile shows the owl instead,
+ * so the wall never passes off an old picture as the camera's view.
+ */
+export const KEEP_FROZEN_MS = 30_000;
 
 /** A player state with a picture on screen. */
 const showing = (state: PlayerState) => state === "playing" || state === "stalled";
@@ -118,24 +127,6 @@ function useClock(active: boolean) {
   return [now, tick] as const;
 }
 
-/**
- * Whether a tile has a problem: at once when it has `failed`, and once it
- * has been in `trouble` (reconnecting or frozen) for {@link PROBLEM_AFTER_MS}.
- * Each spell of trouble starts the wait again.
- */
-function useProblem(failed: boolean, trouble: boolean): boolean {
-  const [spell, setSpell] = useState({ trouble: false, count: 0 });
-  if (spell.trouble !== trouble) setSpell({ trouble, count: spell.count + (trouble ? 1 : 0) });
-  const [late, setLate] = useState(0);
-  useEffect(() => {
-    if (!trouble) return;
-    const count = spell.count;
-    const timer = setTimeout(() => setLate(count), PROBLEM_AFTER_MS);
-    return () => clearTimeout(timer);
-  }, [trouble, spell.count]);
-  return failed || (trouble && spell.count > 0 && late === spell.count);
-}
-
 type Slots = { front: 0 | 1; streams: [string | null, string | null] };
 
 /**
@@ -144,7 +135,7 @@ type Slots = { front: 0 | 1; streams: [string | null, string | null] };
  * frame shows, so the picture never stops moving; a stream the webview
  * cannot decode gives way to the camera's other stream.
  */
-export default function Tile({ base, camera, choice, live, maximised = false, reconnect = 0, refresh = 0, editing = false, streamInfo = false, activity, onOpen, onHide, onAutomatic, onProblem, onPlaying }: TileProps) {
+export default function Tile({ base, camera, choice, live, maximised = false, reconnect = 0, refresh = 0, editing = false, streamInfo = false, activity, onOpen, onHide, onAutomatic, onProblem, onPlaying, onReconnecting }: TileProps) {
   const figure = useRef<HTMLElement>(null);
   const videoA = useRef<HTMLVideoElement>(null);
   const videoB = useRef<HTMLVideoElement>(null);
@@ -235,11 +226,25 @@ export default function Tile({ base, camera, choice, live, maximised = false, re
   const [troubled, setTroubled] = useState(false);
   const troubleNow = live && frontState !== "playing" && (troubled || frontState === "stalled" || frontState === "retrying");
   if (troubled !== troubleNow) setTroubled(troubleNow);
-  const problem = useProblem(failed, troubleNow && !failed);
+  const reconnecting = troubleNow && !failed;
+  const lastingTrouble = useLasting(reconnecting, PROBLEM_AFTER_MS);
+  const problem = failed || lastingTrouble;
+  // The dimmed last frame stays up only while it is recent; then the owl takes over.
+  const held = playing || (stale && frozen);
+  const recent = frozenAt !== null && clock - frozenAt < KEEP_FROZEN_MS;
+  const lost = reconnecting && !(held && recent);
+  if (lost) status = null;
   const reportProblem = useRef(onProblem);
   useEffect(() => {
     reportProblem.current = onProblem;
   });
+  const reportReconnecting = useRef(onReconnecting);
+  useEffect(() => {
+    reportReconnecting.current = onReconnecting;
+  });
+  useEffect(() => {
+    reportReconnecting.current?.(reconnecting);
+  }, [reconnecting]);
   const reportPlaying = useRef(onPlaying);
   useEffect(() => {
     reportPlaying.current = onPlaying;
@@ -262,10 +267,10 @@ export default function Tile({ base, camera, choice, live, maximised = false, re
 
   // Frigate has no snapshot for a camera that is offline or still starting.
   const [noSnapshot, setNoSnapshot] = useState(false);
-  const waiting = noSnapshot && !playing && !(stale && frozen);
+  const waiting = noSnapshot && !playing && !(stale && frozen) && !lost;
   const objects = Object.entries(activity?.objects ?? {}).filter(([, count]) => count > 0);
   const alert = activity?.review === "alert";
-  const className = ["tile", playing && "is-playing", stale && "is-stale", maximised && "is-maximised", editing && "is-editing", activity?.motion && "has-motion", alert && "is-alert"].filter(Boolean).join(" ");
+  const className = ["tile", playing && "is-playing", stale && "is-stale", reconnecting && "is-reconnecting", lost && "is-lost", maximised && "is-maximised", editing && "is-editing", activity?.motion && "has-motion", alert && "is-alert"].filter(Boolean).join(" ");
   return (
     <figure ref={figure} className={className} aria-label={label} data-camera={camera.name} onDoubleClick={editing ? undefined : onOpen}>
       <img className="tile-snapshot" src={`${snapshotUrl(base, camera.name)}${refresh ? `?t=${refresh}` : ""}`} alt="" draggable={false} onLoad={() => setNoSnapshot(false)} onError={() => setNoSnapshot(true)} />
@@ -275,7 +280,13 @@ export default function Tile({ base, camera, choice, live, maximised = false, re
           Waiting for a picture
         </div>
       )}
-      <canvas ref={freeze} className={`tile-freeze${stale && frozen && !playing ? " is-shown" : ""}`} aria-hidden="true" />
+      <canvas ref={freeze} className={`tile-freeze${stale && frozen && !playing && !lost ? " is-shown" : ""}`} aria-hidden="true" />
+      {lost && (
+        <div className="tile-waiting tile-lost">
+          <Owl mood="searching" className="on-wall" />
+          Reconnecting…
+        </div>
+      )}
       {([0, 1] as const).map((slot) => (
         <video
           key={slot}

@@ -162,6 +162,20 @@
   animation: owl-sleepy-blink 11s ease-in-out infinite;
 }
 
+/* Searching: quick looks left and right while the glow swells and fades,
+   like a call going out and waiting for an answer. */
+.owl.is-searching .owl-pupil {
+  animation: owl-search 3.2s ease-in-out infinite;
+}
+
+.owl.is-searching .owl-glow {
+  animation: owl-pulse 1.6s ease-in-out infinite;
+}
+
+.owl.is-searching .owl-eye {
+  animation: owl-blink 6.4s ease-in-out 1s infinite;
+}
+
 @keyframes owl-blink {
   0%,
   94%,
@@ -336,6 +350,31 @@
   90%,
   93% {
     transform: scaleY(0.12);
+  }
+}
+
+@keyframes owl-search {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20%,
+  35% {
+    transform: translateX(-13px);
+  }
+  65%,
+  80% {
+    transform: translateX(13px);
+  }
+}
+
+@keyframes owl-pulse {
+  0%,
+  100% {
+    opacity: calc(var(--owl-glow) * 0.4);
+  }
+  50% {
+    opacity: calc(var(--owl-glow) * 1.6);
   }
 }
 

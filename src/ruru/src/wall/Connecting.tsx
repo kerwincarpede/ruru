@@ -12,7 +12,9 @@ type ConnectingProps =
    */
   | { stage: "frigate"; server: string; error?: string | null; attempt?: number; onRetry: () => void; onSettings: () => void }
   /** The cameras are known and their tiles are starting their streams, `connected` in the order they started. */
-  | { stage: "cameras"; cameras: string[]; connected: string[] };
+  | { stage: "cameras"; cameras: string[]; connected: string[] }
+  /** Most tiles lost their video at once, such as while Frigate restarts. */
+  | { stage: "reconnecting"; cameras: string[]; reconnecting: string[] };
 
 /** What the wall says when Frigate's cameras could not be read. */
 function problemText(error: string, server: string) {
@@ -41,8 +43,38 @@ function problemText(error: string, server: string) {
   }
 }
 
-/** Covers the wall while Ruru first reaches Frigate and its cameras. */
+/** A dot per camera, lit once it plays, or a bar when there are too many. */
+function CameraDots({ cameras, isOn, offLabel }: { cameras: string[]; isOn: (camera: string) => boolean; offLabel: string }) {
+  const total = cameras.length;
+  const done = cameras.filter(isOn).length;
+  return total <= MAX_DOTS ? (
+    <ul className="wall-notice-dots" aria-label="Cameras">
+      {cameras.map((camera) => {
+        const on = isOn(camera);
+        return <li key={camera} className={on ? "is-on" : undefined} aria-label={`${cameraLabel(camera)}: ${on ? "connected" : offLabel}`} />;
+      })}
+    </ul>
+  ) : (
+    <div className="wall-notice-progress" role="progressbar" aria-label="Cameras connected" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>
+      <span style={{ width: `${(done / total) * 100}%` }} />
+    </div>
+  );
+}
+
+/** Covers the wall while Ruru first reaches Frigate and its cameras, and while most of them reconnect. */
 export default function Connecting(props: ConnectingProps) {
+  if (props.stage === "reconnecting") {
+    const { cameras, reconnecting } = props;
+    const down = cameras.filter((camera) => reconnecting.includes(camera)).length;
+    return (
+      <WallNotice mood="searching" title="Reconnecting to Frigate" overlay>
+        <p>
+          {down} of {cameras.length} cameras lost their video. Ruru keeps trying on its own.
+        </p>
+        <CameraDots cameras={cameras} isOn={(camera) => !reconnecting.includes(camera)} offLabel="reconnecting" />
+      </WallNotice>
+    );
+  }
   if (props.stage === "cameras") {
     const { cameras, connected } = props;
     const done = cameras.filter((camera) => connected.includes(camera)).length;
@@ -55,18 +87,7 @@ export default function Connecting(props: ConnectingProps) {
         <p className="wall-notice-count">
           {done} of {total} {total === 1 ? "camera" : "cameras"} connected
         </p>
-        {total <= MAX_DOTS ? (
-          <ul className="wall-notice-dots" aria-label="Cameras">
-            {cameras.map((camera) => {
-              const on = connected.includes(camera);
-              return <li key={camera} className={on ? "is-on" : undefined} aria-label={`${cameraLabel(camera)}: ${on ? "connected" : "connecting"}`} />;
-            })}
-          </ul>
-        ) : (
-          <div className="wall-notice-progress" role="progressbar" aria-label="Cameras connected" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>
-            <span style={{ width: `${(done / total) * 100}%` }} />
-          </div>
-        )}
+        <CameraDots cameras={cameras} isOn={(camera) => connected.includes(camera)} offLabel="connecting" />
       </WallNotice>
     );
   }

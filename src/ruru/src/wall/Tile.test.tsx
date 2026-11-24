@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Camera } from "../app/frigate";
 import { forgetFailures, retryDelay, STALE_MS, STALL_CHECK_MS, STALL_MS } from "./player";
 import { AUTO_SETTLE_MS, forgetWidths } from "./streams";
-import Tile, { PROBLEM_AFTER_MS } from "./Tile";
+import Tile, { KEEP_FROZEN_MS, PROBLEM_AFTER_MS } from "./Tile";
 
 class FakeSocket {
   static all: FakeSocket[] = [];
@@ -49,6 +49,12 @@ function videoFor(stream: string): HTMLVideoElement {
   if (!video) throw new Error(`No video plays ${stream}`);
   Object.defineProperty(video, "readyState", { configurable: true, value: 4 });
   return video;
+}
+
+/** Gives `video` a decoded picture, so the tile can keep its last frame. */
+function withPicture(video: HTMLVideoElement) {
+  Object.defineProperty(video, "videoWidth", { configurable: true, value: 640 });
+  Object.defineProperty(video, "videoHeight", { configurable: true, value: 360 });
 }
 
 const fire = (target: EventTarget, type: string) => act(() => {
@@ -119,6 +125,7 @@ describe("Tile", () => {
 
   it("dims a frozen picture and says how old it is", () => {
     render(<Tile base={base} camera={camera} live />);
+    withPicture(videoFor("cam_sub"));
     fire(videoFor("cam_sub"), "playing");
     const figure = screen.getByRole("figure");
     act(() => vi.advanceTimersByTime(STALE_MS));
@@ -132,6 +139,42 @@ describe("Tile", () => {
     fire(videoFor("cam_sub"), "playing");
     expect(figure).not.toHaveClass("is-stale");
     expect(figure).toHaveTextContent(/^Cam$/);
+  });
+
+  it("swaps a frozen picture for the owl once it is old, and never falls back to the snapshot", () => {
+    render(<Tile base={base} camera={camera} live />);
+    withPicture(videoFor("cam_sub"));
+    fire(videoFor("cam_sub"), "playing");
+    const figure = screen.getByRole("figure");
+    act(() => vi.advanceTimersByTime(STALL_MS));
+    expect(figure).toHaveClass("is-reconnecting");
+    expect(figure).toHaveTextContent("Cam · Reconnecting · 10 s old");
+    expect(document.querySelector(".tile-freeze")).toHaveClass("is-shown");
+    act(() => vi.advanceTimersByTime(KEEP_FROZEN_MS - STALL_MS));
+    expect(figure).toHaveClass("is-lost");
+    expect(figure).toHaveTextContent("Reconnecting…");
+    // The caption no longer gives an age, since no old picture is shown.
+    expect(figure.querySelector("figcaption")).toHaveTextContent(/^Cam$/);
+    expect(document.querySelector(".tile-freeze")).not.toHaveClass("is-shown");
+    // Video coming back puts the owl away.
+    fire(videoFor("cam_sub"), "playing");
+    expect(figure).not.toHaveClass("is-lost");
+    expect(figure).not.toHaveClass("is-reconnecting");
+  });
+
+  it("shows the owl at once when it reconnects with no frame of its own", () => {
+    const onReconnecting = vi.fn();
+    render(<Tile base={base} camera={camera} live onReconnecting={onReconnecting} />);
+    expect(onReconnecting).toHaveBeenLastCalledWith(false);
+    act(() => FakeSocket.all[0].onclose?.());
+    const figure = screen.getByRole("figure");
+    expect(figure).toHaveClass("is-lost");
+    expect(figure).toHaveTextContent("Reconnecting…");
+    expect(onReconnecting).toHaveBeenLastCalledWith(true);
+    act(() => vi.advanceTimersByTime(retryDelay(0)));
+    withPicture(videoFor("cam_sub"));
+    fire(videoFor("cam_sub"), "playing");
+    expect(onReconnecting).toHaveBeenLastCalledWith(false);
   });
 
   it("reports a problem once a tile has been frozen or reconnecting for a while", () => {

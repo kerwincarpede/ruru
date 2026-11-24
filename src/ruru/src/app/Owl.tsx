@@ -11,8 +11,9 @@ import "./owl.css";
  * - `closed`: shut eyes, with one eye peeking open now and then (every camera hidden).
  * - `asleep`: shut eyes, breathing brows and a drifting "z" (streams off).
  * - `dim`: small and quiet, with a slow sleepy blink (a tile with no picture).
+ * - `searching`: pupils dart side to side while the eyes' glow pulses (reconnecting).
  */
-export type OwlMood = "awake" | "scanning" | "counting" | "drowsy" | "puzzled" | "closed" | "asleep" | "dim";
+export type OwlMood = "awake" | "scanning" | "counting" | "drowsy" | "puzzled" | "closed" | "asleep" | "dim" | "searching";
 
 interface OwlProps {
   mood: OwlMood;
