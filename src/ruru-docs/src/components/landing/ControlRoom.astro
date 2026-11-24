@@ -160,7 +160,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 			for (const element of outside()) element.inert = open;
 			if (open) tilt = { x: 0, y: 0 };
 			applyTilt();
-			if (open && moveFocus) heading.focus({ preventScroll: true });
+			if (open) heading.focus({ preventScroll: true });
 			if (!open && (moveFocus || hadFocus)) owl.focus({ preventScroll: true });
 		};
 
@@ -181,6 +181,12 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 			closing = window.setTimeout(() => setOpen(false), 380);
 		});
 		back.addEventListener('click', () => setOpen(false, true));
+		// Tab stays in the story while it's open: the heading and Back to the wall.
+		story.addEventListener('keydown', (event) => {
+			if (event.key !== 'Tab') return;
+			event.preventDefault();
+			(document.activeElement === back ? heading : back).focus();
+		});
 		document.addEventListener('keydown', (event) => {
 			if (event.key === 'Escape' && isOpen()) setOpen(false, true);
 		});
@@ -978,6 +984,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 		color: var(--ru-text);
 	}
 	.is-paused,
+	.is-paused::before,
 	.is-paused :global(*),
 	.is-paused :global(*::before),
 	.is-paused :global(*::after) {
@@ -1130,12 +1137,16 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 	/* Without motion, the wall holds still at the alert, so it still shows what Ruru does. */
 	@media (prefers-reduced-motion: reduce) {
 		.cr,
+		.cr::before,
 		.cr :global(*),
 		.cr :global(*::before),
 		.cr :global(*::after) {
 			animation-delay: calc(var(--loop) * -0.3) !important;
 			animation-play-state: paused !important;
 			transition: none !important;
+		}
+		.pc-pause {
+			display: none;
 		}
 	}
 
