@@ -267,7 +267,8 @@
   scroll-margin-bottom: 16px;
 }
 
-.settings-results > .test-failed {
+.settings-results > .test-failed,
+.settings-section > .test-failed {
   margin: 0;
   font-size: 0.9rem;
 }

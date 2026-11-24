@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import SettingsDialog from "./SettingsDialog";
-import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, type MqttSettings, type Settings } from "../app/api";
+import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, type HostControlsStatus, type MqttSettings, type Settings } from "../app/api";
 import { mockCommands, type CommandCall } from "../test/mockCommands";
 function mqttCalls(calls: CommandCall[]): CommandCall[] {
   return calls.filter(({ cmd }) => cmd !== "host_controls_status");
@@ -166,5 +166,27 @@ describe("SettingsDialog Home Assistant page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Enter a port from 1 to 65535.");
     expect(mqttCalls(calls)).toEqual([]);
+  });
+
+  it("tests host controls on Enter in their fields instead of saving the broker", async () => {
+    const status: HostControlsStatus = { supported: true, enabled: false, connected: false, cleanupPending: false, message: null };
+    const calls = mockCommands({
+      host_controls_status: () => status,
+      test_host_controls: () => null,
+      save_mqtt: () => empty,
+    });
+    const { onClose } = openHomeAssistant({ enabled: true, host: "ha.local" });
+    expect(await screen.findByRole("region", { name: "Host controls" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Enable host controls" }));
+    type("Host controls MQTT username", "agent");
+    type("Host controls MQTT password", "password");
+    const password = screen.getByLabelText<HTMLInputElement>("Host controls MQTT password");
+    // jsdom has no implicit submission, so do what the browser does when Enter is not handled.
+    if (fireEvent.keyDown(password, { key: "Enter" })) password.form?.requestSubmit();
+    expect(await screen.findByText("Connected with the host controls account.")).toBeVisible();
+    expect(calls).toContainEqual({ cmd: "test_host_controls", payload: { credentials: { username: "agent", password: "password" } } });
+    expect(calls.map(({ cmd }) => cmd)).not.toContain("save_mqtt");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(password).toHaveValue("password");
   });
 });
