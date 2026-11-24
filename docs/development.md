@@ -80,6 +80,8 @@ The Linux Tauri overlay includes the user agent unit and the managed wall unit o
 
 Use a disposable GNOME Wayland machine, a separate MQTT 5 account scoped to the agent topics, Home Assistant, and synthetic Frigate streams for verification. Verify the display state after local input as well as after a command. Exercise local opening, a remote stop then start, and the three updater paths. Check that the service’s main PID changes once per relaunch, remains inside `ruru.service`, and that CPU sampling starts over. Check that turning the feature off restores the previous service and GNOME autostart files. Use `systemctl --user status ruru.service ruru-host-agent.service` and the user journal to diagnose failures.
 
+The `.deb` also packages the standard reboot approval helper and its polkit action. Installation grants no reboot permission. To exercise approval and reboot, use a disposable Ubuntu GNOME Wayland host, a test broker and synthetic Frigate video. Confirm the boot ID changes and verify the agent reconnects and one managed Ruru process starts at graphical sign-in. Check the desktop policy and an inhibitor before sending a Home Assistant reboot request.
+
 ## Checks
 
 Run these from `src/ruru/` before you push:
@@ -116,9 +118,6 @@ python3 -m unittest discover .github/scripts
 Checks measures coverage while it runs the tests. `npm run test:coverage` fails below 90% of lines or 83% of branches. `cargo llvm-cov` (pinned in `ci.yml`, and needing the `llvm-tools-preview` rustup component) prints a line summary in the job log and fails below 61% of lines (1 point below the coverage measured when the floor was set; raise it as Rust code gains tests). The HTML and lcov reports for both are uploaded as one `coverage` artifact, even when a test or a floor fails.
 
 On Windows, Tauri embeds the Common Controls 6 manifest only in the app, so the test executables would fail to start. `build.rs` turns that off and has the linker embed `windows-app-manifest.xml`, the same manifest, in every binary instead.
-
-
-The `.deb` also packages the standard reboot approval helper and its polkit action. Installation grants no reboot permission. To exercise approval and reboot, use a disposable Ubuntu GNOME Wayland host, a test broker and synthetic Frigate video. Confirm the boot ID changes and verify the agent reconnects and one managed Ruru process starts at graphical sign-in. Check the desktop policy and an inhibitor before sending a Home Assistant reboot request.
 
 ### Packaging
 
