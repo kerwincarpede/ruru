@@ -60,6 +60,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 						<HeroWall />
 					</div>
 				</div>
+				<button class="pc-pause" type="button" aria-pressed="false" data-cr-pause>Pause</button>
 			</div>
 
 			<div class="pc-call-wrap" aria-hidden="true">
@@ -81,16 +82,16 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 				</div>
 			</div>
 
-			<section id="cr-story" class="pc-story" aria-labelledby="cr-story-title" data-cr-story>
+			<section id="cr-story" class="pc-story" role="dialog" aria-modal="true" aria-labelledby="cr-story-title" data-cr-story>
 				<div class="pc-story-owl" aria-hidden="true"><Owl mood="awake" id="cr-story-owl-" class="on-wall" follow /></div>
 				<p class="pc-kick">Ruru · say “roo-roo” · te reo Māori</p>
-				<h2 id="cr-story-title">Named after a small owl that keeps watch all night.</h2>
+				<h2 id="cr-story-title" tabindex="-1">Named after a small owl that keeps watch all night.</h2>
 				<div class="pc-cols">
 					<div class="pc-col">
 						<small>The bird</small>
 						<h3>New Zealand's own owl</h3>
 						<p>
-							The ruru, or morepork, is New Zealand's only surviving native owl. Small and brown, it's heard far more often than seen,
+							The ruru, or morepork, is a small native owl found in forests all over New Zealand. It's heard far more often than seen,
 							hunting through the night with <em>big yellow eyes</em>.
 						</p>
 					</div>
@@ -126,7 +127,10 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 	const back = hero?.querySelector<HTMLButtonElement>('[data-cr-back]');
 	const par = hero?.querySelector<HTMLElement>('[data-cr-par]');
 
-	if (hero && owl && story && back && par) {
+	const pause = hero?.querySelector<HTMLButtonElement>('[data-cr-pause]');
+	const heading = story?.querySelector<HTMLElement>('h2');
+
+	if (hero && owl && story && back && par && pause && heading) {
 		/** The width at which the whole scene shows; narrower, the story opens over the page. */
 		const wide = window.matchMedia('(min-width: 1000px)');
 		const still = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -135,17 +139,29 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 		let frame = 0;
 		let tilt = { x: 0, y: 0 };
 
+		// While the story is open, everything else on the page is out of reach,
+		// as in a modal dialog: the page around the hero and the hero's own copy,
+		// TV and steps.
+		const outside = () => [
+			...[...document.body.children].filter((element) => !element.contains(hero)),
+			...[...(hero.closest('main')?.children ?? [])].filter((element) => element !== hero),
+			...hero.querySelectorAll<HTMLElement>('.cr-copy, .pc-tv, .pc-steps'),
+		];
+
 		const isOpen = () => hero.classList.contains('is-story');
 		const setOpen = (open: boolean, moveFocus = false) => {
 			window.clearTimeout(opening);
 			window.clearTimeout(closing);
 			if (open === isOpen()) return;
+			const hadFocus = story.contains(document.activeElement);
 			hero.classList.toggle('is-story', open);
 			hero.classList.remove('is-hint');
 			owl.setAttribute('aria-expanded', String(open));
+			for (const element of outside()) element.inert = open;
 			if (open) tilt = { x: 0, y: 0 };
 			applyTilt();
-			if (moveFocus) (open ? back : owl).focus({ preventScroll: true });
+			if (open && moveFocus) heading.focus({ preventScroll: true });
+			if (!open && (moveFocus || hadFocus)) owl.focus({ preventScroll: true });
 		};
 
 		// Hover: a short pause first, so passing over the owl doesn't open it.
@@ -167,6 +183,13 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 		back.addEventListener('click', () => setOpen(false, true));
 		document.addEventListener('keydown', (event) => {
 			if (event.key === 'Escape' && isOpen()) setOpen(false, true);
+		});
+
+		// Pause stops the whole story at once, so the wall, the feed and the card stay in step.
+		pause.addEventListener('click', () => {
+			const paused = hero.classList.toggle('is-paused');
+			pause.setAttribute('aria-pressed', String(paused));
+			pause.textContent = paused ? 'Play' : 'Pause';
 		});
 
 		// The scene leans a little towards the pointer.
@@ -372,7 +395,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 
 	.pc-phone {
 		position: absolute;
-		left: 990px;
+		left: 964px;
 		top: 236px;
 		width: 236px;
 		height: 480px;
@@ -424,7 +447,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 
 	.pc-term {
 		position: absolute;
-		left: -24px;
+		left: 0;
 		top: 574px;
 		width: 440px;
 		rotate: y 8deg;
@@ -537,7 +560,6 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 		border: 1px solid var(--ru-hair);
 		border-radius: 14px;
 		background: rgb(255 255 255 / 2.5%);
-		opacity: 0.5;
 	}
 	.pc-step small {
 		display: block;
@@ -939,10 +961,33 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 		transition-delay: 1.15s;
 	}
 
+	.pc-pause {
+		position: absolute;
+		right: 0;
+		top: calc(100% + 14px);
+		min-height: 32px;
+		padding: 0 14px;
+		border: 1px solid var(--ru-hair-strong);
+		border-radius: 999px;
+		background: rgb(255 255 255 / 4%);
+		color: var(--ru-muted);
+		font: 560 12.5px/1 var(--ru-font-sans);
+		cursor: pointer;
+	}
+	.pc-pause:hover {
+		color: var(--ru-text);
+	}
+	.is-paused,
+	.is-paused :global(*),
+	.is-paused :global(*::before),
+	.is-paused :global(*::after) {
+		animation-play-state: paused !important;
+	}
+
 	/* Smaller desktops: the same scene, a little smaller. */
-	@media (min-width: 1000px) and (max-width: 1239px) {
+	@media (min-width: 1000px) and (max-width: 1299px) {
 		.pc-scene {
-			zoom: 0.82;
+			zoom: 0.76;
 		}
 	}
 
@@ -972,7 +1017,10 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 			top: auto;
 			grid-column: 1 / -1;
 			width: auto;
-			margin-top: 13%;
+			margin: 13% 0 34px;
+		}
+		.pc-pause {
+			top: calc(100% + 8px);
 		}
 		.pc-owl {
 			top: auto;
@@ -1082,9 +1130,9 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 	/* Without motion, the wall holds still at the alert, so it still shows what Ruru does. */
 	@media (prefers-reduced-motion: reduce) {
 		.cr,
-		.cr *,
-		.cr *::before,
-		.cr *::after {
+		.cr :global(*),
+		.cr :global(*::before),
+		.cr :global(*::after) {
 			animation-delay: calc(var(--loop) * -0.3) !important;
 			animation-play-state: paused !important;
 			transition: none !important;
@@ -1217,15 +1265,15 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 	@keyframes cr-s1 {
 		0%,
 		7.6% {
-			opacity: 0.5;
+			border-color: rgb(255 255 255 / 8%);
 		}
 		8.2%,
 		17.6% {
-			opacity: 1;
+			border-color: rgb(243 200 141 / 50%);
 		}
 		18.4%,
 		100% {
-			opacity: 0.5;
+			border-color: rgb(255 255 255 / 8%);
 		}
 	}
 	@keyframes cr-b1 {
@@ -1244,15 +1292,15 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 	@keyframes cr-s2 {
 		0%,
 		17.6% {
-			opacity: 0.5;
+			border-color: rgb(255 255 255 / 8%);
 		}
 		18.2%,
 		33.6% {
-			opacity: 1;
+			border-color: rgb(243 200 141 / 50%);
 		}
 		34.4%,
 		100% {
-			opacity: 0.5;
+			border-color: rgb(255 255 255 / 8%);
 		}
 	}
 	@keyframes cr-b2 {
@@ -1271,15 +1319,15 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 	@keyframes cr-s3 {
 		0%,
 		33.6% {
-			opacity: 0.5;
+			border-color: rgb(255 255 255 / 8%);
 		}
 		34.2%,
 		59.6% {
-			opacity: 1;
+			border-color: rgb(243 200 141 / 50%);
 		}
 		60.4%,
 		100% {
-			opacity: 0.5;
+			border-color: rgb(255 255 255 / 8%);
 		}
 	}
 	@keyframes cr-b3 {
@@ -1298,15 +1346,15 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 	@keyframes cr-s4 {
 		0%,
 		71.6% {
-			opacity: 0.5;
+			border-color: rgb(255 255 255 / 8%);
 		}
 		72.2%,
 		93.6% {
-			opacity: 1;
+			border-color: rgb(243 200 141 / 50%);
 		}
 		94.4%,
 		100% {
-			opacity: 0.5;
+			border-color: rgb(255 255 255 / 8%);
 		}
 	}
 	@keyframes cr-b4 {
