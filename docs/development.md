@@ -76,7 +76,7 @@ npm run tauri build
 
 ### Ubuntu host controls
 
-The Linux Tauri overlay includes the user agent unit and the managed wall unit only in the `.deb`. The agent runs the packaged binary with `--host-agent` without creating a Tauri window. Open an installed Ubuntu build in a GNOME Wayland session to exercise **Settings → Home Assistant → Enable host controls**.
+The Linux Tauri overlay includes the user agent unit and the managed wall unit only in the `.deb`. The agent runs the packaged binary with `--host-agent` without creating a Tauri window. The managed wall waits for GNOME’s Wayland display at login before creating its Tauri window and then reports readiness to systemd. Open an installed Ubuntu build in a GNOME Wayland session to exercise **Settings → Home Assistant → Enable host controls**.
 
 Use a disposable GNOME Wayland machine, a separate MQTT 5 account scoped to the agent topics, Home Assistant, and synthetic Frigate streams for verification. Verify the display state after local input as well as after a command. Exercise local opening, a remote stop then start, and the three updater paths. Check that the service’s main PID changes once per relaunch, remains inside `ruru.service`, and that CPU sampling starts over. Check that turning the feature off restores the previous service and GNOME autostart files. Use `systemctl --user status ruru.service ruru-host-agent.service` and the user journal to diagnose failures.
 

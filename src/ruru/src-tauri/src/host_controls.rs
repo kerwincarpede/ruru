@@ -29,7 +29,9 @@ pub fn dispatch() -> Option<Result<(), String>> {
         Err(error) => Some(Err(error)),
         Ok(false) => Some(Ok(())),
         Ok(true) if mode.as_deref() == Some("--managed-wall") && !setup::enabled() => Some(Ok(())),
-        Ok(true) if mode.as_deref() == Some("--managed-wall") => None,
+        Ok(true) if mode.as_deref() == Some("--managed-wall") => {
+            system::prepare_managed_wall().err().map(Err)
+        }
         Ok(true) if setup::enabled() && system::in_wall_service() => Some(Ok(())),
         Ok(true) if setup::enabled() => Some(system::open_wall()),
         Ok(true) => None,

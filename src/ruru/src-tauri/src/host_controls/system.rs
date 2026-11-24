@@ -1,4 +1,13 @@
-use std::{fs, os::unix::fs::OpenOptionsExt, path::Path, process::Command};
+use std::{
+    env,
+    ffi::OsStr,
+    fs,
+    os::unix::{fs::OpenOptionsExt, net::UnixStream, process::CommandExt},
+    path::Path,
+    process::Command,
+    thread,
+    time::{Duration, Instant},
+};
 
 pub(super) const WALL: &str = "ruru.service";
 pub(super) const AGENT: &str = "ruru-host-agent.service";
@@ -105,6 +114,92 @@ pub(super) fn change_wall(on: bool) -> Result<(), String> {
             )
         }))
     }
+}
+
+/// Waits for the graphical session before Tauri tries to initialise GTK.
+pub(super) fn prepare_managed_wall() -> Result<(), String> {
+    let runtime =
+        env::var_os("XDG_RUNTIME_DIR").ok_or("Could not locate the session runtime directory.")?;
+    let runtime = Path::new(&runtime);
+    if env::var_os("WAYLAND_DISPLAY").is_some_and(|display| wayland_listening(runtime, &display)) {
+        return Ok(());
+    }
+
+    // The user manager imports the display environment during GNOME startup.
+    // A service already started during login keeps its old environment.
+    let deadline = Instant::now() + Duration::from_secs(22);
+    while Instant::now() < deadline {
+        if let Some(environment) =
+            manager_environment().and_then(|entries| display_environment(runtime, &entries))
+        {
+            let mut wall = Command::new("/usr/bin/ruru");
+            // Keep the service's PID, cgroup, notify socket and invocation
+            // while giving GTK the environment from the session now listening.
+            wall.args(env::args_os().skip(1))
+                .env_remove("DISPLAY")
+                .env_remove("XAUTHORITY")
+                .envs(environment);
+            return Err(format!("Could not launch the Ruru wall: {}", wall.exec()));
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+    Err("The GNOME Wayland display was not ready in time to start Ruru.".into())
+}
+
+fn wayland_listening(runtime: &Path, display: &OsStr) -> bool {
+    !display.is_empty() && UnixStream::connect(runtime.join(display)).is_ok()
+}
+
+fn manager_environment() -> Option<Vec<String>> {
+    #[derive(serde::Deserialize)]
+    struct Reply {
+        data: Vec<String>,
+    }
+
+    let output = Command::new("/usr/bin/busctl")
+        .args([
+            "--user",
+            "--timeout=1s",
+            "--json=short",
+            "get-property",
+            "org.freedesktop.systemd1",
+            "/org/freedesktop/systemd1",
+            "org.freedesktop.systemd1.Manager",
+            "Environment",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    serde_json::from_slice::<Reply>(&output.stdout)
+        .ok()
+        .map(|reply| reply.data)
+}
+
+fn display_environment(runtime: &Path, entries: &[String]) -> Option<Vec<(String, String)>> {
+    let display: Vec<_> = entries
+        .iter()
+        .filter_map(|entry| entry.split_once('='))
+        .filter(|(key, _)| {
+            matches!(
+                *key,
+                "WAYLAND_DISPLAY"
+                    | "DISPLAY"
+                    | "XAUTHORITY"
+                    | "XDG_SESSION_TYPE"
+                    | "XDG_CURRENT_DESKTOP"
+                    | "XDG_SESSION_DESKTOP"
+            )
+        })
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect();
+    display
+        .iter()
+        .any(|(key, value)| {
+            key == "WAYLAND_DISPLAY" && wayland_listening(runtime, OsStr::new(value))
+        })
+        .then_some(display)
 }
 
 pub(super) fn notify_ready() -> Result<(), String> {
@@ -245,6 +340,33 @@ mod tests {
         assert_eq!(failed.phase, Phase::Stopped);
         assert_eq!(failed.failure.as_deref(), Some("Ruru service: exit-code"));
         assert!(Wall::parse("").is_err());
+    }
+
+    #[test]
+    fn waits_for_imported_display_and_a_listening_compositor() {
+        use std::os::unix::net::UnixListener;
+
+        let runtime = std::env::temp_dir().join(crate::settings::new_device_id());
+        fs::create_dir(&runtime).unwrap();
+        let display = runtime.join("wayland-test");
+        let entries = [
+            "PATH=/usr/bin".to_owned(),
+            "DISPLAY=:0".to_owned(),
+            "WAYLAND_DISPLAY=wayland-test".to_owned(),
+        ];
+        assert!(display_environment(&runtime, &entries[..2]).is_none());
+        assert!(display_environment(&runtime, &entries).is_none());
+        let listener = UnixListener::bind(display).unwrap();
+        assert_eq!(
+            display_environment(&runtime, &entries),
+            Some(vec![
+                ("DISPLAY".into(), ":0".into()),
+                ("WAYLAND_DISPLAY".into(), "wayland-test".into()),
+            ])
+        );
+        drop(listener);
+        assert!(display_environment(&runtime, &entries).is_none());
+        fs::remove_dir_all(runtime).unwrap();
     }
 
     #[test]
