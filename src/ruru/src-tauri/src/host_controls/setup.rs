@@ -291,7 +291,7 @@ fn remove_wall(dir: &Path, changes: &[Migration]) -> Result<(), String> {
     Ok(())
 }
 
-fn lock_migration(dir: &Path) -> Result<Option<File>, String> {
+pub(super) fn lock_migration(dir: &Path) -> Result<Option<File>, String> {
     fs::create_dir_all(dir).map_err(|err| err.to_string())?;
     let lock = fs::OpenOptions::new()
         .read(true)
@@ -423,24 +423,44 @@ pub(super) fn check_platform() -> Result<(), String> {
     }
 }
 
-pub(super) fn write_status(connected: bool, error: Option<&str>) {
+pub(super) fn write_status(connected: bool, reboot_applied: bool, error: Option<&str>) {
     if let Ok(path) = status_path()
-        && let Ok(bytes) = serde_json::to_vec(&(process::id(), connected, error))
+        && let Ok(bytes) = serde_json::to_vec(&(process::id(), connected, reboot_applied, error))
     {
         let _ = write_private(&path, &bytes);
     }
 }
 
-fn read_agent_status(data: &[u8], active_pid: u32) -> Option<(bool, Option<String>)> {
-    let (pid, connected, message): (u32, bool, Option<String>) =
-        serde_json::from_slice(data).ok()?;
-    (pid == active_pid).then_some((connected, message))
+fn read_agent_status(data: &[u8], active_pid: u32) -> Option<(bool, bool, Option<String>)> {
+    let (pid, connected, reboot_applied, message) = serde_json::from_slice(data)
+        .or_else(|_| {
+            let (pid, connected, message): (u32, bool, Option<String>) =
+                serde_json::from_slice(data)?;
+            Ok::<_, serde_json::Error>((pid, connected, false, message))
+        })
+        .ok()?;
+    (pid == active_pid).then_some((connected, reboot_applied, message))
+}
+
+// A running agent from the host-controls release predates live reboot settings.
+pub(super) fn upgrade_reboot_agent() -> Result<(), String> {
+    let legacy = system::agent_pid()
+        .zip(
+            fs::read(status_path()?)
+                .ok()
+                .and_then(|data| serde_json::from_slice::<(u32, bool, Option<String>)>(&data).ok()),
+        )
+        .is_some_and(|(running, (reported, _, _))| running == reported);
+    if legacy {
+        system::ctl(&["restart", system::AGENT])?;
+    }
+    Ok(())
 }
 
 pub(super) fn status() -> HostControlsStatus {
     let enabled = enabled();
     let active_pid = enabled.then(system::agent_pid).flatten();
-    let (connected, message) = if let Some(active_pid) = active_pid {
+    let (connected, reboot_applied, message) = if let Some(active_pid) = active_pid {
         status_path()
             .ok()
             .and_then(|path| fs::read(path).ok())
@@ -449,21 +469,25 @@ pub(super) fn status() -> HostControlsStatus {
     } else if enabled {
         (
             false,
+            false,
             Some(
                 "The host controls service is not running. Sign out and back in to start it."
                     .into(),
             ),
         )
     } else {
-        (false, None)
+        (false, false, None)
     };
     let reboot_enabled = enabled && reboot::setting().is_ok_and(|value| value == Some(true));
     let (reboot_available, reboot_can_authorise, reboot_message) = if reboot_enabled {
         match reboot::capability() {
             Ok(capability) => (
-                connected && capability.ready(),
+                connected && reboot_applied && capability.ready(),
                 capability.may_authorise(),
-                capability.message().map(str::to_owned),
+                capability.message().map(str::to_owned).or_else(|| {
+                    (connected && !reboot_applied)
+                        .then(|| "The host agent is applying the reboot setting.".into())
+                }),
             ),
             Err(error) => (false, false, Some(error)),
         }
@@ -678,9 +702,14 @@ mod tests {
     fn old_agent_status_never_marks_a_new_process_connected() {
         assert_eq!(
             read_agent_status(br#"[123,true,null]"#, 123),
-            Some((true, None))
+            Some((true, false, None))
         );
         assert_eq!(read_agent_status(br#"[123,true,null]"#, 124), None);
+        assert_eq!(
+            read_agent_status(br#"[123,true,true,null]"#, 123),
+            Some((true, true, None))
+        );
+        assert_eq!(read_agent_status(br#"[123,true,true,null]"#, 124), None);
     }
 
     #[test]

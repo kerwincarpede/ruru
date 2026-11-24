@@ -179,6 +179,9 @@ pub async fn set_host_reboot(enabled: bool) -> Result<HostControlsStatus, String
             agent::test_reboot(&config).await?;
         }
         tauri::async_runtime::spawn_blocking(move || {
+            if enabled {
+                setup::upgrade_reboot_agent()?;
+            }
             reboot::set(enabled)?;
             Ok(setup::status())
         })

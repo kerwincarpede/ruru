@@ -183,12 +183,10 @@ impl Wire<'_> {
         ]
     }
 
-    fn configs(&self, reboot_setting: Option<bool>) -> Vec<Message> {
+    fn configs(&self, reboot_enabled: bool) -> Vec<Message> {
         let mut messages = self.discovery();
-        match reboot_setting {
-            Some(true) => messages.push(self.reboot_discovery()),
-            Some(false) => messages.extend(self.reboot_cleanup()),
-            None => {}
+        if reboot_enabled {
+            messages.push(self.reboot_discovery());
         }
         messages
     }
@@ -340,6 +338,25 @@ pub(super) async fn test_reboot(config: &setup::Config) -> Result<(), String> {
     Ok(())
 }
 
+async fn finish_reboot_cleanup(broker: &Broker, wire: &Wire<'_>) -> Result<(), String> {
+    let Some(reboot::Setting::Cleanup(value)) = reboot::read_setting()? else {
+        return Ok(());
+    };
+    // Keep optional reboot ACL errors off the base host controls connection.
+    let (client, mut events) = connection(
+        broker,
+        format!("ruru-reboot-cleanup-{}", crate::settings::new_device_id()),
+        None,
+    )?;
+    let messages = wire.reboot_cleanup();
+    let count = messages.len();
+    send(&client, messages)?;
+    acknowledged(&mut events, count, |_| {}).await?;
+    reboot::finish_cleanup(value)?;
+    disconnect(&client, &mut events).await;
+    Ok(())
+}
+
 pub(super) async fn cleanup(config: &setup::Config) -> Result<(), String> {
     let topics = Topics::new(&config.device_id, &config.discovery_prefix);
     let device = device();
@@ -400,7 +417,7 @@ async fn disconnect(client: &AsyncClient, events: &mut EventLoop) {
 }
 
 pub(super) fn run() -> Result<(), String> {
-    setup::write_status(false, None);
+    setup::write_status(false, false, None);
     let config = setup::read_config()?;
     async_runtime::block_on(async {
         let topics = Topics::new(&config.device_id, &config.discovery_prefix);
@@ -413,13 +430,18 @@ pub(super) fn run() -> Result<(), String> {
         let mut attempt = 0;
         let mut state = State::default();
         while setup::enabled() {
-            let error = session(&broker, &wire, &mut attempt, &mut state).await;
-            setup::write_status(false, error.as_ref().err().map(String::as_str));
-            if let Err(error) = error {
-                eprintln!("Ruru host controls: {error}");
+            if let Err(error) = finish_reboot_cleanup(&broker, &wire).await {
+                eprintln!("Ruru host reboot cleanup is pending: {error}");
             }
-            tokio::time::sleep(client::backoff(attempt)).await;
-            attempt = attempt.saturating_add(1);
+            let result = session(&broker, &wire, &mut attempt, &mut state).await;
+            if let Err(error) = result {
+                setup::write_status(false, false, Some(&error));
+                eprintln!("Ruru host controls: {error}");
+                tokio::time::sleep(client::backoff(attempt)).await;
+                attempt = attempt.saturating_add(1);
+            } else {
+                setup::write_status(false, false, None);
+            }
         }
         Ok(())
     })
@@ -431,8 +453,8 @@ async fn session(
     attempt: &mut u32,
     state: &mut State,
 ) -> Result<(), String> {
-    let reboot_setting = reboot::setting()?;
-    let reboot_enabled = reboot_setting == Some(true);
+    let reboot_setting = reboot::read_setting()?;
+    let reboot_enabled = matches!(reboot_setting, Some(reboot::Setting::Enabled(_)));
     let will = LastWill::new(wire.topic("availability"), "offline", QOS, true, None);
     let (client, mut events) = connection(
         broker,
@@ -448,7 +470,7 @@ async fn session(
         state.enqueue_event(wire, event, reboot_enabled)
     }))
     .await?;
-    let configs = wire.configs(reboot_setting);
+    let configs = wire.configs(reboot_enabled);
     let config_count = configs.len();
     send(&client, configs)?;
     let state_count = state.report(wire, &client, reboot_enabled).await?;
@@ -458,7 +480,7 @@ async fn session(
     })
     .await?;
     state.start_next(wire, &client)?;
-    setup::write_status(true, state.error());
+    setup::write_status(true, reboot_enabled, state.error(reboot_enabled));
     *attempt = 0;
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -472,9 +494,14 @@ async fn session(
             tokio::select! {
                 event = &mut next => break event?,
                 _ = ticker.tick() => {
+                    if !setup::enabled() || reboot::read_setting()? != reboot_setting {
+                        // Dropping the connection publishes its offline will.
+                        // The next clean session applies the new subscription.
+                        return Ok(());
+                    }
                     state.report(wire, &client, reboot_enabled).await?;
                     state.start_next(wire, &client)?;
-                    setup::write_status(true, state.error());
+                    setup::write_status(true, reboot_enabled, state.error(reboot_enabled));
                 }
             }
         };
@@ -482,7 +509,7 @@ async fn session(
             if publish.topic.as_ref() == wire.topics.home_assistant_status().as_bytes()
                 && publish.payload.as_ref() == b"online"
             {
-                send(&client, wire.configs(reboot_setting))?;
+                send(&client, wire.configs(reboot_enabled))?;
                 send(&client, vec![wire.message("availability", "online")])?;
                 state.published.clear();
                 state.report(wire, &client, reboot_enabled).await?;
@@ -533,11 +560,11 @@ impl Diagnostics {
 }
 
 impl State {
-    fn error(&self) -> Option<&str> {
+    fn error(&self, reboot_enabled: bool) -> Option<&str> {
         self.wall_error
             .message()
             .or(self.display_error.message())
-            .or(self.reboot_error.as_deref())
+            .or(self.reboot_error.as_deref().filter(|_| reboot_enabled))
     }
 
     fn reconnect(&mut self) {
@@ -976,7 +1003,7 @@ mod tests {
                     .map(String::as_str),
                 Some("OFF")
             );
-            assert_eq!(state.error(), Some("The app exited during startup."));
+            assert_eq!(state.error(false), Some("The app exited during startup."));
             state
                 .start_next_with(&wire, &client, |action| {
                     assert_eq!(action, Action::Wall(false));
@@ -1098,7 +1125,7 @@ mod tests {
     }
 
     #[test]
-    fn reboot_discovery_combines_connection_and_permission_and_cleans_up_after_disconnect() {
+    fn reboot_discovery_combines_connection_and_permission() {
         let topics = Topics::new("wall", "homeassistant");
         let device = device();
         let wire = Wire {
@@ -1106,8 +1133,7 @@ mod tests {
             device: &device,
         };
         let button_topic = topics.discovery("button", "reboot");
-        let discovery = wire.configs(Some(true));
-        assert_eq!(wire.configs(Some(true)), discovery);
+        let discovery = wire.configs(true);
         let button = discovery
             .iter()
             .find(|message| message.topic == button_topic)
@@ -1125,13 +1151,59 @@ mod tests {
         assert_eq!(config["command_topic"], "ruru/wall/agent/command/reboot");
         assert_eq!(config["retain"], false);
         assert!(
-            wire.configs(None)
+            wire.configs(false)
                 .iter()
                 .all(|message| message.topic != button_topic)
         );
-        let disabled = wire.configs(Some(false));
-        assert!(disabled.iter().any(|message| message.topic == button_topic
-            && message.retain
-            && message.payload.is_empty()));
+        assert!(
+            wire.reboot_cleanup()
+                .iter()
+                .any(|message| message.topic == button_topic
+                    && message.retain
+                    && message.payload.is_empty())
+        );
+    }
+
+    #[test]
+    fn reboot_availability_and_diagnostics_republish_after_reconnect() {
+        let topics = Topics::new("wall", "homeassistant");
+        let device = device();
+        let wire = Wire {
+            topics: &topics,
+            device: &device,
+        };
+        let mut state = State::default();
+        let now = Instant::now();
+        for (capability, availability, diagnostic) in [
+            (reboot::Capability::Ready, "online", None),
+            (
+                reboot::Capability::Denied,
+                "offline",
+                Some("Ubuntu policy denied a reboot."),
+            ),
+        ] {
+            for reconnect in [false, true] {
+                if reconnect {
+                    state.reconnect();
+                }
+                let messages = state.observe(
+                    &wire,
+                    Err("wall unavailable".into()),
+                    None,
+                    Some(Ok(capability)),
+                    now,
+                );
+                let payload = |suffix| {
+                    messages
+                        .iter()
+                        .find(|message| message.topic == wire.topic(suffix))
+                        .map(|message| message.payload.as_str())
+                };
+                assert_eq!(payload("reboot/availability"), Some(availability));
+                let attributes: Value =
+                    serde_json::from_str(payload("reboot/attributes").unwrap()).unwrap();
+                assert_eq!(attributes["error"].as_str(), diagnostic);
+            }
+        }
     }
 }

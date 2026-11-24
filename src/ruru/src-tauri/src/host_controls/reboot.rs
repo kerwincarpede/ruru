@@ -1,4 +1,4 @@
-use std::{fs, io, path::Path, process::Command};
+use std::{fs, io, path::Path, process::Command, sync::OnceLock};
 
 use super::{setup, system};
 
@@ -6,28 +6,57 @@ const HELPER: &str = "/usr/share/ruru/host-controls/authorize-reboot";
 const PKEXEC: &str = "/usr/bin/pkexec";
 const LOGIND: &str = "org.freedesktop.login1";
 const MANAGER: &str = "org.freedesktop.login1.Manager";
+static SHUTDOWN_LOCK: OnceLock<fs::File> = OnceLock::new();
 
-// Keep the setting separate from the broker credentials. Off also means the
-// broker may still have an entity to clear after a disconnected opt-out.
-pub(super) fn setting() -> Result<Option<bool>, String> {
+// Each opt-in has its own generation. A quick off/on still opens a
+// fresh MQTT session, even if the agent did not observe the off setting.
+#[derive(PartialEq, Eq)]
+pub(super) enum Setting {
+    Enabled(Vec<u8>),
+    Cleanup(Vec<u8>),
+}
+
+pub(super) fn read_setting() -> Result<Option<Setting>, String> {
     match fs::read(setup::directory()?.join("reboot")) {
-        Ok(value) if value == b"on" => Ok(Some(true)),
-        Ok(value) if value == b"off" => Ok(Some(false)),
+        Ok(value) if value == b"on" || value.starts_with(b"on:") => {
+            Ok(Some(Setting::Enabled(value)))
+        }
+        Ok(value) if value == b"off" || value.starts_with(b"off:") => {
+            Ok(Some(Setting::Cleanup(value)))
+        }
         Ok(_) => Err("The host reboot setting is invalid.".into()),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(err) => Err(err.to_string()),
     }
 }
 
+pub(super) fn setting() -> Result<Option<bool>, String> {
+    Ok(read_setting()?.map(|value| matches!(value, Setting::Enabled(_))))
+}
+
 pub(super) fn set(enabled: bool) -> Result<(), String> {
+    let dir = setup::directory()?;
+    let _settings = setup::lock_migration(&dir)?
+        .ok_or("Host controls are changing. Try again when setup finishes.")?;
+    if !setup::enabled() {
+        return Err("Enable host controls before changing reboot.".into());
+    }
     let current = setting()?;
     if current == Some(enabled) || (current.is_none() && !enabled) {
         return Ok(());
     }
-    let value: &[u8] = if enabled { b"on" } else { b"off" };
-    setup::write_private(&setup::directory()?.join("reboot"), value)
-        .map_err(|err| err.to_string())?;
-    system::ctl(&["restart", system::AGENT]).map(|_| ())
+    let state = if enabled { "on" } else { "off" };
+    let value = format!("{state}:{}", crate::settings::new_device_id());
+    setup::write_private(&dir.join("reboot"), value.as_bytes()).map_err(|err| err.to_string())
+}
+
+pub(super) fn finish_cleanup(value: Vec<u8>) -> Result<(), String> {
+    let dir = setup::directory()?;
+    let _settings = setup::lock_migration(&dir)?.ok_or("Host controls are changing.")?;
+    if read_setting()? == Some(Setting::Cleanup(value)) {
+        forget()?;
+    }
+    Ok(())
 }
 
 pub(super) fn forget() -> Result<(), String> {
@@ -67,10 +96,11 @@ impl Capability {
     }
 }
 
-fn logind(method: &str, arguments: &[&str]) -> Result<String, String> {
+fn logind(method: &str, arguments: &[&str], json: bool) -> Result<String, String> {
     let output = Command::new("/usr/bin/busctl")
         .args([
             "--system",
+            if json { "--json=short" } else { "--json=off" },
             "--timeout=5s",
             "--allow-interactive-authorization=no",
             "call",
@@ -102,7 +132,7 @@ fn decode_capability(result: &str) -> Result<Capability, String> {
 }
 
 pub(super) fn capability() -> Result<Capability, String> {
-    decode_capability(&logind("CanReboot", &[])?)
+    decode_capability(&logind("CanReboot", &[], false)?)
 }
 
 pub(super) fn authorise() -> Result<(), String> {
@@ -141,12 +171,44 @@ fn check_request(
     reboot()
 }
 
+fn check_inhibitors(reply: &str) -> Result<(), String> {
+    type Inhibitor = (String, String, String, String, u32, u32);
+    #[derive(serde::Deserialize)]
+    struct Reply {
+        data: (Vec<Inhibitor>,),
+    }
+    let reply: Reply =
+        serde_json::from_str(reply).map_err(|_| "Could not read Ubuntu shutdown inhibitors.")?;
+    if reply.data.0.iter().any(|(what, _, _, mode, _, _)| {
+        what.split(':').any(|event| event == "shutdown")
+            && matches!(mode.as_str(), "block" | "block-weak")
+    }) {
+        return Err("An application is blocking shutdown. Try again when it finishes.".into());
+    }
+    Ok(())
+}
+
 pub(super) fn request() -> Result<(), String> {
-    check_request(setting(), capability, || {
-        // A normal reboot. The flag requires logind to honour weak inhibitors
-        // too. No interactive authorisation or inhibitor bypass is requested.
-        logind("RebootWithFlags", &["t", "1"]).map(|_| ())
-    })
+    let dir = setup::directory()?;
+    let _settings = setup::lock_migration(&dir)?
+        .ok_or("Host controls are changing. Try again when setup finishes.")?;
+    check_request(
+        if setup::enabled() {
+            setting()
+        } else {
+            Ok(None)
+        },
+        capability,
+        || {
+            let operation = system::lock_wall_operation()?;
+            check_inhibitors(&logind("ListInhibitors", &[], true)?)?;
+            // Logind's final permission and inhibitor checks still apply.
+            logind("RebootWithFlags", &["t", "1"], false)?;
+            // Keep new installs out between accepting reboot and shutdown.
+            let _ = SHUTDOWN_LOCK.set(operation);
+            Ok(())
+        },
+    )
 }
 
 #[cfg(test)]
@@ -210,5 +272,21 @@ mod tests {
             check_request(Ok(Some(true)), || Ok(Capability::Ready), || Ok(())),
             Ok(())
         );
+    }
+    #[test]
+    fn checks_blocking_shutdown_inhibitors_including_the_desktop_users_weak_lock() {
+        for mode in ["block", "block-weak"] {
+            let reply = serde_json::json!({
+                "data": [[["sleep:shutdown", "Editor", "Unsaved data", mode, 1000, 42]]]
+            });
+            assert!(check_inhibitors(&reply.to_string()).is_err());
+        }
+        for reply in [
+            r#"{"data":[[]]}"#,
+            r#"{"data":[[["sleep","Editor","","block-weak",1000,42],["shutdown","Editor","","delay",1000,42]]]}"#,
+        ] {
+            assert_eq!(check_inhibitors(reply), Ok(()));
+        }
+        assert!(check_inhibitors(r#"{"data":[]}"#).is_err());
     }
 }
