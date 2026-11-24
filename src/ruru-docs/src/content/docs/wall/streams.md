@@ -29,7 +29,7 @@ If a stream won't play on your computer, the tile shows the camera's other strea
 
 ## Stream info
 
-Right-click a tile and choose **Show stream info** to see playback details on every tile:
+Choose **Show stream info** in **Settings → Appearance** or in a tile’s right-click menu to see playback details on every tile:
 
 | Shows | Meaning |
 | --- | --- |

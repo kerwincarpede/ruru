@@ -245,9 +245,9 @@
   outline: none;
 }
 
-/* Frigate's activity, drawn in the style chosen in Settings › Home
-   Assistant: yellow while there is motion, red during an alert. No style
-   covers more than a few pixels of the picture. */
+/* Frigate's activity, drawn in the style chosen in Settings › Appearance:
+   yellow while there is motion, red during an alert. No style covers more
+   than a few pixels of the picture. */
 .tile::after {
   content: "";
   position: absolute;

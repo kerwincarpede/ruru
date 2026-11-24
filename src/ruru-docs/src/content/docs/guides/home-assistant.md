@@ -87,7 +87,7 @@ Frigate publishes what it sees to the same broker. While Ruru is connected, each
 - **Objects:** a chip at the top right for each kind of object moving in view, such as **Person**, or **Car ×2** for two. Parked and other still objects get no chip.
 - **Alert:** the tile is marked in red, its object chips turn red, and its caption says **Alert**, while Frigate has an alert open for the camera. Which objects and zones raise an alert is set in Frigate's `review` settings.
 
-Choose how tiles are marked with **Activity style** in **Settings → Home Assistant**. Every style leaves the picture clear apart from a few pixels at most:
+Choose how tiles are marked with **Activity style** in **Settings → Appearance**. Every style leaves the picture clear apart from a few pixels at most:
 
 | Style | Motion | Alert |
 | --- | --- | --- |
@@ -99,7 +99,7 @@ Choose how tiles are marked with **Activity style** in **Settings → Home Assis
 
 A maximised tile has no gap round it, so **Outline between tiles** draws a thin outline inside its edge instead.
 
-**Show activity** is on by default. Turn it off in **Settings → Home Assistant**, or right-click the wall and untick **Show activity**. The tiles go quiet while Ruru is not connected to the broker.
+**Show activity** is on by default. Turn it off in **Settings → Appearance**, or right-click the wall and untick **Show activity**. The tiles go quiet while Ruru is not connected to the broker.
 
 Frigate must have MQTT turned on with the same broker, and **Frigate prefix** must match the `topic_prefix` in Frigate's `mqtt` settings, usually `frigate`.
 

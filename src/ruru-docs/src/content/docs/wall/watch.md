@@ -37,7 +37,7 @@ The arrow keys move through the menu, `Home` and `End` jump to the first and las
 
 ## Motion, objects and alerts
 
-With [Home Assistant](/ruru/guides/home-assistant/#activity-on-the-tiles) connected, a tile is marked in yellow while its camera sees motion, shows a chip such as **Person** for each kind of object moving, and is marked in red with **Alert** in its caption during a Frigate alert. Choose how tiles are marked with **Activity style** in **Settings → Home Assistant**. Untick **Show activity** in the right-click menu to hide them.
+With [Home Assistant](/ruru/guides/home-assistant/#activity-on-the-tiles) connected, a tile is marked in yellow while its camera sees motion, shows a chip such as **Person** for each kind of object moving, and is marked in red with **Alert** in its caption during a Frigate alert. Choose how tiles are marked with **Activity style** in **Settings → Appearance**. Untick **Show activity** in the right-click menu to hide them.
 
 ## Full screen
 

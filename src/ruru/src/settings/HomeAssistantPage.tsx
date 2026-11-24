@@ -1,15 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { saveMqtt, testMqtt, type ActivityStyle, type MqttInput, type MqttSettings, type Settings, type WallOptions } from "../app/api";
-import { ACTIVITY_STYLES } from "../wall/activity";
+import { saveMqtt, testMqtt, type MqttInput, type MqttSettings, type Settings } from "../app/api";
 
 interface HomeAssistantPageProps {
   mqtt: MqttSettings;
-  /** Whether tiles show Frigate's motion, objects and alerts, and how. */
-  wall: WallOptions;
   /** The connection was saved; the window uses the new settings. */
   onSaved: (settings: Settings) => void;
-  /** Show activity or its style was changed and saved with the connection. */
-  onWall: (change: Partial<WallOptions>) => void;
   onClose: () => void;
 }
 
@@ -32,7 +27,7 @@ function parsePort(text: string): number | null {
 }
 
 /** Settings › Home Assistant: the MQTT broker in Home Assistant that Ruru connects to. */
-export default function HomeAssistantPage({ mqtt, wall, onSaved, onWall, onClose }: HomeAssistantPageProps) {
+export default function HomeAssistantPage({ mqtt, onSaved, onClose }: HomeAssistantPageProps) {
   const [enabled, setEnabled] = useState(mqtt.enabled);
   const [host, setHost] = useState(mqtt.host);
   const [port, setPort] = useState(String(mqtt.port));
@@ -42,8 +37,6 @@ export default function HomeAssistantPage({ mqtt, wall, onSaved, onWall, onClose
   const [password, setPassword] = useState<string | null>(null);
   const [discoveryPrefix, setDiscoveryPrefix] = useState(mqtt.discoveryPrefix);
   const [frigatePrefix, setFrigatePrefix] = useState(mqtt.frigatePrefix);
-  const [showActivity, setShowActivity] = useState(wall.activity);
-  const [style, setStyle] = useState(wall.activityStyle);
   const [test, setTest] = useState<Test>({ kind: "idle" });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -86,11 +79,6 @@ export default function HomeAssistantPage({ mqtt, wall, onSaved, onWall, onClose
     setSaveError(null);
     try {
       onSaved(await saveMqtt(value, password || null));
-      const change: Partial<WallOptions> = {
-        ...(showActivity !== wall.activity && { activity: showActivity }),
-        ...(style !== wall.activityStyle && { activityStyle: style }),
-      };
-      if (Object.keys(change).length > 0) onWall(change);
       onClose();
     } catch (error) {
       setSaveError(message(error));
@@ -124,146 +112,124 @@ export default function HomeAssistantPage({ mqtt, wall, onSaved, onWall, onClose
         <p className="field-hint">
           Ruru shows up in Home Assistant as a device, through the MQTT broker that Home Assistant uses.
         </p>
-        <div className="field-row">
-          <div className="field field-grow">
-            <label className="field-label" htmlFor="mqtt-host">
-              Broker
+        <section className="settings-section" aria-labelledby="mqtt-broker-title">
+          <h4 id="mqtt-broker-title">MQTT broker</h4>
+          <div className="field-row">
+            <div className="field field-grow">
+              <label className="field-label" htmlFor="mqtt-host">
+                Broker
+              </label>
+              <input
+                id="mqtt-host"
+                type="text"
+                value={host}
+                placeholder="homeassistant.local"
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) => {
+                  setHost(event.target.value);
+                  changed();
+                }}
+              />
+            </div>
+            <div className="field field-port">
+              <label className="field-label" htmlFor="mqtt-port">
+                Port
+              </label>
+              <input
+                id="mqtt-port"
+                type="text"
+                inputMode="numeric"
+                value={port}
+                onChange={(event) => {
+                  setPort(event.target.value);
+                  changed();
+                }}
+              />
+            </div>
+            <label className="check field-tls">
+              <input type="checkbox" checked={tls} onChange={(event) => changeTls(event.target.checked)} />
+              Use TLS
             </label>
-            <input
-              id="mqtt-host"
-              type="text"
-              value={host}
-              placeholder="homeassistant.local"
-              autoComplete="off"
-              spellCheck={false}
-              onChange={(event) => {
-                setHost(event.target.value);
-                changed();
-              }}
-            />
           </div>
-          <div className="field field-port">
-            <label className="field-label" htmlFor="mqtt-port">
-              Port
-            </label>
-            <input
-              id="mqtt-port"
-              type="text"
-              inputMode="numeric"
-              value={port}
-              onChange={(event) => {
-                setPort(event.target.value);
-                changed();
-              }}
-            />
+          <div className="field-row">
+            <div className="field field-grow">
+              <label className="field-label" htmlFor="mqtt-username">
+                Username
+              </label>
+              <input
+                id="mqtt-username"
+                type="text"
+                value={username}
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) => {
+                  setUsername(event.target.value);
+                  changed();
+                }}
+              />
+            </div>
+            <div className="field field-grow">
+              <label className="field-label" htmlFor="mqtt-password">
+                Password
+              </label>
+              <input
+                id="mqtt-password"
+                type="password"
+                aria-describedby="mqtt-password-hint"
+                value={password ?? ""}
+                placeholder={saved ? "Saved" : ""}
+                autoComplete="off"
+                onChange={(event) => {
+                  setPassword(event.target.value);
+                  changed();
+                }}
+              />
+            </div>
           </div>
-        </div>
-        <label className="check">
-          <input type="checkbox" checked={tls} onChange={(event) => changeTls(event.target.checked)} />
-          Use TLS
-        </label>
-        <div className="field-row">
-          <div className="field field-grow">
-            <label className="field-label" htmlFor="mqtt-username">
-              Username
-            </label>
-            <input
-              id="mqtt-username"
-              type="text"
-              value={username}
-              autoComplete="off"
-              spellCheck={false}
-              onChange={(event) => {
-                setUsername(event.target.value);
-                changed();
-              }}
-            />
-          </div>
-          <div className="field field-grow">
-            <label className="field-label" htmlFor="mqtt-password">
-              Password
-            </label>
-            <input
-              id="mqtt-password"
-              type="password"
-              aria-describedby="mqtt-password-hint"
-              value={password ?? ""}
-              placeholder={saved ? "Saved" : ""}
-              autoComplete="off"
-              onChange={(event) => {
-                setPassword(event.target.value);
-                changed();
-              }}
-            />
-          </div>
-        </div>
-        <span id="mqtt-password-hint" className="field-hint">
-          {mqtt.passwordStorage === "file" && "This computer has no keychain Ruru can use, so the password is kept in Ruru’s settings file."}
-          {mqtt.passwordStorage === "keychain" && "The password is kept in this computer’s keychain."}
-          {mqtt.passwordStorage === "none" && "Ruru keeps the password in this computer’s keychain if it has one, or else in Ruru’s settings file."}
-        </span>
-        <div className="field-row">
-          <div className="field field-grow">
-            <label className="field-label" htmlFor="mqtt-discovery">
-              Discovery prefix
-            </label>
-            <input
-              id="mqtt-discovery"
-              type="text"
-              value={discoveryPrefix}
-              autoComplete="off"
-              spellCheck={false}
-              onChange={(event) => {
-                setDiscoveryPrefix(event.target.value);
-                changed();
-              }}
-            />
-          </div>
-          <div className="field field-grow">
-            <label className="field-label" htmlFor="mqtt-frigate">
-              Frigate prefix
-            </label>
-            <input
-              id="mqtt-frigate"
-              type="text"
-              value={frigatePrefix}
-              autoComplete="off"
-              spellCheck={false}
-              onChange={(event) => {
-                setFrigatePrefix(event.target.value);
-                changed();
-              }}
-            />
-          </div>
-        </div>
-        <label className="check">
-          <input type="checkbox" checked={showActivity} aria-describedby="mqtt-activity-hint" onChange={(event) => setShowActivity(event.target.checked)} />
-          Show activity
-        </label>
-        <span id="mqtt-activity-hint" className="field-hint">
-          Each tile is marked while Frigate sees motion, shows a chip for each kind of object moving, and is marked in red during an alert.
-        </span>
-        <div className="field">
-          <label className="field-label" htmlFor="mqtt-activity-style">
-            Activity style
-          </label>
-          <select
-            id="mqtt-activity-style"
-            aria-describedby="mqtt-activity-style-hint"
-            value={style}
-            disabled={!showActivity}
-            onChange={(event) => setStyle(event.target.value as ActivityStyle)}
-          >
-            {ACTIVITY_STYLES.map((choice) => (
-              <option key={choice.value} value={choice.value}>
-                {choice.title}
-              </option>
-            ))}
-          </select>
-          <span id="mqtt-activity-style-hint" className="field-hint">
-            {ACTIVITY_STYLES.find((choice) => choice.value === style)?.hint}
+          <span id="mqtt-password-hint" className="field-hint">
+            {mqtt.passwordStorage === "file" && "This computer has no keychain Ruru can use, so the password is kept in Ruru’s settings file."}
+            {mqtt.passwordStorage === "keychain" && "The password is kept in this computer’s keychain."}
+            {mqtt.passwordStorage === "none" && "Ruru keeps the password in this computer’s keychain if it has one, or else in Ruru’s settings file."}
           </span>
-        </div>
+        </section>
+        <section className="settings-section" aria-labelledby="mqtt-topics-title">
+          <h4 id="mqtt-topics-title">MQTT topics</h4>
+          <div className="field-row">
+            <div className="field field-grow">
+              <label className="field-label" htmlFor="mqtt-discovery">
+                Discovery prefix
+              </label>
+              <input
+                id="mqtt-discovery"
+                type="text"
+                value={discoveryPrefix}
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) => {
+                  setDiscoveryPrefix(event.target.value);
+                  changed();
+                }}
+              />
+            </div>
+            <div className="field field-grow">
+              <label className="field-label" htmlFor="mqtt-frigate">
+                Frigate prefix
+              </label>
+              <input
+                id="mqtt-frigate"
+                type="text"
+                value={frigatePrefix}
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) => {
+                  setFrigatePrefix(event.target.value);
+                  changed();
+                }}
+              />
+            </div>
+          </div>
+        </section>
         <div ref={result} className="settings-results">
           <div className="settings-test" aria-live="polite">
             <button type="button" onClick={() => void runTest()} disabled={!host.trim() || test.kind === "testing"}>

@@ -4,6 +4,7 @@ import Dialog from "../app/Dialog";
 import type { FrigateStatus } from "../app/frigate";
 import { saveFrigateUrl, testFrigate, type AppInfo, type Settings, type WallOptions } from "../app/api";
 import type { AvailableUpdate } from "../app/updates";
+import AppearancePage from "./AppearancePage";
 import HomeAssistantPage from "./HomeAssistantPage";
 import UpdatesPage from "./UpdatesPage";
 
@@ -17,8 +18,8 @@ interface SettingsDialogProps {
   onChannelSaved: (settings: Settings) => void;
   /** The Home Assistant connection was saved. */
   onMqttSaved: (settings: Settings) => void;
-  /** Show activity or its style was changed in Settings › Home Assistant. */
-  onWall: (change: Partial<WallOptions>) => void;
+  /** The appearance settings were saved; the wall uses the new options. */
+  onWallSaved: (options: WallOptions) => void;
   /** Install updates automatically was turned on or off. */
   onAutoUpdateSaved: (settings: Settings) => void;
   /** A check on the Updates page found an update, or found none. */
@@ -26,11 +27,12 @@ interface SettingsDialogProps {
   onClose: () => void;
 }
 
-type Page = "frigate" | "homeassistant" | "updates";
-const PAGES: { page: Page; title: string }[] = [
-  { page: "frigate", title: "Frigate" },
-  { page: "homeassistant", title: "Home Assistant" },
-  { page: "updates", title: "Updates" },
+type Page = "frigate" | "homeassistant" | "appearance" | "updates";
+const PAGES: { page: Page; title: string; icon: string }[] = [
+  { page: "frigate", title: "Frigate", icon: "M3 6h12v12H3z M15 10l6-4v12l-6-4" },
+  { page: "homeassistant", title: "Home Assistant", icon: "m3 11 9-8 9 8 M5 9v12h14V9 M10 21v-6h4v6" },
+  { page: "appearance", title: "Appearance", icon: "M3 5h18v14H3z M3 15l5-5 4 4 3-3 6 6" },
+  { page: "updates", title: "Updates", icon: "M20 10a8 8 0 1 0-1 7 M20 4v6h-6" },
 ];
 
 type Test = { kind: "idle" } | { kind: "testing" } | { kind: "ok"; status: FrigateStatus } | { kind: "failed"; message: string };
@@ -40,8 +42,8 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Settings over the wall: Frigate holds the server's URL, Home Assistant the MQTT connection, Updates the version, update channel and automatic updates. */
-export default function SettingsDialog({ settings, info, onSaved, onChannelSaved, onAutoUpdateSaved, onMqttSaved, onWall, onUpdate, onClose }: SettingsDialogProps) {
+/** Settings over the wall, with a page for each group of options. */
+export default function SettingsDialog({ settings, info, onSaved, onChannelSaved, onAutoUpdateSaved, onMqttSaved, onWallSaved, onUpdate, onClose }: SettingsDialogProps) {
   const [page, setPage] = useState<Page>("frigate");
   const [url, setUrl] = useState(settings.frigateUrl ?? "");
   const [test, setTest] = useState<Test>({ kind: "idle" });
@@ -86,11 +88,20 @@ export default function SettingsDialog({ settings, info, onSaved, onChannelSaved
             aria-current={page === item.page ? "page" : undefined}
             onClick={() => setPage(item.page)}
           >
-            {item.title}
+            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <path d={item.icon} />
+            </svg>
+            <span>{item.title}</span>
           </button>
         ))}
       </nav>
-      {page === "homeassistant" && <HomeAssistantPage mqtt={settings.mqtt} wall={settings.wall} onSaved={onMqttSaved} onWall={onWall} onClose={onClose} />}
+      <button type="button" className="settings-close" aria-label="Close Settings" onClick={onClose}>
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <path d="m6 6 12 12M18 6 6 18" />
+        </svg>
+      </button>
+      {page === "homeassistant" && <HomeAssistantPage mqtt={settings.mqtt} onSaved={onMqttSaved} onClose={onClose} />}
+      {page === "appearance" && <AppearancePage wall={settings.wall} mqttEnabled={settings.mqtt.enabled} onSaved={onWallSaved} onClose={onClose} />}
       {page === "updates" && (
         <UpdatesPage
           info={info}
