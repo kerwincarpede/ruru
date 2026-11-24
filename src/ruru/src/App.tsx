@@ -13,6 +13,7 @@ import { EMPTY_LAYOUT, hideCamera, showCamera, wallPlacements } from "./wall/lay
 import { tileMenu, type MenuItem, type MenuSection } from "./wall/menu";
 import type { StreamKind } from "./wall/streams";
 import Connecting from "./wall/Connecting";
+import { useLasting } from "./app/useLasting";
 import { EveryCameraHidden, NoCameras } from "./wall/EmptyWall";
 import StreamsOff from "./wall/StreamsOff";
 import Wall from "./wall/Wall";
@@ -23,6 +24,11 @@ export const TOOLBAR_HIDE_MS = 2500;
 
 /** The longest the wall stays covered while its tiles start their streams. */
 export const CONNECTING_MS = 20_000;
+/**
+ * How long more than half the wall must be reconnecting before the whole
+ * window says so, such as while Frigate restarts. A short blip stays on the tiles.
+ */
+export const WALL_DOWN_AFTER_MS = 10_000;
 const NO_SETTINGS: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
 
 function GearIcon() {
@@ -329,6 +335,14 @@ function App() {
     const timer = setTimeout(() => setConnectDone(true), CONNECTING_MS);
     return () => clearTimeout(timer);
   }, [connectingCameras]);
+  // The cameras whose tiles are reconnecting or frozen right now.
+  const [reconnecting, setReconnecting] = useState<string[]>([]);
+  const onReconnecting = useCallback((camera: string, now: boolean) => {
+    setReconnecting((list) => (list.includes(camera) === now ? list : now ? [...list, camera] : list.filter((name) => name !== camera)));
+  }, []);
+  const reconnectingOnWall = onWall?.filter((camera) => reconnecting.includes(camera)).length ?? 0;
+  const wallDown = onWall !== null && streams && live && !editing && !connectingCameras && reconnectingOnWall > onWall.length / 2;
+  const showWallDown = useLasting(wallDown, WALL_DOWN_AFTER_MS);
   const onPlaying = useCallback((camera: string) => {
     setConnected((now) => (now.includes(camera) ? now : [...now, camera]));
   }, []);
@@ -490,11 +504,13 @@ function App() {
           onAutomatic={onAutomatic}
           onProblem={onProblem}
           onPlaying={onPlaying}
+          onReconnecting={onReconnecting}
           onLayout={changeLayout}
         />
       )}
 
       {connectingCameras && onWall && <Connecting stage="cameras" cameras={onWall} connected={connected} />}
+      {showWallDown && onWall && <Connecting stage="reconnecting" cameras={onWall} reconnecting={reconnecting} />}
 
       {menu && <WallMenu x={menu.x} y={menu.y} sections={sections} onClose={closeMenu} />}
       {settingsOpen && settings && (

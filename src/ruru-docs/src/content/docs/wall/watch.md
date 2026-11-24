@@ -57,8 +57,11 @@ Ruru reconnects on its own when a camera or the network drops. While it does, th
 
 - **Reconnecting · 12 s old**: the stream dropped and Ruru is connecting again.
 - **Frozen · 12 s old**: the stream is connected, but its picture stopped moving.
-- **Reconnecting…**: Ruru is trying again before any picture has arrived.
 - **Can't play this stream**: the stream doesn't play on this computer. See [Troubleshooting](/ruru/reference/troubleshooting/).
+
+Once the last frame is 30 seconds old, or straight away when the tile has no frame to keep, the tile shows the Ruru owl looking around and **Reconnecting…** instead. A reconnecting tile never goes back to the camera's snapshot, which can be hours old on a wall nobody touches.
+
+When more than half the wall has been reconnecting for 10 seconds, such as while Frigate restarts or the network is down, the owl fills the window with **Reconnecting to Frigate**, how many cameras lost their video, and a dot for each camera that lights up as it comes back. The wall returns once at least half its cameras play again.
 
 The caption clears as soon as new video arrives. To force a fresh start, right-click the tile and choose **Reconnect**.
 

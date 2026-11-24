@@ -36,6 +36,8 @@ interface WallProps {
   onProblem?: (camera: string, problem: boolean) => void;
   /** Told each time a camera's tile starts playing video. */
   onPlaying?: (camera: string) => void;
+  /** Told whether each camera's tile is reconnecting or frozen right now. */
+  onReconnecting?: (camera: string, reconnecting: boolean) => void;
   /** The layout changed in Edit layout mode and should be saved. */
   onLayout: (layout: SavedLayout) => void;
 }
@@ -78,6 +80,7 @@ export default function Wall({
   onAutomatic,
   onProblem,
   onPlaying,
+  onReconnecting,
   onLayout,
 }: WallProps) {
   const [box, size] = useSize();
@@ -147,6 +150,7 @@ export default function Wall({
                   onAutomatic={onAutomatic && ((stream) => onAutomatic(camera.name, stream))}
                   onProblem={onProblem && ((problem) => onProblem(camera.name, problem))}
                   onPlaying={onPlaying && (() => onPlaying(camera.name))}
+                  onReconnecting={onReconnecting && ((reconnecting) => onReconnecting(camera.name, reconnecting))}
                 />
               </div>
             );

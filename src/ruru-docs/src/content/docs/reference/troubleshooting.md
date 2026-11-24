@@ -37,7 +37,7 @@ If the camera is there but hidden, choose **Edit layout** and then **Show** with
 
 ## A tile says **Reconnecting** or **Frozen**
 
-The camera's stream dropped or stopped moving, and Ruru is getting it back. Check the camera in Frigate's own live view. Right-click the tile and choose **Reconnect** to start it again by hand. See [When a picture stops](/ruru/wall/watch/#when-a-picture-stops).
+The camera's stream dropped or stopped moving, and Ruru is getting it back. Check the camera in Frigate's own live view. If the whole window says **Reconnecting to Frigate**, most cameras dropped at once: check that Frigate is running and reachable, since a Frigate restart or a network drop does this. Right-click the tile and choose **Reconnect** to start it again by hand. See [When a picture stops](/ruru/wall/watch/#when-a-picture-stops).
 
 ## A tile says **Can't play this stream**
 

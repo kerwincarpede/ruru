@@ -46,4 +46,12 @@ describe("Connecting", () => {
     expect(screen.queryByRole("list", { name: "Cameras" })).not.toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "Cameras connected" })).toHaveAttribute("aria-valuenow", "1");
   });
+
+  it("says how many cameras are reconnecting, with a dot for each", () => {
+    render(<Connecting stage="reconnecting" cameras={["garage", "front_door", "bins"]} reconnecting={["garage", "bins"]} />);
+    const status = screen.getByRole("status", { name: "Reconnecting to Frigate" });
+    expect(status).toHaveTextContent("2 of 3 cameras lost their video. Ruru keeps trying on its own.");
+    expect(within(status).getByRole("listitem", { name: "Garage: reconnecting" })).toBeInTheDocument();
+    expect(within(status).getByRole("listitem", { name: "Front door: connected" })).toBeInTheDocument();
+  });
 });

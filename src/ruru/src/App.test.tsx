@@ -2,12 +2,12 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach } from "vitest";
 import { emit } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import App, { CONNECTING_MS } from "./App";
+import App, { CONNECTING_MS, WALL_DOWN_AFTER_MS } from "./App";
 import { RETRY_DELAYS_MS, type Camera } from "./app/frigate";
 import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, type Activity, type SavedLayout, type Settings } from "./app/api";
 import { findUpdate } from "./app/updates";
 import { mockCommands, type CommandHandlers } from "./test/mockCommands";
-import { forgetFailures } from "./wall/player";
+import { forgetFailures, retryDelay, STALL_MS } from "./wall/player";
 
 // Only the startup check is faked; Settings › Updates checks through the mocked commands.
 vi.mock("./app/updates", async (importOriginal) => ({ ...(await importOriginal<typeof import("./app/updates")>()), findUpdate: vi.fn() }));
@@ -925,6 +925,46 @@ describe("App streams", () => {
         await vi.advanceTimersByTimeAsync(CONNECTING_MS);
       });
       expect(screen.queryByRole("status", { name: "Connecting to your cameras" })).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("covers the wall once most of its tiles have been reconnecting for a while, and uncovers it as they come back", async () => {
+    vi.useFakeTimers();
+    // Reconnecting falls back to MSE, which jsdom lacks.
+    vi.stubGlobal("MediaSource", Object.assign(class extends EventTarget {
+      readyState = "closed";
+    }, { isTypeSupported: () => true }));
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:source", revokeObjectURL: () => {} }));
+    try {
+      wall();
+      render(<App />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      play("garage_sub");
+      play("maingate_sub");
+      const down = () => screen.queryByRole("status", { name: "Reconnecting to Frigate" });
+      // A second at a time, so the wall draws between the players' timers.
+      const wait = async (ms: number) => {
+        for (let left = ms; left > 0; left -= 1000) {
+          await act(async () => {
+            await vi.advanceTimersByTimeAsync(Math.min(1000, left));
+          });
+        }
+      };
+      // Both pictures stop moving, so both tiles reconnect.
+      await wait(STALL_MS);
+      expect(screen.getByRole("figure", { name: "Garage" })).toHaveClass("is-reconnecting");
+      expect(down()).not.toBeInTheDocument();
+      await wait(WALL_DOWN_AFTER_MS);
+      expect(down()).toHaveTextContent("2 of 2 cameras lost their video");
+      expect(screen.getByRole("listitem", { name: "Garage: reconnecting" })).toBeInTheDocument();
+      // Half the wall back is enough to show it again.
+      await wait(retryDelay(0));
+      play("garage_sub");
+      expect(down()).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }

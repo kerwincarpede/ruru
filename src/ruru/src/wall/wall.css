@@ -65,6 +65,13 @@
   visibility: hidden;
 }
 
+/* A reconnecting tile never falls back to the snapshot, which can be hours
+   old on a wall that runs unattended. It keeps its own last frame for a
+   while, then shows the owl. */
+.tile.is-reconnecting .tile-snapshot {
+  visibility: hidden;
+}
+
 /* A frozen picture is dimmed while the tile waits for new frames. */
 .tile.is-stale .tile-video,
 .tile.is-stale .tile-freeze {
@@ -111,6 +118,16 @@
 .tile-waiting .owl {
   width: 4rem;
   height: auto;
+}
+
+/* Reconnecting with no recent picture: the owl searches for the stream. */
+.tile-lost {
+  font-size: 0.9rem;
+  opacity: 0.85;
+}
+
+.tile-lost .owl {
+  width: min(6rem, 40%);
 }
 
 .tile-name {
