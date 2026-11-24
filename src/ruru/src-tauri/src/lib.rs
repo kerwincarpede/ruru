@@ -79,6 +79,8 @@ pub fn run() {
             host_controls::test_host_controls,
             host_controls::enable_host_controls,
             host_controls::disable_host_controls,
+            host_controls::set_host_reboot,
+            host_controls::authorise_host_reboot,
             mqtt::test_mqtt,
             mqtt::save_mqtt,
             mqtt::report_wall_state,

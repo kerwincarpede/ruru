@@ -6,7 +6,7 @@ After=graphical-session-pre.target
 [Service]
 Type=notify
 NotifyAccess=all
-TimeoutStartSec=30
+TimeoutStartSec=120
 ExecStart=/usr/bin/ruru --managed-wall
 CPUAccounting=yes
 MemoryAccounting=yes

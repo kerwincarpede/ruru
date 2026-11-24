@@ -169,7 +169,17 @@ describe("SettingsDialog Home Assistant page", () => {
   });
 
   it("tests host controls on Enter in their fields instead of saving the broker", async () => {
-    const status: HostControlsStatus = { supported: true, enabled: false, connected: false, cleanupPending: false, message: null };
+    const status: HostControlsStatus = {
+      supported: true,
+      enabled: false,
+      connected: false,
+      cleanupPending: false,
+      message: null,
+      rebootEnabled: false,
+      rebootAvailable: false,
+      rebootCanAuthorise: false,
+      rebootMessage: null,
+    };
     const calls = mockCommands({
       host_controls_status: () => status,
       test_host_controls: () => null,
