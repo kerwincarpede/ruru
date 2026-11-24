@@ -1,7 +1,8 @@
 ---
-// The Ruru owl on its night tile, as in the app icon
-// (src/ruru/src-tauri/icons/source/app-icon.svg). Each use passes its own id,
-// so the gradients on one page don't clash.
+// The Ruru owl on its night tile, as in the favicon (public/favicon.svg):
+// two glowing eyes under a pale brow. The pupils drift a little towards the
+// pointer (scripts/follow.ts). Each use passes its own id, so the gradients
+// on one page don't clash.
 interface Props {
 	size?: number;
 	id: string;
@@ -9,28 +10,57 @@ interface Props {
 const { size = 26, id } = Astro.props;
 ---
 
-<svg width={size} height={size} viewBox="32 32 960 960" aria-hidden="true" class="ru-logo">
+<svg width={size} height={size} viewBox="32 32 960 960" aria-hidden="true" class="ru-logo" data-follow="36">
 	<defs>
-		<linearGradient id={`${id}-tile`} x1="0" y1="0" x2="0" y2="1">
-			<stop offset="0" stop-color="#2a2f3a"></stop>
-			<stop offset="1" stop-color="#14171d"></stop>
-		</linearGradient>
-		<linearGradient id={`${id}-body`} x1="0" y1="0" x2="0" y2="1">
-			<stop offset="0" stop-color="#c98a3e"></stop>
-			<stop offset="1" stop-color="#8a5523"></stop>
-		</linearGradient>
+		<clipPath id={`${id}-tile`}><rect x="32" y="32" width="960" height="960" rx="220"></rect></clipPath>
+		<radialGradient id={`${id}-bg`} cx="0.5" cy="0.42" r="0.7">
+			<stop offset="0" stop-color="#1f232c"></stop>
+			<stop offset="1" stop-color="#07080a"></stop>
+		</radialGradient>
+		<radialGradient id={`${id}-glow`}>
+			<stop offset="0" stop-color="#f5b52e" stop-opacity="0.38"></stop>
+			<stop offset="1" stop-color="#f5b52e" stop-opacity="0"></stop>
+		</radialGradient>
+		<radialGradient id={`${id}-iris`} cx="0.5" cy="0.42" r="0.58">
+			<stop offset="0" stop-color="#fff0a0"></stop>
+			<stop offset="0.55" stop-color="#ffc933"></stop>
+			<stop offset="1" stop-color="#e08a06"></stop>
+		</radialGradient>
 	</defs>
-	<rect x="32" y="32" width="960" height="960" rx="220" fill={`url(#${id}-tile)`}></rect>
-	<circle cx="760" cy="250" r="96" fill="#f3e6c8" opacity="0.18"></circle>
-	<path d="M262 214 L380 318 Q512 270 644 318 L762 214 L770 500 Q790 846 512 880 Q234 846 254 500 Z" fill={`url(#${id}-body)`}></path>
-	<path d="M512 610 Q420 640 400 760 Q512 840 624 760 Q604 640 512 610 Z" fill="#f1dfc4" opacity="0.35"></path>
-	<circle cx="400" cy="474" r="128" fill="#f1dfc4"></circle>
-	<circle cx="624" cy="474" r="128" fill="#f1dfc4"></circle>
-	<circle cx="400" cy="474" r="80" fill="#f2b631"></circle>
-	<circle cx="624" cy="474" r="80" fill="#f2b631"></circle>
-	<circle cx="400" cy="474" r="44" fill="#14171d"></circle>
-	<circle cx="624" cy="474" r="44" fill="#14171d"></circle>
-	<circle cx="418" cy="456" r="13" fill="#ffffff"></circle>
-	<circle cx="642" cy="456" r="13" fill="#ffffff"></circle>
-	<path d="M478 560 L546 560 L512 632 Z" fill="#3a2a1a"></path>
+	<g clip-path={`url(#${id}-tile)`}>
+		<rect x="32" y="32" width="960" height="960" fill={`url(#${id}-bg)`}></rect>
+		<circle cx="352" cy="540" r="270" fill={`url(#${id}-glow)`}></circle>
+		<circle cx="672" cy="540" r="270" fill={`url(#${id}-glow)`}></circle>
+		<circle cx="352" cy="540" r="150" fill={`url(#${id}-iris)`}></circle>
+		<circle cx="672" cy="540" r="150" fill={`url(#${id}-iris)`}></circle>
+		<g class="ru-logo-pupils">
+			<circle cx="352" cy="548" r="90" fill="#050506"></circle>
+			<circle cx="672" cy="548" r="90" fill="#050506"></circle>
+			<circle cx="392" cy="506" r="28" fill="#fff"></circle>
+			<circle cx="712" cy="506" r="28" fill="#fff"></circle>
+			<circle cx="324" cy="584" r="10" fill="#fff" opacity="0.6"></circle>
+			<circle cx="644" cy="584" r="10" fill="#fff" opacity="0.6"></circle>
+		</g>
+		<path d="M168 372 Q352 278 500 452" fill="none" stroke="#ece0c8" stroke-width="40" stroke-linecap="round"></path>
+		<path d="M856 372 Q672 278 524 452" fill="none" stroke="#ece0c8" stroke-width="40" stroke-linecap="round"></path>
+		<path d="M478 640 L546 640 L512 730 Z" fill="#cdb48a"></path>
+	</g>
 </svg>
+
+<script>
+	import '../scripts/follow';
+</script>
+
+<style>
+	.ru-logo-pupils {
+		translate: var(--follow-x, 0) var(--follow-y, 0);
+		transition: translate 0.6s cubic-bezier(0.2, 0.7, 0.3, 1);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.ru-logo-pupils {
+			translate: none;
+			transition: none;
+		}
+	}
+</style>

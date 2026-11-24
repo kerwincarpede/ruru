@@ -1,0 +1,129 @@
+---
+// Ruru's owl, the same drawing and moods as the app's
+// (src/ruru/src/app/Owl.tsx). The animations come straight from the app's
+// owl.css. The markup below mirrors Owl.tsx line for line, and
+// scripts/check-owl.mjs fails the build if the two drift apart.
+//
+// Moods, as in the app:
+// - `awake`: blinks now and then, with a rare double-blink or wink.
+// - `scanning`: pupils sweep side to side, then stop and stare out.
+// - `counting`: pupils look sideways by `look`, from -1 (left) to 1 (right).
+// - `drowsy`: heavy lids that droop once and stay down.
+// - `puzzled`: a glance left, a glance right and a small shrug of the brows.
+// - `closed`: shut eyes, with one eye peeking open now and then.
+// - `asleep`: shut eyes, breathing brows and a drifting "z".
+// - `dim`: small and quiet, with a slow sleepy blink.
+//
+// Pass `class="on-wall"` on the dark wall, and `follow` to have the pupils
+// drift a little towards the pointer (scripts/follow.ts). Each use passes its
+// own `id`, so the gradients on one page don't clash.
+import '../../../ruru/src/app/owl.css';
+
+export type OwlMood = 'awake' | 'scanning' | 'counting' | 'drowsy' | 'puzzled' | 'closed' | 'asleep' | 'dim';
+
+interface Props {
+	mood: OwlMood;
+	id: string;
+	look?: number;
+	follow?: boolean;
+	class?: string;
+}
+
+const { mood, id, look = 0, follow = false, class: className } = Astro.props;
+/** The farthest the pupils drift towards the pointer, less than LOOK_RANGE. */
+const FOLLOW_RANGE = 6;
+
+const EYES = [
+	{ side: 'l', cx: 66 },
+	{ side: 'r', cx: 154 },
+] as const;
+const CY = 86;
+const R = 40;
+/** The farthest the pupils move sideways inside the iris. */
+const LOOK_RANGE = 13;
+
+const style = `--owl-look: ${Math.max(-1, Math.min(1, look)) * LOOK_RANGE}px`;
+---
+
+<svg class={['owl', `is-${mood}`, className].filter(Boolean).join(' ')} viewBox="-10 -6 240 160" style={style} aria-hidden="true" data-follow={follow ? FOLLOW_RANGE : undefined}>
+	<defs>
+		<radialGradient id={`${id}iris`} cx=".5" cy=".42" r=".58">
+			<stop offset="0" stop-color="#fff0a0" />
+			<stop offset=".55" stop-color="#ffc933" />
+			<stop offset="1" stop-color="#e08a06" />
+		</radialGradient>
+		<radialGradient id={`${id}glow`}>
+			<stop offset="0" stop-color="#f5b52e" />
+			<stop offset="1" stop-color="#f5b52e" stop-opacity="0" />
+		</radialGradient>
+		{EYES.map(({ side, cx }) => (
+			<clipPath id={`${id}clip-${side}`}>
+				<circle cx={cx} cy={CY} r={R + 1} />
+			</clipPath>
+		))}
+	</defs>
+	{EYES.map(({ side, cx }) => (
+		<circle class="owl-glow" cx={cx} cy={CY} r="74" fill={`url(#${id}glow)`} />
+	))}
+	{EYES.map(({ side, cx }) => (
+		<g class={`owl-side owl-${side}`}>
+			<g class="owl-eye">
+				<circle cx={cx} cy={CY} r={R} fill={`url(#${id}iris)`} />
+				<g class="owl-pupil">
+					<circle cx={cx} cy={CY + 2} r="24" fill="#0b0b0c" />
+					<circle cx={cx + 9} cy={CY - 9} r="7" fill="#fff" />
+				</g>
+				<g clip-path={`url(#${id}clip-${side})`}>
+					<path class="owl-lid" d={`M${cx - R - 2} ${CY - R - 4} H${cx + R + 2} V${CY - 6} Q${cx} ${CY + 8} ${cx - R - 2} ${CY - 6} Z`} />
+				</g>
+			</g>
+			<path class="owl-lash" d={`M${cx - 30} ${CY + 2} Q${cx} ${CY + 20} ${cx + 30} ${CY + 2}`} />
+		</g>
+	))}
+	<g class="owl-brows">
+		<path class="owl-brow" d="M14 44 Q66 14 104 64" />
+		<path class="owl-brow" d="M206 44 Q154 14 116 64" />
+	</g>
+	<path class="owl-beak" d="M103 116 L117 116 L110 136 Z" />
+	<text class="owl-z" x="200" y="40">
+		z
+	</text>
+</svg>
+
+<script>
+	import '../scripts/follow';
+</script>
+
+<style is:global>
+	/* The app picks the owl's colours from the system theme; the site picks
+	   them from its own theme switch. These are the app's two sets from
+	   owl.css (check-owl.mjs keeps them equal). The lids take the colour
+	   behind the owl: the page, or --ru-owl-bg where a section sets it. */
+	.owl {
+		--bg: var(--ru-owl-bg, var(--ru-bg));
+		--wall: var(--ru-wall);
+	}
+	:root[data-theme='dark'] .owl {
+		--owl-brow: #ece0c8;
+		--owl-beak: #cdb48a;
+		--owl-glow: 0.38;
+	}
+	:root[data-theme='light'] .owl:not(.on-wall) {
+		--owl-brow: #7a5532;
+		--owl-beak: #b08a55;
+		--owl-glow: 0.22;
+	}
+
+	/* Following the pointer adds to the mood's own movement, except where the
+	   mood moves the pupils itself. */
+	.owl[data-follow]:not(.is-scanning, .is-counting, .is-puzzled) .owl-pupil {
+		translate: var(--follow-x, 0) var(--follow-y, 0);
+		transition: translate 0.6s cubic-bezier(0.2, 0.7, 0.3, 1);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.owl[data-follow] .owl-pupil {
+			translate: none;
+		}
+	}
+</style>

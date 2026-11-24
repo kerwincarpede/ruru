@@ -1,0 +1,397 @@
+---
+// The camera wall in the landing page's hero: seven made-up cameras drawn as
+// night-time infrared scenes, playing one story on a loop. It shares the
+// hero's timeline (--loop, set by ControlRoom.astro), so the MQTT feed and the
+// Home Assistant card change in step with it:
+//    2%  a cat crosses the back yard (motion, Cat chip)
+//   10%  front door motion, 18% Person chip, 26% alert (red)
+//   34%  Home Assistant maximises the front door, 58% restores the wall
+//   64%  the person has gone, 70% motion ends
+//   72-94% Edit layout: drag Driveway, resize Porch and Street, Done
+//   97-100% the wall fades and starts again
+// `activity` picks how tiles are marked, as Settings → Home Assistant →
+// Activity style does: gap (Outline between tiles), thin, corners or top.
+
+interface Props {
+	activity?: 'gap' | 'thin' | 'corners' | 'top';
+}
+
+const { activity = 'gap' } = Astro.props;
+---
+
+<div class={`rw as-${activity}`} role="img" aria-label="Ruru's camera wall: a person walks up to the front door, the tile is marked for motion, a Person chip appears, then an alert turns it red and Home Assistant maximises it. Then the layout is edited.">
+	<svg width="0" height="0" style="position: absolute" aria-hidden="true">
+		<defs>
+			<radialGradient id="rw-gl"><stop offset="0" class="gl0"></stop><stop offset="1" class="gl1"></stop></radialGradient>
+		</defs>
+	</svg>
+	<div class="rw-in">
+		<div class="rw-grid"></div>
+
+		<div class="t t-fd">
+			<i class="mk mk-o"></i>
+			<div class="pic">
+				<svg class="scene" viewBox="0 0 160 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+					<rect class="k2" width="160" height="120"></rect>
+					<rect class="k1" y="96" width="160" height="24"></rect>
+					<rect class="k3" y="94.5" width="160" height="1.5"></rect>
+					<rect class="k0" x="14" y="30" width="42" height="32" rx="1"></rect>
+					<path class="ln" d="M35 30V62M14 46H56"></path>
+					<rect class="k3" x="86" y="24" width="38" height="71"></rect>
+					<rect class="k0" x="90" y="28" width="30" height="67"></rect>
+					<path class="ln" d="M94 34h22v26h-22zM94 64h22v26h-22z"></path>
+					<circle class="k5" cx="115" cy="62" r="1.6"></circle>
+					<circle class="porch-light" cx="136" cy="36" r="30" fill="url(#rw-gl)"></circle>
+					<rect class="k4" x="133" y="31" width="6" height="9" rx="1.5"></rect>
+					<circle class="k6" cx="136" cy="36" r="2.2"></circle>
+					<rect class="k3" x="80" y="95" width="50" height="5"></rect>
+					<rect class="k4" x="76" y="100" width="58" height="5"></rect>
+					<path class="k3" d="M62 95c1-10 4-14 6-8 1-9 5-11 6-2 2-6 5-4 4 10z"></path>
+					<rect class="k4" x="63" y="89" width="14" height="7" rx="1"></rect>
+					<rect class="kp parcel" x="96" y="88" width="13" height="8" rx="1"></rect>
+					<g class="person">
+						<g transform="translate(0 -23.75) scale(1.25)"><g class="bob">
+							<circle class="kp" cx="0" cy="49" r="5.6"></circle>
+							<rect class="kp" x="-7.5" y="56" width="15" height="24" rx="6"></rect>
+							<rect class="kp" x="-6" y="76" width="5" height="19" rx="2.5"></rect>
+							<rect class="kp" x="1" y="76" width="5" height="19" rx="2.5"></rect>
+							<rect class="k5 carry" x="3" y="62" width="12" height="9" rx="1"></rect>
+						</g></g>
+					</g>
+				</svg>
+				<span class="ts">2026-11-24 02:14:07</span>
+				<i class="mk mk-i"></i><i class="mk mk-c c1"></i><i class="mk mk-c c2"></i><i class="mk mk-c c3"></i><i class="mk mk-c c4"></i><i class="mk mk-t"></i>
+				<span class="chips"><b class="chip">Person</b></span>
+				<span class="cap"><i class="lv"></i>Front door<em>&#160;· Alert</em></span>
+			</div>
+			<i class="eo"></i>
+		</div>
+
+		<div class="t t-dw">
+			<i class="mk mk-o"></i>
+			<div class="pic">
+				<svg class="scene" viewBox="0 0 160 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+					<rect class="k1" width="160" height="120"></rect>
+					<rect class="k2" width="160" height="50"></rect>
+					<path class="kg" d="M0 120H160L118 50H42z"></path>
+					<path class="ln2" d="M42 50L0 120M118 50L160 120"></path>
+					<circle cx="141" cy="12" r="22" fill="url(#rw-gl)" opacity="0.5"></circle>
+					<rect class="k4" x="140" y="12" width="2" height="40"></rect>
+					<circle class="k6" cx="141" cy="12" r="2.4"></circle>
+					<path class="k3" d="M48 92c2-13 9-18 18-19h30c10 1 16 6 18 19v10H48z"></path>
+					<path class="k0" d="M60 78h40l6 11H54z"></path>
+					<circle class="k0" cx="62" cy="102" r="7"></circle>
+					<circle class="k0" cx="100" cy="102" r="7"></circle>
+					<rect class="k5" x="51" y="92" width="7" height="3" rx="1"></rect>
+					<rect class="k5" x="104" y="92" width="7" height="3" rx="1"></rect>
+				</svg>
+				<span class="ts">2026-11-24 02:14:07</span>
+				<i class="mk mk-i"></i><i class="mk mk-c c1"></i><i class="mk mk-c c2"></i><i class="mk mk-c c3"></i><i class="mk mk-c c4"></i><i class="mk mk-t"></i>
+				<span class="cap"><i class="lv"></i>Driveway</span>
+			</div>
+			<i class="eo"></i>
+		</div>
+
+		<div class="t t-by">
+			<i class="mk mk-o"></i>
+			<div class="pic">
+				<svg class="scene" viewBox="0 0 160 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+					<rect class="k1" width="160" height="120"></rect>
+					<rect class="k2" y="28" width="160" height="44"></rect>
+					<path class="ln" d="M10 28v44M22 28v44M34 28v44M46 28v44M58 28v44M70 28v44M82 28v44M94 28v44M106 28v44M118 28v44M130 28v44M142 28v44M154 28v44"></path>
+					<rect class="kg" y="72" width="160" height="48"></rect>
+					<circle class="k3" cx="128" cy="34" r="24"></circle>
+					<circle class="k2" cx="112" cy="44" r="13"></circle>
+					<rect class="k3" x="125" y="52" width="6" height="24"></rect>
+					<ellipse class="k3" cx="40" cy="104" rx="22" ry="5"></ellipse>
+					<g class="cat">
+						<ellipse class="kp" cx="0" cy="96" rx="9" ry="4.2"></ellipse>
+						<circle class="kp" cx="9.5" cy="91.5" r="3.6"></circle>
+						<path class="kp" d="M7 88.5l1.2-4 2.4 3zM10.5 88.5l2.2-3.6 1.2 4z"></path>
+						<path class="ln2" style="stroke: #a3afb6" d="M-8 95c-6-2-7-8-4-11"></path>
+						<rect class="kp" x="-6" y="98" width="2.2" height="6" rx="1"></rect>
+						<rect class="kp" x="4" y="98" width="2.2" height="6" rx="1"></rect>
+					</g>
+				</svg>
+				<span class="ts">2026-11-24 02:14:07</span>
+				<i class="mk mk-i"></i><i class="mk mk-c c1"></i><i class="mk mk-c c2"></i><i class="mk mk-c c3"></i><i class="mk mk-c c4"></i><i class="mk mk-t"></i>
+				<span class="chips"><b class="chip">Cat</b></span>
+				<span class="cap"><i class="lv"></i>Back yard</span>
+			</div>
+			<i class="eo"></i>
+		</div>
+
+		<div class="t t-ga">
+			<i class="mk mk-o"></i>
+			<div class="pic">
+				<svg class="scene" viewBox="0 0 160 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+					<rect class="k2" width="160" height="120"></rect>
+					<rect class="k1" y="88" width="160" height="32"></rect>
+					<rect class="k6" x="60" y="18" width="40" height="3" rx="1.5" opacity="0.7"></rect>
+					<circle cx="80" cy="20" r="34" fill="url(#rw-gl)" opacity="0.35"></circle>
+					<path class="ln2" d="M10 30h48M10 50h48M10 70h48"></path>
+					<rect class="k4" x="14" y="22" width="10" height="8"></rect>
+					<rect class="k3" x="30" y="40" width="16" height="10"></rect>
+					<rect class="k4" x="16" y="60" width="8" height="10"></rect>
+					<rect class="k3" x="96" y="66" width="56" height="6"></rect>
+					<rect class="k3" x="100" y="72" width="4" height="18"></rect>
+					<rect class="k3" x="144" y="72" width="4" height="18"></rect>
+					<circle class="ln2" cx="80" cy="96" r="10"></circle>
+					<circle class="ln2" cx="112" cy="96" r="10"></circle>
+					<path class="ln2" d="M80 96l12-14h14l6 14M92 82l-4-6h-6M106 82l2-6"></path>
+				</svg>
+				<span class="ts">2026-11-24 02:14:07</span>
+				<i class="mk mk-i"></i><i class="mk mk-c c1"></i><i class="mk mk-c c2"></i><i class="mk mk-c c3"></i><i class="mk mk-c c4"></i><i class="mk mk-t"></i>
+				<span class="cap"><i class="lv"></i>Garage</span>
+			</div>
+			<i class="eo"></i>
+		</div>
+
+		<div class="t t-sg">
+			<i class="mk mk-o"></i>
+			<div class="pic">
+				<svg class="scene" viewBox="0 0 160 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+					<rect class="k1" width="160" height="120"></rect>
+					<path class="k3" d="M0 0H44V88L0 120z"></path>
+					<path class="k2" d="M160 0H116V88L160 120z"></path>
+					<path class="kg" d="M44 88H116L160 120H0z"></path>
+					<rect class="k0" x="44" y="18" width="72" height="70"></rect>
+					<rect class="k3" x="56" y="30" width="48" height="58"></rect>
+					<path class="ln" d="M62 30v58M70 30v58M78 30v58M86 30v58M94 30v58M100 30v58M56 44h48M56 74h48"></path>
+					<rect class="k4" x="126" y="70" width="18" height="30" rx="2"></rect>
+					<rect class="k5" x="124" y="66" width="22" height="5" rx="1.5"></rect>
+				</svg>
+				<span class="ts">2026-11-24 02:14:07</span>
+				<i class="mk mk-i"></i><i class="mk mk-c c1"></i><i class="mk mk-c c2"></i><i class="mk mk-c c3"></i><i class="mk mk-c c4"></i><i class="mk mk-t"></i>
+				<span class="cap"><i class="lv"></i>Side gate</span>
+			</div>
+			<i class="eo"></i>
+		</div>
+
+		<div class="t t-po">
+			<i class="mk mk-o"></i>
+			<div class="pic">
+				<svg class="scene" viewBox="0 0 240 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+					<rect class="k2" width="240" height="90"></rect>
+					<rect class="k1" y="62" width="240" height="28"></rect>
+					<rect class="k0" x="150" y="12" width="46" height="30" rx="1"></rect>
+					<path class="ln" d="M173 12v30M150 27h46"></path>
+					<path class="ln2" d="M0 44H240"></path>
+					<path class="ln" d="M12 44v18M26 44v18M40 44v18M54 44v18M68 44v18M82 44v18M96 44v18M110 44v18M124 44v18M138 44v18M152 44v18M166 44v18M180 44v18M194 44v18M208 44v18M222 44v18M236 44v18"></path>
+					<path class="k4" d="M40 70h26v-20h4v26H36V50h4z"></path>
+					<rect class="k3" x="40" y="62" width="26" height="4"></rect>
+					<path class="k3" d="M200 66c0-12 6-18 10-10 2-10 8-10 9 0 4-6 8-2 6 10z"></path>
+					<rect class="k4" x="203" y="62" width="18" height="10" rx="1.5"></rect>
+				</svg>
+				<span class="ts">2026-11-24 02:14:07</span>
+				<i class="mk mk-i"></i><i class="mk mk-c c1"></i><i class="mk mk-c c2"></i><i class="mk mk-c c3"></i><i class="mk mk-c c4"></i><i class="mk mk-t"></i>
+				<span class="cap"><i class="lv"></i>Porch</span>
+			</div>
+			<i class="eo"></i>
+		</div>
+
+		<div class="t t-st">
+			<i class="mk mk-o"></i>
+			<div class="pic">
+				<svg class="scene" viewBox="0 0 240 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+					<rect class="k0" width="240" height="90"></rect>
+					<path class="k1" d="M0 52V30l18-12 18 12v22zM40 52V24h30v28zM78 52V34l22-16 22 16v18zM150 52V28h36v24zM192 52V36l20-14 20 14v16z"></path>
+					<rect class="k0" x="88" y="38" width="8" height="8"></rect>
+					<rect class="k5" x="160" y="36" width="7" height="7" opacity="0.6"></rect>
+					<rect class="k2" y="52" width="240" height="38"></rect>
+					<path class="ld" d="M0 72H240"></path>
+					<circle cx="132" cy="18" r="30" fill="url(#rw-gl)" opacity="0.55"></circle>
+					<rect class="k4" x="131" y="18" width="2" height="36"></rect>
+					<circle class="k6" cx="132" cy="18" r="2.4"></circle>
+					<path class="k3" d="M20 66c2-7 6-10 12-10h22c7 0 11 3 13 10v6H20z"></path>
+					<circle class="k0" cx="30" cy="72" r="4.5"></circle>
+					<circle class="k0" cx="58" cy="72" r="4.5"></circle>
+				</svg>
+				<span class="ts">2026-11-24 02:14:07</span>
+				<i class="mk mk-i"></i><i class="mk mk-c c1"></i><i class="mk mk-c c2"></i><i class="mk mk-c c3"></i><i class="mk mk-c c4"></i><i class="mk mk-t"></i>
+				<span class="cap"><i class="lv"></i>Street</span>
+			</div>
+			<i class="eo"></i>
+		</div>
+
+		<div class="rw-bar">
+			<b>Edit layout</b>
+			<span class="rw-opt"><i class="ck"></i>Lock to 16:9</span>
+			<span class="rw-opt"><i class="ck"></i>Fit to window</span>
+			<span class="rw-opt"><i class="ck off"></i>Reset to Frigate order</span>
+			<span class="rw-done">Done</span>
+		</div>
+		<svg class="rw-cur" viewBox="0 0 20 24" aria-hidden="true"><path d="M2 2l15 12h-7l4 8-3 1.4-4-8.2L2 20z"></path></svg>
+	</div>
+</div>
+
+<style>
+	@property --fx { syntax: '<color>'; inherits: true; initial-value: rgba(232, 183, 63, 0); }
+	@property --chip { syntax: '<color>'; inherits: true; initial-value: #e8b73f; }
+	@property --cap { syntax: '<color>'; inherits: true; initial-value: #ece9e3; }
+	/* ---------- The camera wall ---------- */
+
+	.rw { position: relative; width: 100%; height: 100%; overflow: hidden; background: #08090b; container-type: inline-size; color: #ece9e3; font-family: var(--ru-font-sans); }
+	.rw * { box-sizing: border-box; }
+	.rw-in { position: absolute; inset: 0.45cqw; animation: cr-rw-fade var(--loop) linear infinite; }
+
+	.t { position: absolute; padding: 0.55cqw; }
+	.t-fd { left: 0; top: 0; width: 50%; height: 66.667%; z-index: 8; animation: cr-fd-pos var(--loop) linear infinite, cr-fd-fx var(--loop) linear infinite; }
+	.t-dw { left: 50%; top: 0; width: 25%; height: 33.333%; z-index: 5; animation: cr-dw-pos var(--loop) linear infinite; }
+	.t-by { left: 75%; top: 0; width: 25%; height: 33.333%; z-index: 2; animation: cr-by-pos var(--loop) linear infinite, cr-by-fx var(--loop) linear infinite; }
+	.t-ga { left: 50%; top: 33.333%; width: 25%; height: 33.333%; }
+	.t-sg { left: 75%; top: 33.333%; width: 25%; height: 33.333%; }
+	.t-po { left: 0; top: 66.667%; width: 50%; height: 33.333%; animation: cr-po-pos var(--loop) linear infinite; }
+	.t-st { left: 50%; top: 66.667%; width: 50%; height: 33.333%; z-index: 1; animation: cr-st-pos var(--loop) linear infinite; }
+
+	.pic { position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: 0.55cqw; background: #1b2227; }
+	.pic::after { content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none; background: radial-gradient(120% 95% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.5)), repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.022) 0 1px, transparent 1px 3px); }
+	.t-dw .pic { animation: cr-dw-lift var(--loop) linear infinite; }
+	.scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+	.ts { position: absolute; left: 0.7cqw; top: 0.6cqw; z-index: 2; font: 500 0.9cqw/1 var(--ru-font-mono); letter-spacing: 0.02em; color: rgba(255, 255, 255, 0.7); text-shadow: 0 1px 2px #000; white-space: nowrap; }
+	.cap { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; display: flex; align-items: center; gap: 0.6cqw; padding: 2.4cqw 0.9cqw 0.75cqw; background: linear-gradient(transparent, rgba(0, 0, 0, 0.7)); color: var(--cap); font-size: 1.4cqw; font-weight: 600; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); white-space: nowrap; }
+	.lv { flex: none; width: 0.65cqw; height: 0.65cqw; border-radius: 50%; background: #4ade80; box-shadow: 0 0 0.5cqw #4ade80; }
+	.cap em { display: inline-block; max-width: 0; overflow: hidden; opacity: 0; font-style: normal; vertical-align: bottom; }
+	.t-fd .cap em { animation: cr-fd-alert var(--loop) linear infinite; }
+
+	.chips { position: absolute; right: 0.6cqw; top: 0.6cqw; z-index: 2; display: flex; gap: 0.4cqw; }
+	.chip { display: block; padding: 0.5cqw 1cqw; border-radius: 99cqw; background: var(--chip); color: #0b0c0f; font: 700 1.25cqw/1 var(--ru-font-sans); box-shadow: 0 0 1.6cqw -0.2cqw var(--chip); opacity: 0; transform: scale(0.8); transform-origin: right center; }
+	.t-fd .chip { animation: cr-fd-chip var(--loop) linear infinite; }
+	.t-by .chip { animation: cr-by-chip var(--loop) linear infinite; }
+
+	/* Activity marks: one per style; the wall's as-* class picks which shows. */
+	.mk { position: absolute; z-index: 3; pointer-events: none; }
+	.mk-o { inset: 0; border: 0.3cqw solid var(--fx); border-radius: 1.05cqw; box-shadow: 0 0 2.2cqw 0 var(--fx); }
+	.mk-i { inset: 0; display: none; border: 0.15cqw solid var(--fx); border-radius: 0.55cqw; }
+	.mk-c { display: none; width: 1.5cqw; height: 1.5cqw; border: 0 solid var(--fx); }
+	.mk-c.c1 { left: 0.45cqw; top: 0.45cqw; border-top-width: 0.24cqw; border-left-width: 0.24cqw; border-top-left-radius: 0.3cqw; }
+	.mk-c.c2 { right: 0.45cqw; top: 0.45cqw; border-top-width: 0.24cqw; border-right-width: 0.24cqw; border-top-right-radius: 0.3cqw; }
+	.mk-c.c3 { left: 0.45cqw; bottom: 0.45cqw; border-bottom-width: 0.24cqw; border-left-width: 0.24cqw; border-bottom-left-radius: 0.3cqw; }
+	.mk-c.c4 { right: 0.45cqw; bottom: 0.45cqw; border-bottom-width: 0.24cqw; border-right-width: 0.24cqw; border-bottom-right-radius: 0.3cqw; }
+	.mk-t { left: 0; right: 0; top: 0; height: 0.3cqw; display: none; background: var(--fx); }
+	.as-thin .mk-o, .as-corners .mk-o, .as-top .mk-o { display: none; }
+	.as-thin .mk-i, .as-corners .mk-c, .as-top .mk-t { display: block; }
+	.as-corners .chips, .as-top .chips { top: 1.1cqw; right: 1.1cqw; }
+
+	/* Edit layout */
+	.eo { position: absolute; inset: 0.55cqw; z-index: 4; border: 0.1cqw dashed rgba(255, 255, 255, 0.5); border-radius: 0.55cqw; opacity: 0; pointer-events: none; animation: cr-rw-edit var(--loop) linear infinite; }
+	.eo::after { content: ''; position: absolute; right: -0.4cqw; bottom: -0.4cqw; width: 0.8cqw; height: 0.8cqw; border-radius: 0.2cqw; background: #ece9e3; box-shadow: 0 0 0 0.12cqw #08090b; }
+	.rw-grid { position: absolute; inset: 0; z-index: 0; opacity: 0; pointer-events: none; animation: cr-rw-edit var(--loop) linear infinite; background-image: linear-gradient(to right, rgba(255, 255, 255, 0.07) 1px, transparent 1px), linear-gradient(to bottom, rgba(255, 255, 255, 0.07) 1px, transparent 1px); background-size: 12.5% 16.667%; }
+	.rw-bar { position: absolute; left: 50%; top: 1.2cqw; z-index: 12; display: flex; align-items: center; gap: 1.1cqw; padding: 0.55cqw 0.6cqw 0.55cqw 1.2cqw; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 99cqw; background: rgba(30, 33, 40, 0.9); backdrop-filter: blur(8px); font-size: 1.02cqw; white-space: nowrap; opacity: 0; transform: translate(-50%, -0.6cqw); animation: cr-rw-bar var(--loop) linear infinite; box-shadow: 0 1cqw 3cqw rgba(0, 0, 0, 0.5); }
+	.rw-bar b { font-weight: 650; }
+	.rw-opt { display: inline-flex; align-items: center; gap: 0.4cqw; color: #cfc9bf; }
+	.ck { width: 0.95cqw; height: 0.95cqw; border-radius: 0.22cqw; background: #e0a458; box-shadow: inset 0 0 0 0.16cqw #e0a458; }
+	.ck.off { background: transparent; box-shadow: inset 0 0 0 0.12cqw #8b867d; }
+	.rw-done { padding: 0.4cqw 1.1cqw; border-radius: 99cqw; background: #e8b73f; color: #08090b; font-weight: 650; animation: cr-rw-done var(--loop) linear infinite; }
+	.rw-cur { position: absolute; left: 40%; top: 40%; z-index: 13; width: 2.1cqw; height: auto; opacity: 0; pointer-events: none; filter: drop-shadow(0 0.2cqw 0.4cqw rgba(0, 0, 0, 0.6)); animation: cr-rw-cur var(--loop) linear infinite; }
+	.rw-cur path { fill: #ffffff; stroke: #08090b; stroke-width: 1.4; stroke-linejoin: round; }
+
+	/* Scene shading: infrared greys */
+	.k0 { fill: #161c21; } .k1 { fill: #222a30; } .k2 { fill: #2f3940; } .k3 { fill: #414d55; }
+	.k4 { fill: #56646d; } .k5 { fill: #75848d; } .k6 { fill: #f1f6f8; } .kp { fill: #e3eaee; }
+	.kg { fill: #283137; }
+	.ln { fill: none; stroke: #4b5861; stroke-width: 1.4; }
+	.ln2 { fill: none; stroke: #5d6b74; stroke-width: 2; }
+	.ld { fill: none; stroke: #5d6b74; stroke-width: 1.6; stroke-dasharray: 10 9; }
+	.gl0 { stop-color: #f4f7f8; stop-opacity: 0.7; } .gl1 { stop-color: #e9eef0; stop-opacity: 0; }
+	.porch-light { opacity: 0.35; animation: cr-fd-light var(--loop) linear infinite; }
+	.person { opacity: 0; animation: cr-walk var(--loop) linear infinite; }
+	.bob { animation: cr-bob 0.62s ease-in-out infinite; }
+	.carry { animation: cr-carry var(--loop) linear infinite; }
+	.parcel { opacity: 0; animation: cr-parcel var(--loop) linear infinite; }
+	.cat { opacity: 0; animation: cr-cat var(--loop) linear infinite; }
+
+	/* ---------- Wall timeline keyframes ---------- */
+
+	@keyframes cr-rw-fade { 0% { opacity: 0; } 2% { opacity: 1; } 97% { opacity: 1; } 99%, 100% { opacity: 0; } }
+
+	@keyframes cr-fd-pos {
+		0%, 34% { left: 0; top: 0; width: 50%; height: 66.667%; padding: 0.55cqw; animation-timing-function: cubic-bezier(0.55, 0, 0.2, 1); }
+		36.5%, 57.6% { left: 0; top: 0; width: 100%; height: 100%; padding: 0; animation-timing-function: cubic-bezier(0.55, 0, 0.2, 1); }
+		60%, 100% { left: 0; top: 0; width: 50%; height: 66.667%; padding: 0.55cqw; }
+	}
+	@keyframes cr-fd-fx {
+		0%, 9.6% { --fx: rgba(232, 183, 63, 0); --chip: #e8b73f; --cap: #ece9e3; }
+		10%, 25.6% { --fx: #e8b73f; --chip: #e8b73f; --cap: #ece9e3; }
+		26%, 55.6% { --fx: #f2555a; --chip: #f2555a; --cap: #ff8a8d; }
+		56%, 69.6% { --fx: #e8b73f; --chip: #e8b73f; --cap: #ece9e3; }
+		70.4%, 100% { --fx: rgba(232, 183, 63, 0); --chip: #e8b73f; --cap: #ece9e3; }
+	}
+	@keyframes cr-fd-chip {
+		0%, 17.6% { opacity: 0; transform: scale(0.8); }
+		18.4%, 63.6% { opacity: 1; transform: scale(1); }
+		64.4%, 100% { opacity: 0; transform: scale(0.8); }
+	}
+	@keyframes cr-fd-alert {
+		0%, 25.6% { max-width: 0; opacity: 0; }
+		26.4%, 55.6% { max-width: 6cqw; opacity: 1; }
+		56.4%, 100% { max-width: 0; opacity: 0; }
+	}
+	@keyframes cr-fd-light { 0%, 9.6% { opacity: 0.3; } 10.4%, 69.6% { opacity: 0.95; } 71%, 100% { opacity: 0.3; } }
+
+	@keyframes cr-walk {
+		0%, 8% { transform: translate(-26px, 0); opacity: 0; }
+		9% { opacity: 1; }
+		22%, 46% { transform: translate(100px, 0); opacity: 1; }
+		62% { transform: translate(-6px, 0); opacity: 1; }
+		63.5%, 100% { transform: translate(-26px, 0); opacity: 0; }
+	}
+	@keyframes cr-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.1px); } }
+	@keyframes cr-carry { 0%, 45.6% { opacity: 1; } 46%, 100% { opacity: 0; } }
+	@keyframes cr-parcel { 0%, 45.6% { opacity: 0; } 46%, 96% { opacity: 1; } 98%, 100% { opacity: 0; } }
+
+	@keyframes cr-by-fx {
+		0%, 1.6% { --fx: rgba(232, 183, 63, 0); --chip: #e8b73f; }
+		2%, 7.6% { --fx: #e8b73f; --chip: #e8b73f; }
+		8.4%, 100% { --fx: rgba(232, 183, 63, 0); --chip: #e8b73f; }
+	}
+	@keyframes cr-by-chip { 0%, 3.6% { opacity: 0; transform: scale(0.8); } 4.2%, 7.6% { opacity: 1; transform: scale(1); } 8.4%, 100% { opacity: 0; transform: scale(0.8); } }
+	@keyframes cr-cat { 0%, 1.4% { transform: translate(-16px, 0); opacity: 0; } 2.2% { opacity: 1; } 8.2% { transform: translate(118px, 0); opacity: 1; } 8.8%, 100% { transform: translate(126px, 0); opacity: 0; } }
+
+	@keyframes cr-rw-edit { 0%, 71.6% { opacity: 0; } 72.6%, 92.6% { opacity: 1; } 93.6%, 100% { opacity: 0; } }
+	@keyframes cr-rw-bar { 0%, 71.6% { opacity: 0; transform: translate(-50%, -0.6cqw); } 72.6%, 92.8% { opacity: 1; transform: translate(-50%, 0); } 93.8%, 100% { opacity: 0; transform: translate(-50%, -0.6cqw); } }
+	@keyframes cr-rw-done { 0%, 91.6% { filter: none; transform: scale(1); } 92.2% { filter: brightness(1.25); transform: scale(0.94); } 93%, 100% { filter: none; transform: scale(1); } }
+
+	@keyframes cr-dw-pos {
+		0%, 74.5% { left: 50%; animation-timing-function: cubic-bezier(0.5, 0, 0.25, 1); }
+		79.5%, 98.4% { left: 75%; }
+		98.6%, 100% { left: 50%; }
+	}
+	@keyframes cr-dw-lift {
+		0%, 74% { transform: scale(1); box-shadow: none; }
+		74.6%, 79.4% { transform: scale(1.04); box-shadow: 0 1.5cqw 3cqw rgba(0, 0, 0, 0.7); }
+		80.2%, 100% { transform: scale(1); box-shadow: none; }
+	}
+	@keyframes cr-by-pos {
+		0%, 77% { left: 75%; animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+		80%, 98.4% { left: 50%; }
+		98.6%, 100% { left: 75%; }
+	}
+	@keyframes cr-po-pos {
+		0%, 82% { width: 50%; animation-timing-function: cubic-bezier(0.45, 0, 0.25, 1); }
+		87.6%, 98.4% { width: 25%; }
+		98.6%, 100% { width: 50%; }
+	}
+	@keyframes cr-st-pos {
+		0%, 86% { left: 50%; width: 50%; animation-timing-function: cubic-bezier(0.45, 0, 0.25, 1); }
+		89.6%, 98.4% { left: 25%; width: 75%; }
+		98.6%, 100% { left: 50%; width: 50%; }
+	}
+	@keyframes cr-rw-cur {
+		0%, 71.6% { left: 42%; top: 44%; opacity: 0; transform: scale(1); }
+		72.6% { left: 42%; top: 44%; opacity: 1; animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+		74.3% { left: 62%; top: 15%; transform: scale(1); }
+		74.6% { transform: scale(0.88); animation-timing-function: cubic-bezier(0.5, 0, 0.25, 1); }
+		79.5% { left: 87%; top: 15%; transform: scale(0.88); }
+		80.2% { left: 87%; top: 15%; transform: scale(1); animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+		81.8% { left: 49.4%; top: 97%; transform: scale(1); }
+		82% { transform: scale(0.88); animation-timing-function: cubic-bezier(0.45, 0, 0.25, 1); }
+		87.6% { left: 24.4%; top: 97%; transform: scale(0.88); }
+		88.4% { left: 24.4%; top: 97%; transform: scale(1); animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+		91.6% { left: 64%; top: 2.6%; transform: scale(1); }
+		92.2% { transform: scale(0.85); }
+		93% { left: 64%; top: 2.6%; transform: scale(1); opacity: 1; }
+		95%, 100% { left: 66%; top: 6%; opacity: 0; }
+	}
+</style>
