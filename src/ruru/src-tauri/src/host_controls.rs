@@ -59,9 +59,14 @@ pub fn app_ready() -> Result<(), String> {
     Ok(())
 }
 
-/// Mirrors `HostControlsCredentials` in src/app/api.ts.
+/// The account the agent signs in with. Mirrors `HostControlsCredentials`
+/// in src/app/api.ts.
 #[derive(serde::Deserialize)]
 pub struct HostControlsCredentials {
+    /// Use the wall's saved account; `username` and `password` are ignored.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    #[serde(default)]
+    shared: bool,
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     username: String,
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]

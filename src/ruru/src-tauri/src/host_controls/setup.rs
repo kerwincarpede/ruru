@@ -30,6 +30,11 @@ pub(super) struct Config {
     pub password: String,
     pub device_id: String,
     pub discovery_prefix: String,
+    /// The agent signs in with the wall's saved account, so that account
+    /// can't change while host controls are on. Setups from before sharing
+    /// was offered have their own account.
+    #[serde(default)]
+    pub shared: bool,
     migrations: Vec<Migration>,
 }
 
@@ -511,27 +516,64 @@ pub(super) fn status() -> HostControlsStatus {
     }
 }
 
-fn new_config(saved: MqttSettings, credentials: HostControlsCredentials) -> Result<Config, String> {
-    let username = credentials.username.trim();
+/// The agent's settings: the saved broker, signed in with the wall's saved
+/// account and `wall_password` when `credentials` share it, or with an
+/// account of its own.
+fn new_config(
+    saved: MqttSettings,
+    credentials: HostControlsCredentials,
+    wall_password: Option<String>,
+) -> Result<Config, String> {
     if !saved.enabled || saved.host.is_empty() || saved.device_id.is_empty() {
         return Err("Save your Home Assistant connection before setting up host controls.".into());
     }
-    if username.is_empty() || username == saved.username || username.len() > 1024 {
-        return Err("Enter a separate MQTT username for host controls.".into());
-    }
-    if credentials.password.is_empty() || credentials.password.len() > 1024 {
-        return Err("Enter the password for the host controls MQTT account.".into());
-    }
+    let (username, password) = if credentials.shared {
+        (saved.username, wall_password.unwrap_or_default())
+    } else {
+        let username = credentials.username.trim();
+        if username.is_empty() || username.len() > 1024 {
+            return Err("Enter an MQTT username for host controls.".into());
+        }
+        if username == saved.username {
+            return Err(
+                "That is Ruru’s Home Assistant account. Choose Use Ruru’s Home Assistant account instead."
+                    .into(),
+            );
+        }
+        if credentials.password.is_empty() || credentials.password.len() > 1024 {
+            return Err("Enter the password for the host controls MQTT account.".into());
+        }
+        (username.into(), credentials.password)
+    };
     Ok(Config {
         host: saved.host,
         port: saved.port,
         tls: saved.tls,
-        username: username.into(),
-        password: credentials.password,
+        username,
+        password,
         device_id: saved.device_id,
         discovery_prefix: saved.discovery_prefix,
+        shared: credentials.shared,
         migrations: Vec::new(),
     })
+}
+
+/// The agent's settings, reading the wall's saved password when the agent
+/// shares its account. The agent keeps its own copy because it runs while
+/// the wall is closed and must never wait on a keychain prompt.
+async fn resolve(
+    saved: MqttSettings,
+    credentials: HostControlsCredentials,
+) -> Result<Config, String> {
+    let wall_password = if credentials.shared {
+        let mqtt = saved.clone();
+        tauri::async_runtime::spawn_blocking(move || crate::mqtt::saved_password(&mqtt))
+            .await
+            .map_err(|err| err.to_string())??
+    } else {
+        None
+    };
+    new_config(saved, credentials, wall_password)
 }
 
 pub(super) async fn test(
@@ -539,7 +581,7 @@ pub(super) async fn test(
     credentials: HostControlsCredentials,
 ) -> Result<(), String> {
     check_platform()?;
-    agent::test(&new_config(saved, credentials)?).await
+    agent::test(&resolve(saved, credentials).await?).await
 }
 
 pub(super) async fn enable(
@@ -554,7 +596,7 @@ pub(super) async fn enable(
     if enabled() {
         return Err("Host controls are already enabled.".into());
     }
-    let mut config = new_config(saved, credentials)?;
+    let mut config = resolve(saved, credentials).await?;
     let dir = directory()?;
     agent::test(&config).await?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -635,21 +677,40 @@ pub(super) async fn disable() -> Result<Option<String>, String> {
     Ok(None)
 }
 
-pub(crate) fn check_wall_broker(input: &crate::mqtt::MqttInput) -> Result<(), String> {
+/// Refuses a wall connection change the agent would not follow: another
+/// broker, or, when the agent shares the wall's account, another username or
+/// `new_password`. An agent with its own account keeps it to itself.
+pub(crate) fn check_wall_broker(
+    input: &crate::mqtt::MqttInput,
+    new_password: Option<&str>,
+) -> Result<(), String> {
     if enabled() {
-        let config = read_config()?;
-        if !input.enabled
-            || input.host != config.host
-            || input.port != config.port
-            || input.tls != config.tls
-            || input.discovery_prefix != config.discovery_prefix
-            || input.username == config.username
-        {
-            return Err(
-                "Turn off host controls before changing the shared Home Assistant connection."
-                    .into(),
-            );
-        }
+        check_broker_change(&read_config()?, input, new_password)?;
+    }
+    Ok(())
+}
+
+fn check_broker_change(
+    config: &Config,
+    input: &crate::mqtt::MqttInput,
+    new_password: Option<&str>,
+) -> Result<(), String> {
+    let account_changed = if config.shared {
+        input.username != config.username
+            || new_password.is_some_and(|password| password != config.password)
+    } else {
+        input.username == config.username
+    };
+    if !input.enabled
+        || input.host != config.host
+        || input.port != config.port
+        || input.tls != config.tls
+        || input.discovery_prefix != config.discovery_prefix
+        || account_changed
+    {
+        return Err(
+            "Turn off host controls before changing the shared Home Assistant connection.".into(),
+        );
     }
     Ok(())
 }
@@ -672,9 +733,8 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn setup_reuses_the_saved_broker_and_requires_dedicated_credentials() {
-        let saved = MqttSettings {
+    fn saved_broker() -> MqttSettings {
+        MqttSettings {
             enabled: true,
             host: "broker.test".into(),
             port: 8883,
@@ -683,19 +743,104 @@ mod tests {
             discovery_prefix: "hass".into(),
             device_id: "device".into(),
             ..MqttSettings::default()
-        };
-        let credentials = |user: &str, password: &str| HostControlsCredentials {
+        }
+    }
+
+    fn credentials(shared: bool, user: &str, password: &str) -> HostControlsCredentials {
+        HostControlsCredentials {
+            shared,
             username: user.into(),
             password: password.into(),
-        };
-        assert!(new_config(saved.clone(), credentials("wall", "secret")).is_err());
-        assert!(new_config(saved.clone(), credentials("agent", "")).is_err());
-        let config = new_config(saved, credentials("agent", "secret")).unwrap();
+        }
+    }
+
+    #[test]
+    fn setup_shares_the_saved_account_by_copying_its_password() {
+        let config = new_config(
+            saved_broker(),
+            credentials(true, "ignored", "ignored"),
+            Some("wall secret".into()),
+        )
+        .unwrap();
+        assert!(config.shared);
+        assert_eq!(config.username, "wall");
+        assert_eq!(config.password, "wall secret");
         assert_eq!(config.broker().address(), "broker.test:8883");
-        assert!(config.tls);
-        assert_eq!(config.username, "agent");
         assert_eq!(config.discovery_prefix, "hass");
         assert_eq!(config.device_id, "device");
+        // A broker without logins needs no password.
+        let open = MqttSettings {
+            username: String::new(),
+            ..saved_broker()
+        };
+        let config = new_config(open, credentials(true, "", ""), None).unwrap();
+        assert_eq!(
+            (config.username.as_str(), config.password.as_str()),
+            ("", "")
+        );
+        let unsaved = MqttSettings {
+            enabled: false,
+            ..saved_broker()
+        };
+        assert!(new_config(unsaved, credentials(true, "", ""), None).is_err());
+    }
+
+    #[test]
+    fn setup_can_use_a_separate_account_on_the_saved_broker() {
+        let saved = saved_broker();
+        assert!(new_config(saved.clone(), credentials(false, "wall", "secret"), None).is_err());
+        assert!(new_config(saved.clone(), credentials(false, " ", "secret"), None).is_err());
+        assert!(new_config(saved.clone(), credentials(false, "agent", ""), None).is_err());
+        let config = new_config(
+            saved,
+            credentials(false, " agent ", "secret"),
+            Some("wall secret".into()),
+        )
+        .unwrap();
+        assert!(!config.shared);
+        assert!(config.tls);
+        assert_eq!(config.username, "agent");
+        assert_eq!(config.password, "secret");
+    }
+
+    #[test]
+    fn setups_from_before_sharing_keep_their_own_account() {
+        let config: Config = serde_json::from_str(
+            r#"{"host":"broker.test","port":1883,"tls":false,"username":"agent",
+            "password":"secret","device_id":"device","discovery_prefix":"homeassistant",
+            "migrations":[]}"#,
+        )
+        .unwrap();
+        assert!(!config.shared);
+    }
+
+    #[test]
+    fn the_wall_keeps_the_account_the_agent_shares() {
+        let input = |username: &str| crate::mqtt::MqttInput {
+            enabled: true,
+            host: "broker.test".into(),
+            port: 8883,
+            tls: true,
+            username: username.into(),
+            discovery_prefix: "hass".into(),
+            frigate_prefix: "frigate".into(),
+        };
+        let shared =
+            new_config(saved_broker(), credentials(true, "", ""), Some("pw".into())).unwrap();
+        assert!(check_broker_change(&shared, &input("wall"), None).is_ok());
+        assert!(check_broker_change(&shared, &input("wall"), Some("pw")).is_ok());
+        assert!(check_broker_change(&shared, &input("wall"), Some("new")).is_err());
+        assert!(check_broker_change(&shared, &input("other"), None).is_err());
+        let moved = crate::mqtt::MqttInput {
+            port: 1883,
+            ..input("wall")
+        };
+        assert!(check_broker_change(&shared, &moved, None).is_err());
+
+        let separate = new_config(saved_broker(), credentials(false, "agent", "pw"), None).unwrap();
+        assert!(check_broker_change(&separate, &input("wall"), Some("new")).is_ok());
+        assert!(check_broker_change(&separate, &input("other"), None).is_ok());
+        assert!(check_broker_change(&separate, &input("agent"), None).is_err());
     }
 
     #[test]

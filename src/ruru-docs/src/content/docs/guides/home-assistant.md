@@ -48,7 +48,7 @@ It also has controls:
 | **Check for updates** | A button that checks your update channel now, rather than waiting for the next check. |
 | **Display** | A switch that turns the screen off and on. Only where Ruru can do it: see [Display](#display). |
 
-The wall’s entities show as unavailable while Ruru is disconnected. With [Ubuntu host controls](#ubuntu-host-controls) on, the agent’s entities follow its separate connection. Problem sensors follow the cameras on the wall: hiding a camera removes its sensor, and showing it adds it back. Tiles reconnect on their own, so there are no Reconnect buttons; Ruru removes any an earlier version added. **Maximise** offers only the cameras on the wall.
+The wall’s entities show as unavailable while Ruru is disconnected. With [Ubuntu host controls](#ubuntu-host-controls) on, the agent’s entities follow the agent’s own connection. Problem sensors follow the cameras on the wall: hiding a camera removes its sensor, and showing it adds it back. Tiles reconnect on their own, so there are no Reconnect buttons; Ruru removes any an earlier version added. **Maximise** offers only the cameras on the wall.
 
 ## Updates from Home Assistant
 
@@ -87,21 +87,24 @@ Both sensors show zero when the wall is stopped. All agent entities show as unav
 
 ### Set up host controls
 
-1. Save the Ruru connection in **Settings → Home Assistant**.
-2. Create a separate account for the agent on the same MQTT 5-capable broker and grant the [permissions below](#broker-permissions).
-3. Choose **Enable host controls**, enter the separate MQTT username and password, and choose **Test host controls connection**.
-4. Confirm the startup change and choose **Enable and restart Ruru**. Ruru restarts under `ruru.service` and the agent runs under `ruru-host-agent.service`. Your previous user service file and matching GNOME autostart entries are saved and restored when you turn host controls off.
-5. Open the Home Assistant page again and look for **Host controls connected**. Open the existing Ruru device in Home Assistant to see the new controls and sensors.
+1. Save the Ruru connection in **Settings → Home Assistant**. The broker must support MQTT 5.
+2. Check that the account has the agent's [broker permissions](#broker-permissions).
+3. Choose **Enable host controls**. **Use Ruru’s Home Assistant account** is ticked, so the agent signs in with the saved account. To give the agent an account of its own, untick it and enter that account's username and password.
+4. Choose **Test host controls connection**.
+5. Confirm the startup change and choose **Enable and restart Ruru**. Ruru restarts under `ruru.service` and the agent runs under `ruru-host-agent.service`. Your previous user service file and matching GNOME autostart entries are saved and restored when you turn host controls off.
+6. Open the Home Assistant page again and look for **Host controls connected**. Open the existing Ruru device in Home Assistant to see the new controls and sensors.
 
 The wall starts whenever you sign into the graphical desktop, even if you turned it off in Home Assistant before signing out. Opening Ruru locally starts the service or raises the running window. The service also handles relaunches after in-app, Home Assistant, and automatic updates. Updates use the usual installer permissions. If you turn the wall off from Home Assistant during installation, the service stays on and reports that it is busy. Try again after the update finishes.
 
 Choose **Disable host controls** to stop the agent, restore the previous startup settings and remove its Home Assistant controls. If you edited a startup file that Ruru replaced, move it aside when prompted, then retry to restore the saved file. If the broker is unreachable, the agent stops immediately and **Retry broker cleanup** appears. Use it once the broker is reachable. Ruru keeps the agent’s credentials until it can remove the retained messages.
 
-The agent runs as your desktop user, connects only to your saved broker and sends the states listed here. Its MQTT credentials are in a separate user-readable file under Ruru’s local configuration directory. To see why the service could not start or connect, run `journalctl --user -u ruru-host-agent.service -u ruru.service -b` in the desktop session. The configuration folder’s `host-controls` directory holds the original startup files while the agent is enabled.
+The agent runs as your desktop user, connects only to your saved broker and sends the states listed here. It keeps its MQTT credentials in a file under Ruru’s local configuration directory that only your desktop account can read. With **Use Ruru’s Home Assistant account**, Ruru copies the saved password into that file, even when the wall keeps it in the keychain, so the agent can connect while the wall is closed and never waits for the keychain to unlock. While the agent shares the account, change its username or password only after you turn host controls off; Ruru says so if you try. The wall and the agent connect at the same time with their own client IDs, `ruru-<device id>` and `ruru-<device id>-host`, so neither replaces the other. To see why the service could not start or connect, run `journalctl --user -u ruru-host-agent.service -u ruru.service -b` in the desktop session. The configuration folder’s `host-controls` directory holds the original startup files while the agent is enabled.
 
 ### Broker permissions
 
-Substitute the discovery prefix and device ID from Ruru’s MQTT setup and `settings.json`. Give the agent account read access to `<discovery prefix>/status` and `ruru/<device id>/agent/command/+`. Give it write access to:
+Substitute the discovery prefix and device ID from Ruru’s MQTT setup and `settings.json`. With the Mosquitto broker add-on, a Home Assistant user can read and write every topic unless you set up an access control list, so there is nothing to add.
+
+On a broker that limits each account, give the account the agent uses read access to `<discovery prefix>/status` and `ruru/<device id>/agent/command/+`. Give it write access to:
 
 - `ruru/<device id>/agent/availability`
 - `ruru/<device id>/agent/+/state`
@@ -114,11 +117,24 @@ Substitute the discovery prefix and device ID from Ruru’s MQTT setup and `sett
 
 Home Assistant needs to read the agent’s discovery, availability and state messages and publish to `ruru/<device id>/agent/command/+`. Keep all command messages non-retained. For the **Ruru** and **Display** switches, the payloads are `ON` and `OFF` and the command names are `ruru` and `display`. The agent rejects retained commands and broker redeliveries.
 
+When the agent shares Ruru’s account, add these permissions to the ones the wall already has. In a Mosquitto ACL file, this covers the wall, the agent and reboot for one account, with the default `homeassistant` and `frigate` prefixes:
+
+```text
+user <username>
+topic read homeassistant/status
+topic readwrite homeassistant/+/<device id>/+/config
+topic readwrite ruru/<device id>/#
+topic read frigate/#
+topic write frigate/onConnect
+```
+
+A shared account can also send the agent’s commands, so anyone with the wall’s login can stop the wall and, with reboot on, reboot the host. Untick **Use Ruru’s Home Assistant account** and give the agent its own account to keep them apart.
+
 ### Reboot the Ubuntu host
 
 **Enable host reboot** is a separate setting under **Settings → Home Assistant → Host controls**. Turn it on after host controls connect. Before enabling it, add these permissions to the broker ACL:
 
-- Let the agent read `ruru/<device id>/agent/command/reboot` and write `<discovery prefix>/button/<device id>/reboot/config`. The agent’s existing state permissions cover `agent/reboot/availability` and `agent/reboot/attributes`.
+- Let the account the agent uses read `ruru/<device id>/agent/command/reboot` and write `<discovery prefix>/button/<device id>/reboot/config`. The agent’s existing state permissions cover `agent/reboot/availability` and `agent/reboot/attributes`. The shared-account ACL above already covers these.
 - Let Home Assistant read that discovery and availability data and publish `PRESS` to `ruru/<device id>/agent/command/reboot` as a non-retained message.
 
 Ruru checks these permissions as you enable reboot. **Reboot host** appears on the same Home Assistant device and is available when the agent is connected and Ubuntu allows a normal reboot.

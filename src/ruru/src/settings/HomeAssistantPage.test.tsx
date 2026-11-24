@@ -188,13 +188,14 @@ describe("SettingsDialog Home Assistant page", () => {
     const { onClose } = openHomeAssistant({ enabled: true, host: "ha.local" });
     expect(await screen.findByRole("region", { name: "Host controls" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Enable host controls" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Use Ruru’s Home Assistant account/ }));
     type("Host controls MQTT username", "agent");
     type("Host controls MQTT password", "password");
     const password = screen.getByLabelText<HTMLInputElement>("Host controls MQTT password");
     // jsdom has no implicit submission, so do what the browser does when Enter is not handled.
     if (fireEvent.keyDown(password, { key: "Enter" })) password.form?.requestSubmit();
     expect(await screen.findByText("Connected with the host controls account.")).toBeVisible();
-    expect(calls).toContainEqual({ cmd: "test_host_controls", payload: { credentials: { username: "agent", password: "password" } } });
+    expect(calls).toContainEqual({ cmd: "test_host_controls", payload: { credentials: { shared: false, username: "agent", password: "password" } } });
     expect(calls.map(({ cmd }) => cmd)).not.toContain("save_mqtt");
     expect(onClose).not.toHaveBeenCalled();
     expect(password).toHaveValue("password");

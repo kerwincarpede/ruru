@@ -1001,6 +1001,14 @@ impl Wall {
     }
 }
 
+/// The saved broker password, for host controls signing in with the wall's
+/// account. A locked keychain is an error, never a prompt. This can block on
+/// the keychain: run it off the main thread.
+#[cfg(target_os = "linux")]
+pub(crate) fn saved_password(mqtt: &MqttSettings) -> Result<Option<String>, String> {
+    password::load(&Keychain, mqtt)
+}
+
 /// Connects to the broker once with what the user entered, for Test
 /// connection. Without a new password, the saved one is used.
 #[tauri::command]
@@ -1044,10 +1052,16 @@ pub async fn save_mqtt(
     let input = input.validated(enabled).map_err(|err| err.to_string())?;
     #[cfg(target_os = "linux")]
     let _guard = crate::host_controls::CHANGE.lock().await;
-    #[cfg(target_os = "linux")]
-    crate::host_controls::check_wall_broker(&input)?;
     let password = checked_password(password).map_err(|err| err.to_string())?;
     let change = PasswordChange::from_page(&input.username, password);
+    #[cfg(target_os = "linux")]
+    crate::host_controls::check_wall_broker(
+        &input,
+        match &change {
+            PasswordChange::Set(password) => Some(password.as_str()),
+            _ => None,
+        },
+    )?;
     let current = settings::lock(&store).current().mqtt.clone();
     let next = input.apply_to(current);
     let next =
