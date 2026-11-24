@@ -131,7 +131,7 @@ pkexec /usr/share/ruru/host-controls/authorize-reboot
 
 Approval grants only the standard Ubuntu reboot action to that account. It leaves approvals for rebooting with other users signed in and bypassing inhibitors under your existing system policy. Ruru requests a normal reboot and respects inhibitors. If a request fails, see **Reboot host** attributes or the host agent journal for the error.
 
-The button becomes unavailable during reboot. It returns when you sign in and the agent reconnects. Ruru starts at graphical sign-in even if it was stopped in Home Assistant before the reboot. Set up automatic sign-in in Ubuntu if the wall should return without local input.
+The button becomes unavailable during reboot. It returns when you sign in and the agent reconnects. Ruru starts at graphical sign-in even if it was stopped in Home Assistant before the reboot. On a slow first sign-in the **Ruru** switch can stay unavailable for up to two minutes while the desktop finishes starting. Set up automatic sign-in in Ubuntu if the wall should return without local input.
 
 Untick **Enable host reboot** to stop accepting MQTT reboot commands and remove **Reboot host** when the broker is reachable. Keep the reboot ACL in place until the button disappears from Home Assistant. If cleanup fails, Ruru retries when the host agent reconnects. The local administrator’s approval is saved separately so Ruru can reuse it. To revoke it, an administrator can delete `/etc/polkit-1/rules.d/90-ruru-reboot-<desktop UID>.rules`. The desktop account’s UID is shown by `id -u`. This also applies if you remove the package.
 

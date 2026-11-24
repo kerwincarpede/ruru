@@ -11,6 +11,10 @@ use std::{
 
 pub(super) const WALL: &str = "ruru.service";
 pub(super) const AGENT: &str = "ruru-host-agent.service";
+/// How long a managed wall waits at login for GNOME's Wayland display.
+/// A cold session can take most of a minute before the compositor listens,
+/// and GTK and EGL setup then need the rest of the unit's `TimeoutStartSec`.
+const DISPLAY_WAIT: Duration = Duration::from_secs(60);
 
 pub(super) fn ctl(args: &[&str]) -> Result<String, String> {
     let output = Command::new("/usr/bin/systemctl")
@@ -127,7 +131,7 @@ pub(super) fn prepare_managed_wall() -> Result<(), String> {
 
     // The user manager imports the display environment during GNOME startup.
     // A service already started during login keeps its old environment.
-    let deadline = Instant::now() + Duration::from_secs(22);
+    let deadline = Instant::now() + DISPLAY_WAIT;
     while Instant::now() < deadline {
         if let Some(environment) =
             manager_environment().and_then(|entries| display_environment(runtime, &entries))
@@ -340,6 +344,19 @@ mod tests {
         assert_eq!(failed.phase, Phase::Stopped);
         assert_eq!(failed.failure.as_deref(), Some("Ruru service: exit-code"));
         assert!(Wall::parse("").is_err());
+    }
+
+    #[test]
+    fn display_wait_leaves_startup_time_inside_the_unit_deadline() {
+        let unit = include_str!("../../host-controls/ruru.service");
+        let start: u64 = unit
+            .lines()
+            .find_map(|line| line.strip_prefix("TimeoutStartSec="))
+            .and_then(|value| value.parse().ok())
+            .expect("ruru.service sets TimeoutStartSec in seconds");
+        assert!(unit.lines().any(|line| line == "Type=notify"));
+        // Leave at least a minute for Tauri, GTK and EGL after the display appears.
+        assert!(Duration::from_secs(start) >= DISPLAY_WAIT + Duration::from_secs(60));
     }
 
     #[test]
