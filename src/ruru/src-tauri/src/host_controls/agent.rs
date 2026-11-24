@@ -454,7 +454,11 @@ async fn session(
     state: &mut State,
 ) -> Result<(), String> {
     let reboot_setting = reboot::read_setting()?;
-    let reboot_enabled = matches!(reboot_setting, Some(reboot::Setting::Enabled(_)));
+    let reboot_generation = match &reboot_setting {
+        Some(reboot::Setting::Enabled(generation)) => Some(generation.as_slice()),
+        _ => None,
+    };
+    let reboot_enabled = reboot_generation.is_some();
     let will = LastWill::new(wire.topic("availability"), "offline", QOS, true, None);
     let (client, mut events) = connection(
         broker,
@@ -479,7 +483,7 @@ async fn session(
         state.enqueue_event(wire, event, reboot_enabled);
     })
     .await?;
-    state.start_next(wire, &client)?;
+    state.start_next(wire, &client, reboot_generation)?;
     setup::write_status(true, reboot_enabled, state.error(reboot_enabled));
     *attempt = 0;
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
@@ -500,7 +504,7 @@ async fn session(
                         return Ok(());
                     }
                     state.report(wire, &client, reboot_enabled).await?;
-                    state.start_next(wire, &client)?;
+                    state.start_next(wire, &client, reboot_generation)?;
                     setup::write_status(true, reboot_enabled, state.error(reboot_enabled));
                 }
             }
@@ -515,7 +519,7 @@ async fn session(
                 state.report(wire, &client, reboot_enabled).await?;
             } else if let Some(action) = wire.command(&publish, reboot_enabled) {
                 state.enqueue(action);
-                state.start_next(wire, &client)?;
+                state.start_next(wire, &client, reboot_generation)?;
             }
         }
     }
@@ -601,13 +605,20 @@ impl State {
         }
     }
 
-    fn start_next(&mut self, wire: &Wire<'_>, client: &AsyncClient) -> Result<(), String> {
+    fn start_next(
+        &mut self,
+        wire: &Wire<'_>,
+        client: &AsyncClient,
+        reboot_generation: Option<&[u8]>,
+    ) -> Result<(), String> {
         self.start_next_with(wire, client, |action| {
+            // The queue belongs to this MQTT session and is cleared on reconnect.
+            let generation = reboot_generation.map(<[u8]>::to_vec);
             async_runtime::spawn_blocking(move || {
                 let result = match action {
                     Action::Wall(on) => system::change_wall(on),
                     Action::Display(on) => super::mutter::set(on),
-                    Action::Reboot => reboot::request(),
+                    Action::Reboot => reboot::request(generation.as_deref()),
                 };
                 if let Err(err) = &result {
                     eprintln!("Ruru host controls: {err}");

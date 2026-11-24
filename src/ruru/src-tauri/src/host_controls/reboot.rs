@@ -158,12 +158,16 @@ pub(super) fn authorise() -> Result<(), String> {
 }
 
 fn check_request(
-    enabled: Result<Option<bool>, String>,
+    setting: Result<Option<Setting>, String>,
+    generation: Option<&[u8]>,
     read_capability: impl FnOnce() -> Result<Capability, String>,
     reboot: impl FnOnce() -> Result<(), String>,
 ) -> Result<(), String> {
-    if enabled? != Some(true) {
+    let Some(Setting::Enabled(current)) = setting? else {
         return Err("Host reboot is disabled.".into());
+    };
+    if generation != Some(current.as_slice()) {
+        return Err("The host reboot setting changed. Press Reboot host again.".into());
     }
     if let Some(reason) = read_capability()?.message() {
         return Err(reason.into());
@@ -188,16 +192,17 @@ fn check_inhibitors(reply: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn request() -> Result<(), String> {
+pub(super) fn request(generation: Option<&[u8]>) -> Result<(), String> {
     let dir = setup::directory()?;
     let _settings = setup::lock_migration(&dir)?
         .ok_or("Host controls are changing. Try again when setup finishes.")?;
     check_request(
         if setup::enabled() {
-            setting()
+            read_setting()
         } else {
             Ok(None)
         },
+        generation,
         capability,
         || {
             let operation = system::lock_wall_operation()?;
@@ -232,10 +237,11 @@ mod tests {
 
     #[test]
     fn a_disabled_or_unauthorised_request_cannot_reach_logind_reboot() {
-        for setting in [None, Some(false)] {
+        for setting in [None, Some(Setting::Cleanup(b"off:revoked".to_vec()))] {
             assert!(
                 check_request(
                     Ok(setting),
+                    Some(b"on:current"),
                     || panic!("disabled requests need no permission check"),
                     || panic!("disabled requests must never reboot"),
                 )
@@ -249,7 +255,8 @@ mod tests {
         ] {
             assert!(
                 check_request(
-                    Ok(Some(true)),
+                    Ok(Some(Setting::Enabled(b"on:current".to_vec()))),
+                    Some(b"on:current"),
                     || Ok(capability),
                     || panic!("unauthorised requests must never reboot"),
                 )
@@ -259,17 +266,37 @@ mod tests {
     }
 
     #[test]
+    fn a_queued_press_from_before_opt_out_cannot_use_the_new_opt_in() {
+        let queued_generation = Some(b"on:before-opt-out".as_slice());
+        assert_eq!(
+            check_request(
+                Ok(Some(Setting::Enabled(b"on:after-new-opt-in".to_vec()))),
+                queued_generation,
+                || panic!("stale requests need no permission check"),
+                || panic!("stale requests must never reboot"),
+            ),
+            Err("The host reboot setting changed. Press Reboot host again.".into())
+        );
+    }
+
+    #[test]
     fn a_denial_or_inhibitor_from_the_final_call_is_reported() {
         assert_eq!(
             check_request(
-                Ok(Some(true)),
+                Ok(Some(Setting::Enabled(b"on:current".to_vec()))),
+                Some(b"on:current"),
                 || Ok(Capability::Ready),
                 || Err("Interactive authentication required or operation inhibited".into())
             ),
             Err("Interactive authentication required or operation inhibited".into())
         );
         assert_eq!(
-            check_request(Ok(Some(true)), || Ok(Capability::Ready), || Ok(())),
+            check_request(
+                Ok(Some(Setting::Enabled(b"on:current".to_vec()))),
+                Some(b"on:current"),
+                || Ok(Capability::Ready),
+                || Ok(())
+            ),
             Ok(())
         );
     }
