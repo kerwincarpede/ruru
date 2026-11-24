@@ -26,7 +26,7 @@ pub struct Message {
 }
 
 impl Message {
-    fn retained(topic: String, payload: impl Into<String>) -> Self {
+    pub(crate) fn retained(topic: String, payload: impl Into<String>) -> Self {
         Self {
             topic,
             payload: payload.into(),
@@ -89,7 +89,7 @@ pub fn camera_label(name: &str) -> String {
 }
 
 /// What every one of the device's entities shares.
-fn base(
+pub(crate) fn base(
     topics: &Topics,
     device: &Device,
     object: &str,

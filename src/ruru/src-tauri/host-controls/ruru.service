@@ -1,0 +1,17 @@
+[Unit]
+Description=Ruru camera wall
+PartOf=graphical-session.target
+After=graphical-session-pre.target
+
+[Service]
+Type=notify
+NotifyAccess=all
+TimeoutStartSec=30
+ExecStart=/usr/bin/ruru --managed-wall
+CPUAccounting=yes
+MemoryAccounting=yes
+KillMode=control-group
+TimeoutStopSec=15
+
+[Install]
+WantedBy=graphical-session.target

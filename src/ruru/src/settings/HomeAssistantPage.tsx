@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { saveMqtt, testMqtt, type MqttInput, type MqttSettings, type Settings } from "../app/api";
+import HostControls from "./HostControls";
 
 interface HomeAssistantPageProps {
   mqtt: MqttSettings;
@@ -248,6 +249,7 @@ export default function HomeAssistantPage({ mqtt, onSaved, onClose }: HomeAssist
             </p>
           )}
         </div>
+        <HostControls mqttEnabled={mqtt.enabled} />
       </div>
       <footer className="dialog-foot">
         <button type="button" onClick={onClose}>

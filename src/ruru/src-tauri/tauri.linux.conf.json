@@ -1,0 +1,12 @@
+{
+  "bundle": {
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/lib/systemd/user/ruru-host-agent.service": "host-controls/ruru-host-agent.service",
+          "/usr/share/ruru/host-controls/ruru.service": "host-controls/ruru.service"
+        }
+      }
+    }
+  }
+}

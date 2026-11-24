@@ -41,7 +41,7 @@ impl Topics {
         &self.device_id
     }
 
-    fn own(&self, rest: &str) -> String {
+    pub(crate) fn own(&self, rest: &str) -> String {
         format!("{ROOT}/{}/{rest}", self.device_id)
     }
 
