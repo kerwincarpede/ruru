@@ -4,7 +4,7 @@ import { appInfo, type AppInfo } from "./app/api";
 import { RETRY_DELAYS_MS, cameraLabel, type Camera } from "./app/frigate";
 import { isMac, shortcutFor } from "./app/keys";
 import Owl from "./app/Owl";
-import { DEFAULT_DYNAMIC_WALL, DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, cameraActivity, frigateCameras, getSettings, onCameraActivity, onFullScreenChanged, onOpenSettings, onWallCommand, reportTileProblem, reportWallState, saveLayout, saveWallOptions, setFullScreen, type Activity, type SavedLayout, type Settings, type WallOptions } from "./app/api";
+import { DEFAULT_DYNAMIC_WALL, DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, cameraActivity, frigateCameras, getSettings, onActivityLost, onCameraActivity, onFullScreenChanged, onOpenSettings, onWallCommand, reportTileProblem, reportWallState, saveLayout, saveWallOptions, setFullScreen, type Activity, type SavedLayout, type Settings, type WallOptions } from "./app/api";
 import UpdateNotice from "./app/UpdateNotice";
 import UpdatePrompt from "./app/UpdatePrompt";
 import { findUpdate, onUpdateStatus, versionLabel, type AvailableUpdate, type UpdateStatus } from "./app/updates";
@@ -88,6 +88,22 @@ function App() {
   const setActivity = useCallback((next: Activity) => {
     setActivityNow(next);
     setActivityAt(Date.now());
+  }, []);
+  // Counts Home Assistant connection losses, which forget the Dynamic wall's picks.
+  const [activityLost, setActivityLost] = useState(0);
+  useEffect(() => {
+    let current = true;
+    let stop: (() => void) | null = null;
+    void onActivityLost(() => {
+      if (current) setActivityLost((count) => count + 1);
+    }).then((unlisten) => {
+      if (current) stop = unlisten;
+      else unlisten();
+    });
+    return () => {
+      current = false;
+      stop?.();
+    };
   }, []);
   const [wallSize, setWallSize] = useState<WallSize>(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const onWallSize = useCallback((size: WallSize) => {
@@ -382,7 +398,7 @@ function App() {
     activity,
     activityAt,
     priority,
-    reset: `${url ?? ""}\n${streams}`,
+    reset: `${url ?? ""}\n${streams}\n${activityLost}`,
   });
   const dynamicShown = dynamicView.kind !== "overview" && !shownMaximised && !editing;
   useEffect(() => {

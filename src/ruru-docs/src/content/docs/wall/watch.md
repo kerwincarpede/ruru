@@ -49,7 +49,7 @@ With [Home Assistant](/ruru/guides/home-assistant/#activity-on-the-tiles) connec
 
 The preview under **Dynamic wall** shows the heroes at the size of your wall. With fewer than two cameras on the wall it shows your layout and says heroes need two.
 
-Press `Esc` to put a takeover away, and again to put the heroes away. They stay away until Frigate stops seeing those objects. Maximising a tile and **Edit layout** come first: the Dynamic wall waits until you restore the tile or choose **Done**. Your saved layout never changes, and every stream keeps playing while tiles move or a camera fills the wall. The Dynamic wall starts afresh when you stop the streams or connect to another Frigate server, and turning it off puts your layout back straight away.
+Press `Esc` to put a takeover away, and again to put the heroes away. They stay away until Frigate stops seeing those objects. Maximising a tile and **Edit layout** come first: the Dynamic wall waits until you restore the tile or choose **Done**. Your saved layout never changes, and every stream keeps playing while tiles move or a camera fills the wall. The Dynamic wall starts afresh when you stop the streams, connect to another Frigate server or lose the Home Assistant connection, and turning it off puts your layout back straight away.
 
 ## Full screen
 

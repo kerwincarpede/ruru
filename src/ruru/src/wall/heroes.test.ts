@@ -28,19 +28,35 @@ describe("stepDynamic", () => {
 
   it("holds a hero for the minimum hold and the clearing grace, then fills its place", () => {
     let state = run([[0, { garage: car, yard: car }]]);
-    // Cleared after 8 s: the hold lasts to 10 s.
+    // Cleared after 8 s: the grace from then outlasts the 10 s hold.
     state = run([[8000, { yard: car }]], [], state);
     expect(dynamicView(state)).toEqual({ kind: "heroes", heroes: ["garage", "yard"] });
-    expect(nextExpiry(state, { cameras, activity: { yard: car }, priority: [], now: 8000 })).toBe(HERO_HOLD_MS);
-    // Cleared after the hold: the grace lasts 5 s from when it was last seen.
+    expect(nextExpiry(state, { cameras, activity: { yard: car }, priority: [], now: 8000 })).toBe(Math.max(HERO_HOLD_MS, 8000 + HERO_GRACE_MS));
+    // Cleared after the hold: the grace lasts 5 s from when it cleared.
     state = run([[2000, { garage: car, yard: car }], [12_000, { garage: car, yard: car }], [13_000, { yard: car, drive: car }]]);
     expect(dynamicView(state)).toEqual({ kind: "heroes", heroes: ["garage", "yard"] });
-    state = run([[12_000 + HERO_GRACE_MS, { yard: car, drive: car }]], [], state);
+    state = run([[13_000 + HERO_GRACE_MS - 1, { yard: car, drive: car }]], [], state);
+    expect(dynamicView(state)).toEqual({ kind: "heroes", heroes: ["garage", "yard"] });
+    state = run([[13_000 + HERO_GRACE_MS, { yard: car, drive: car }]], [], state);
     // The garage's place goes to the drive; the yard keeps its own.
     expect(dynamicView(state)).toEqual({ kind: "heroes", heroes: ["drive", "yard"] });
-    state = run([[30_000, {}]], [], state);
+    state = run([[30_000, {}], [30_000 + HERO_GRACE_MS, {}]], [], state);
     expect(dynamicView(state)).toEqual({ kind: "overview" });
-    expect(nextExpiry(state, { cameras, activity: {}, priority: [], now: 30_000 })).toBeNull();
+    expect(nextExpiry(state, { cameras, activity: {}, priority: [], now: 35_000 })).toBeNull();
+  });
+
+  it("starts the grace when a camera clears, however long it was busy without a change", () => {
+    let state = run([[0, { garage: car }]], ["garage"]);
+    state = run([[30_000, {}]], ["garage"], state);
+    expect(dynamicView(state)).toEqual({ kind: "heroes", heroes: ["garage"] });
+    expect(nextExpiry(state, { cameras, activity: {}, priority: [], now: 30_000 })).toBe(30_000 + HERO_GRACE_MS);
+    state = run([[30_000 + HERO_GRACE_MS, {}]], ["garage"], state);
+    expect(dynamicView(state)).toEqual({ kind: "overview" });
+    // A priority camera's takeover gets the same grace.
+    state = run([[0, { yard: person }], [30_000, {}]], ["yard"]);
+    expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "yard" });
+    state = run([[30_000 + HERO_GRACE_MS, {}]], ["yard"], state);
+    expect(dynamicView(state)).toEqual({ kind: "overview" });
   });
 
   it("forgets cameras that leave the wall", () => {
@@ -60,25 +76,44 @@ describe("stepDynamic", () => {
     expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "drive" });
     state = run([[12_000, { yard: person, garage: car }]], ["drive", "yard"], state);
     expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "drive" });
-    state = run([[9000 + HERO_GRACE_MS, { yard: person, garage: car }]], ["drive", "yard"], state);
+    state = run([[12_000 + HERO_GRACE_MS, { yard: person, garage: car }]], ["drive", "yard"], state);
     expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "yard" });
     state = run([[40_000, { garage: car }], [50_000, { garage: car }]], ["drive", "yard"], state);
     expect(dynamicView(state)).toEqual({ kind: "heroes", heroes: ["garage"] });
   });
 
   it("dismisses the takeover, then the heroes, until their activity clears", () => {
-    let state = run([[0, { yard: person, garage: car }]], ["yard"]);
-    state = dismissDynamic(state);
+    const busy = { yard: person, garage: car };
+    let state = run([[0, busy]], ["yard"]);
+    state = dismissDynamic(state, { cameras, activity: busy, priority: ["yard"] });
     expect(dynamicView(state)).toEqual({ kind: "heroes", heroes: ["garage", "yard"] });
-    state = run([[1000, { yard: person, garage: car }]], ["yard"], state);
+    state = run([[1000, busy]], ["yard"], state);
     expect(dynamicView(state)).toEqual({ kind: "heroes", heroes: ["garage", "yard"] });
-    state = dismissDynamic(state);
+    state = dismissDynamic(state, { cameras, activity: busy, priority: ["yard"] });
     expect(dynamicView(state)).toEqual({ kind: "overview" });
-    expect(dismissDynamic(state)).toBe(state);
-    state = run([[2000, { yard: person, garage: car }]], ["yard"], state);
+    expect(dismissDynamic(state, { cameras, activity: busy, priority: ["yard"] })).toBe(state);
+    state = run([[2000, busy]], ["yard"], state);
     expect(dynamicView(state)).toEqual({ kind: "overview" });
     // Once the activity clears, new activity counts again.
     state = run([[3000, {}], [4000, { yard: person }]], ["yard"], state);
     expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "yard" });
+  });
+
+  it("dismisses every camera busy when Esc is pressed, not only the ones shown", () => {
+    const busy = { garage: car, yard: person, drive: person };
+    const priority = ["yard", "drive"];
+    let state = run([[0, busy]], priority);
+    expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "yard" });
+    state = dismissDynamic(state, { cameras, activity: busy, priority });
+    // The drive also sees a person, so it does not take over in the yard's place.
+    state = run([[1000, busy]], priority, state);
+    expect(dynamicView(state)).toEqual({ kind: "heroes", heroes: ["garage", "yard"] });
+    state = dismissDynamic(state, { cameras, activity: busy, priority });
+    // The drive was busy too, so it does not fill a freed hero place.
+    state = run([[2000, busy]], priority, state);
+    expect(dynamicView(state)).toEqual({ kind: "overview" });
+    // A camera that gets busy after Esc still counts.
+    state = run([[3000, { ...busy, maingate: car }]], priority, state);
+    expect(dynamicView(state)).toEqual({ kind: "heroes", heroes: ["maingate"] });
   });
 });

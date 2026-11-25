@@ -1058,8 +1058,11 @@ describe("App streams", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(maingate).not.toHaveClass("is-maximised");
     expect(garage.parentElement).toHaveClass("is-hero");
-    // Activity that drops away entirely, as when Home Assistant disconnects, clears it at once.
+    // Every camera going quiet leaves the hero for its hold and grace.
     await act(() => emit("camera-activity", {}));
+    expect(garage.parentElement).toHaveClass("is-hero");
+    // A lost Home Assistant connection clears it at once.
+    await act(() => emit("camera-activity-lost"));
     expect(garage.parentElement).not.toHaveClass("is-hero");
   });
 

@@ -252,6 +252,19 @@ export async function onCameraActivity(handler: (activity: Activity) => void): P
   }
 }
 
+/**
+ * Calls `handler` when the Home Assistant connection that brings Frigate's
+ * activity drops or is replaced. Resolves to a function that stops
+ * listening; a backend without events gives a no-op.
+ */
+export async function onActivityLost(handler: () => void): Promise<() => void> {
+  try {
+    return await listen("camera-activity-lost", handler);
+  } catch {
+    return () => {};
+  }
+}
+
 /** Tells the backend whether a tile has a problem, for Home Assistant. */
 export function reportTileProblem(camera: string, problem: boolean): Promise<void> {
   return invoke<void>("report_tile_problem", { camera, problem });

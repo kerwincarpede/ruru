@@ -15,6 +15,10 @@ use crate::settings::{MAX_TILES, valid_camera_name};
 /// The event the page hears, with every camera's activity, whenever any of
 /// it changes.
 pub const EVENT: &str = "camera-activity";
+/// The event the page hears when the connection that brought the activity
+/// drops or is replaced, so it can tell that apart from every camera going
+/// quiet.
+pub const LOST_EVENT: &str = "camera-activity-lost";
 /// The most object labels kept for one camera.
 const MAX_LABELS: usize = 32;
 /// The longest object label Ruru keeps.

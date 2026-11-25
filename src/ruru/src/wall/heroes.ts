@@ -5,11 +5,16 @@ export const HERO_HOLD_MS = 10_000;
 /** How long a hero, or a takeover, stays after Frigate stops seeing its objects. */
 export const HERO_GRACE_MS = 5_000;
 
-/** A camera the Dynamic wall picked: when it was picked, and when it last qualified. */
+/**
+ * A camera the Dynamic wall picked: when it was picked, when it last
+ * qualified (or stopped qualifying, which starts the grace), and whether it
+ * qualified at the last step.
+ */
 export interface Pick {
   camera: string;
   since: number;
   seen: number;
+  qualified: boolean;
 }
 
 /** What the Dynamic wall shows and what it was told to put away. */
@@ -50,7 +55,7 @@ function stays(pick: Pick, qualifies: boolean, now: number): boolean {
   return qualifies || now - pick.seen < HERO_GRACE_MS || now - pick.since < HERO_HOLD_MS;
 }
 
-function qualifiers({ cameras, activity, priority }: DynamicInput) {
+function qualifiers({ cameras, activity, priority }: Omit<DynamicInput, "now">) {
   const onWall = new Set(cameras);
   return {
     hero: (camera: string) => onWall.has(camera) && seesObjects(activity[camera]),
@@ -71,36 +76,43 @@ export function stepDynamic(state: DynamicState, input: DynamicInput): DynamicSt
   const keep = (pick: Pick | null, test: (camera: string) => boolean, put: string[]): Pick | null => {
     if (!pick || !cameras.includes(pick.camera) || put.includes(pick.camera)) return null;
     const qualifying = test(pick.camera);
-    if (!stays(pick, qualifying, now)) return null;
-    return qualifying ? { ...pick, seen: now } : pick;
+    // Activity only arrives when it changes, so the grace runs from the step
+    // that saw the camera clear, not from the last step before it.
+    const next = qualifying || pick.qualified ? { ...pick, seen: now, qualified: qualifying } : pick;
+    return stays(next, qualifying, now) ? next : null;
   };
   const heroes = state.heroes.map((pick) => keep(pick, qualifies.hero, dismissed.heroes)) as DynamicState["heroes"];
   for (const camera of cameras) {
     const place = heroes.indexOf(null);
     if (place < 0) break;
     if (qualifies.hero(camera) && !dismissed.heroes.includes(camera) && !heroes.some((pick) => pick?.camera === camera)) {
-      heroes[place] = { camera, since: now, seen: now };
+      heroes[place] = { camera, since: now, seen: now, qualified: true };
     }
   }
   let takeover = keep(state.takeover, qualifies.takeover, dismissed.takeover);
   if (!takeover) {
     const camera = cameras.find((name) => qualifies.takeover(name) && !dismissed.takeover.includes(name));
-    if (camera) takeover = { camera, since: now, seen: now };
+    if (camera) takeover = { camera, since: now, seen: now, qualified: true };
   }
   return { heroes, takeover, dismissed };
 }
 
 /**
- * The state after `Esc`: a takeover is put away, or else the heroes are,
- * until each camera's activity clears.
+ * The state after `Esc`: a takeover is put away with every priority camera
+ * that could take over now, or else the heroes are, with every camera that
+ * could become one now. Each stays away until its activity clears.
  */
-export function dismissDynamic(state: DynamicState): DynamicState {
+export function dismissDynamic(state: DynamicState, input: Omit<DynamicInput, "now">): DynamicState {
+  const qualifies = qualifiers(input);
+  const add = (list: string[], more: string[]) => [...list, ...more.filter((camera) => !list.includes(camera))];
   if (state.takeover) {
-    return { ...state, takeover: null, dismissed: { ...state.dismissed, takeover: [...state.dismissed.takeover, state.takeover.camera] } };
+    const now = input.cameras.filter(qualifies.takeover);
+    return { ...state, takeover: null, dismissed: { ...state.dismissed, takeover: add(state.dismissed.takeover, [state.takeover.camera, ...now]) } };
   }
   const shown = state.heroes.flatMap((pick) => (pick ? [pick.camera] : []));
   if (shown.length === 0) return state;
-  return { ...state, heroes: [null, null], dismissed: { ...state.dismissed, heroes: [...state.dismissed.heroes, ...shown] } };
+  const now = input.cameras.filter(qualifies.hero);
+  return { ...state, heroes: [null, null], dismissed: { ...state.dismissed, heroes: add(state.dismissed.heroes, [...shown, ...now]) } };
 }
 
 /** When a pick that no longer qualifies is next due to go, or null when none is. */

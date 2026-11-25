@@ -582,14 +582,26 @@ fn emit_activity(app: &AppHandle, activity: &Activity) {
     }
 }
 
+/// Tells the page the activity's connection is gone.
+fn emit_activity_lost(app: &AppHandle) {
+    if let Err(err) = app.emit(activity::LOST_EVENT, ()) {
+        eprintln!("Ruru: lost camera activity could not reach the page: {err}");
+    }
+}
+
 /// Forgets Frigate's activity, if connection `generation` is still the
-/// current one, and tells the page if there was any.
+/// current one, and tells the page the connection is gone and, if there was
+/// any activity, that it is cleared.
 fn forget_activity(app: &AppHandle, generation: u64) {
     let state = app.state::<MqttState>();
-    let cleared = {
+    let (current, cleared) = {
         let mut inner = state.lock();
-        inner.current(generation) && inner.activity.clear()
+        let current = inner.current(generation);
+        (current, current && inner.activity.clear())
     };
+    if current {
+        emit_activity_lost(app);
+    }
     if cleared {
         emit_activity(app, &Activity::default());
     }
@@ -613,6 +625,7 @@ pub fn restart(app: &AppHandle) {
     }
     inner.link = None;
     // What the old connection heard is gone with it.
+    emit_activity_lost(app);
     if inner.activity.clear() {
         emit_activity(app, &Activity::default());
     }

@@ -12,7 +12,7 @@ interface DynamicWallOptions {
   activityAt: number;
   /** Keep the same array while it is unchanged. */
   priority: string[];
-  /** Changing it, such as for another Frigate server, forgets what was picked. */
+  /** Changing it, such as for another Frigate server or a lost Home Assistant connection, forgets what was picked. */
   reset: string;
 }
 
@@ -37,8 +37,7 @@ export function useDynamicWall({ enabled, cameras, activity, activityAt, priorit
   const now = Math.max(clock, activityAt);
   const [stepped, setStepped] = useState<Stepped>({ enabled, cameras, activity, priority, reset, now, state: IDLE });
   if (stepped.enabled !== enabled || stepped.cameras !== cameras || stepped.activity !== activity || stepped.priority !== priority || stepped.reset !== reset || stepped.now !== now) {
-    // Without activity, as when the Home Assistant connection drops, nothing stays.
-    const fresh = !enabled || stepped.reset !== reset || Object.keys(activity).length === 0;
+    const fresh = !enabled || stepped.reset !== reset;
     const state = fresh ? IDLE : stepDynamic(stepped.state, { cameras, activity, priority, now });
     setStepped({ enabled, cameras, activity, priority, reset, now, state });
   }
@@ -50,6 +49,6 @@ export function useDynamicWall({ enabled, cameras, activity, activityAt, priorit
     return () => clearTimeout(timer);
   }, [due]);
 
-  const dismiss = useCallback(() => setStepped((last) => ({ ...last, state: dismissDynamic(last.state) })), []);
+  const dismiss = useCallback(() => setStepped((last) => ({ ...last, state: dismissDynamic(last.state, last) })), []);
   return [enabled ? dynamicView(stepped.state) : { kind: "overview" }, dismiss];
 }
