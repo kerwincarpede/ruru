@@ -4,7 +4,7 @@ import SettingsDialog from "./SettingsDialog";
 import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, type Settings } from "../app/api";
 import { mockCommands } from "../test/mockCommands";
 
-const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
+const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: DEFAULT_MQTT_SETTINGS, layouts: {}, dynamicWalls: {} };
 
 const info = { name: "Ruru", version: "0.3.0" };
 

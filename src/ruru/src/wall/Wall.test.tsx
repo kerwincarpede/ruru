@@ -3,11 +3,14 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { Camera } from "../app/frigate";
 import type { GridItem } from "./layout";
+import { automaticHeroItems, customHeroItems } from "./dynamic";
+import { toGridItems, wallPlacements } from "./layout";
 import Wall from "./Wall";
 
 type GridProps = {
   children: ReactNode;
   layout: GridItem[];
+  compactType: "vertical" | null;
   isDraggable: boolean;
   isResizable: boolean;
   onResize: (layout: GridItem[], old: GridItem, tile: GridItem, placeholder: GridItem) => void;
@@ -65,6 +68,30 @@ describe("Wall", () => {
     expect(a.parentElement).toHaveClass("has-motion", "is-alert");
     expect(b.parentElement).not.toHaveClass("has-motion");
     expect(b.parentElement).not.toHaveClass("is-alert");
+  });
+
+  it("draws the Dynamic wall's placements exactly as computed, and compacts only the saved layout", () => {
+    const names = Array.from({ length: 10 }, (_, index) => `cam${index}`);
+    const size = { width: window.innerWidth, height: window.innerHeight };
+    const props = { base: "http://f", cameras: names.map(camera), live: false, editing: false, refresh: 0, onLayout: vi.fn() };
+    const { rerender } = render(<Wall {...props} layout={undefined} />);
+    expect(grid.props?.compactType).toBe("vertical");
+    const saved = grid.props?.layout;
+    // One hero leaves room beside it, which compacting would fill.
+    rerender(<Wall {...props} layout={undefined} dynamic={{ kind: "heroes", heroes: ["cam4"] }} />);
+    const one = automaticHeroItems(names, ["cam4"], size);
+    expect(one).not.toBeNull();
+    expect(grid.props?.layout).toEqual(one);
+    expect(grid.props?.compactType).toBeNull();
+    rerender(<Wall {...props} layout={undefined} dynamic={{ kind: "heroes", heroes: ["cam4", "cam8"] }} />);
+    expect(grid.props?.layout).toEqual(automaticHeroItems(names, ["cam4", "cam8"], size));
+    const items = toGridItems(wallPlacements(names, undefined));
+    rerender(<Wall {...props} layout={undefined} heroSlots={["cam0", "cam1"]} dynamic={{ kind: "heroes", heroes: ["cam9"] }} />);
+    expect(grid.props?.layout).toEqual(customHeroItems(items, ["cam0", "cam1"], ["cam9"]));
+    expect(grid.props?.compactType).toBeNull();
+    rerender(<Wall {...props} layout={undefined} />);
+    expect(grid.props?.layout).toEqual(saved);
+    expect(grid.props?.compactType).toBe("vertical");
   });
 
   it("drags and resizes only in Edit layout mode", () => {

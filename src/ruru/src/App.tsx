@@ -1,10 +1,10 @@
 import "./App.css";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appInfo, type AppInfo } from "./app/api";
 import { RETRY_DELAYS_MS, cameraLabel, type Camera } from "./app/frigate";
 import { isMac, shortcutFor } from "./app/keys";
 import Owl from "./app/Owl";
-import { DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, cameraActivity, frigateCameras, getSettings, onCameraActivity, onFullScreenChanged, onOpenSettings, onWallCommand, reportTileProblem, reportWallState, saveLayout, saveWallOptions, setFullScreen, type Activity, type SavedLayout, type Settings, type WallOptions } from "./app/api";
+import { DEFAULT_DYNAMIC_WALL, DEFAULT_MQTT_SETTINGS, DEFAULT_WALL_OPTIONS, cameraActivity, frigateCameras, getSettings, onActivityLost, onCameraActivity, onFullScreenChanged, onOpenSettings, onWallCommand, reportTileProblem, reportWallState, saveLayout, saveWallOptions, setFullScreen, type Activity, type SavedLayout, type Settings, type WallOptions } from "./app/api";
 import UpdateNotice from "./app/UpdateNotice";
 import UpdatePrompt from "./app/UpdatePrompt";
 import { findUpdate, onUpdateStatus, versionLabel, type AvailableUpdate, type UpdateStatus } from "./app/updates";
@@ -18,6 +18,8 @@ import { EveryCameraHidden, NoCameras } from "./wall/EmptyWall";
 import StreamsOff from "./wall/StreamsOff";
 import Wall from "./wall/Wall";
 import WallMenu from "./wall/WallMenu";
+import type { WallSize } from "./wall/dynamic";
+import { useDynamicWall } from "./wall/useDynamicWall";
 
 /** How long the toolbar stays after the pointer stops moving. */
 export const TOOLBAR_HIDE_MS = 2500;
@@ -29,7 +31,9 @@ export const CONNECTING_MS = 20_000;
  * window says so, such as while Frigate restarts. A short blip stays on the tiles.
  */
 export const WALL_DOWN_AFTER_MS = 10_000;
-const NO_SETTINGS: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
+const NO_SETTINGS: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: DEFAULT_MQTT_SETTINGS, layouts: {}, dynamicWalls: {} };
+
+const NO_CAMERAS: string[] = [];
 
 function GearIcon() {
   return (
@@ -78,7 +82,33 @@ function App() {
     },
     [restartConnecting],
   );
-  const [activity, setActivity] = useState<Activity>({});
+  const [activity, setActivityNow] = useState<Activity>({});
+  // When the activity arrived, so the Dynamic wall can time its holds.
+  const [activityAt, setActivityAt] = useState(() => Date.now());
+  const setActivity = useCallback((next: Activity) => {
+    setActivityNow(next);
+    setActivityAt(Date.now());
+  }, []);
+  // Counts Home Assistant connection losses, which forget the Dynamic wall's picks.
+  const [activityLost, setActivityLost] = useState(0);
+  useEffect(() => {
+    let current = true;
+    let stop: (() => void) | null = null;
+    void onActivityLost(() => {
+      if (current) setActivityLost((count) => count + 1);
+    }).then((unlisten) => {
+      if (current) stop = unlisten;
+      else unlisten();
+    });
+    return () => {
+      current = false;
+      stop?.();
+    };
+  }, []);
+  const [wallSize, setWallSize] = useState<WallSize>(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  const onWallSize = useCallback((size: WallSize) => {
+    setWallSize((now) => (now.width === size.width && now.height === size.height ? now : size));
+  }, []);
   const [toolbar, setToolbar] = useState(true);
   const toolbarTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -257,7 +287,7 @@ function App() {
       current = false;
       stop?.();
     };
-  }, []);
+  }, [setActivity]);
 
   // Home Assistant's controls: the backend checks each command, naming only
   // cameras on the wall, before it arrives here.
@@ -321,8 +351,10 @@ function App() {
   // Home Assistant hears the wall's state and every tile's problems. The
   // backend only publishes them while Settings › Home Assistant is on.
   const fullScreenNow = settings?.fullScreen ?? false;
-  const onWall = url && cameras ? wallPlacements(cameras.map((camera) => camera.name), layout).map((tile) => tile.camera) : null;
-  const onWallKey = onWall ? JSON.stringify(onWall) : null;
+  const onWallNow = url && cameras ? wallPlacements(cameras.map((camera) => camera.name), layout).map((tile) => tile.camera) : null;
+  const onWallKey = onWallNow ? JSON.stringify(onWallNow) : null;
+  // The same array while the cameras on the wall are the same.
+  const onWall = useMemo(() => (onWallKey === null ? null : (JSON.parse(onWallKey) as string[])), [onWallKey]);
   const shownMaximised = maximised && onWall?.includes(maximised) ? maximised : null;
 
   // The wall stays covered until every tile on it has played, or for
@@ -354,6 +386,29 @@ function App() {
   const onProblem = useCallback((camera: string, problem: boolean) => {
     void reportTileProblem(camera, problem).catch(() => {});
   }, []);
+
+  // Dynamic wall: Frigate's activity rearranges the wall for a while, and a
+  // person at a priority camera fills it. The saved layout never changes.
+  const dynamicWall = (url ? settings?.dynamicWalls[url] : undefined) ?? DEFAULT_DYNAMIC_WALL;
+  const priorityKey = JSON.stringify(dynamicWall.priorityCameras);
+  const priority = useMemo(() => JSON.parse(priorityKey) as string[], [priorityKey]);
+  const [dynamicView, dismissDynamic] = useDynamicWall({
+    enabled: wallOptions.dynamicWall && (settings?.mqtt.enabled ?? false) && streams,
+    cameras: onWall ?? NO_CAMERAS,
+    activity,
+    activityAt,
+    priority,
+    reset: `${url ?? ""}\n${streams}\n${activityLost}`,
+  });
+  const dynamicShown = dynamicView.kind !== "overview" && !shownMaximised && !editing;
+  useEffect(() => {
+    if (!dynamicShown || settingsOpen || menu) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") dismissDynamic();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dynamicShown, settingsOpen, menu, dismissDynamic]);
 
   const onAutomatic = useCallback((camera: string, stream: StreamKind) => {
     setAutomatic((now) => (now[camera] === stream ? now : { ...now, [camera]: stream }));
@@ -506,6 +561,9 @@ function App() {
           onPlaying={onPlaying}
           onReconnecting={onReconnecting}
           onLayout={changeLayout}
+          dynamic={dynamicView}
+          heroSlots={dynamicWall.heroSlots}
+          onSize={onWallSize}
         />
       )}
 
@@ -523,6 +581,10 @@ function App() {
           }}
           onMqttSaved={setSettings}
           onWallSaved={(wall) => setSettings((current) => ({ ...(current ?? NO_SETTINGS), wall }))}
+          onDynamicWallSaved={setSettings}
+          wallCameras={onWall ?? []}
+          wallLayout={layout}
+          wallSize={wallSize}
           onAutoUpdateSaved={(saved) => {
             channelSwitches.current += 1;
             setSettings(saved);

@@ -72,6 +72,7 @@ pub fn run() {
             settings::set_full_screen,
             settings::save_layout,
             settings::save_wall_options,
+            settings::save_dynamic_wall,
             settings::set_update_channel,
             frigate::test_frigate,
             frigate::frigate_cameras,

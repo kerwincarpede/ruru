@@ -37,8 +37,11 @@ Choose **Save** to connect, or to disconnect when **Connect to Home Assistant** 
 | **Show activity** | Shows Frigate's motion, objects and alerts on each tile. On by default. Also in the wall's right-click menu. |
 | **Activity style** | How a tile is marked for motion and alerts: **Outline between tiles** (the default), **Thin outline**, **Corner marks**, **Top edge** or **Name only**. See [Activity on the tiles](/ruru/guides/home-assistant/#activity-on-the-tiles). |
 | **Show stream info** | Shows playback details on each tile. Also in the tile’s right-click menu. See [Stream info](/ruru/wall/streams/#stream-info). |
+| **Dynamic wall** | Shows busy cameras large above the rest while Frigate sees objects. Off by default. The preview shows how it looks at your wall's size. See [Dynamic wall](/ruru/wall/watch/#dynamic-wall). |
+| **First hero slot**, **Second hero slot** | **Automatic**, or two tiles of your layout that busy cameras swap into. Saved for each Frigate server. |
+| **Priority cameras** | Cameras that fill the wall while Frigate sees a person there. Press `Esc` to go back. Saved for each Frigate server. |
 
-Choose **Save** to apply these settings. Card highlighting uses activity from the MQTT broker configured in **Settings → Home Assistant**.
+Choose **Save** to apply these settings. Card highlighting and the Dynamic wall use activity from the MQTT broker configured in **Settings → Home Assistant**.
 
 ## Updates
 

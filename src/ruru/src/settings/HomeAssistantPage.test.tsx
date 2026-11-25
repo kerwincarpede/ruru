@@ -7,7 +7,7 @@ function mqttCalls(calls: CommandCall[]): CommandCall[] {
   return calls.filter(({ cmd }) => cmd !== "host_controls_status");
 }
 
-const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
+const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: DEFAULT_MQTT_SETTINGS, layouts: {}, dynamicWalls: {} };
 
 function openHomeAssistant(mqtt: Partial<MqttSettings> = {}) {
   const onMqttSaved = vi.fn();

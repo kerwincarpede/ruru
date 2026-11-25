@@ -414,3 +414,16 @@
     animation: none;
   }
 }
+
+/* Dynamic wall: tiles glide to their new places. */
+.wall.is-dynamic .wall-cell,
+.wall-cell.is-hero {
+  transition: left 0.3s ease, top 0.3s ease, width 0.3s ease, height 0.3s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wall.is-dynamic .wall-cell,
+  .wall-cell.is-hero {
+    transition: none;
+  }
+}

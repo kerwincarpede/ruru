@@ -5,6 +5,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import GridLayout from "react-grid-layout";
 import type { Camera } from "../app/frigate";
 import type { Activity, ActivityStyle, SavedLayout } from "../app/api";
+import { heroItems, type WallSize } from "./dynamic";
+import type { DynamicView } from "./heroes";
 import { COLUMNS, GAP, ROW_RATIO, fitWidth, fromGridItems, gridRows, hideCamera, rowHeight, toGridItems, wallPlacements, type GridItem } from "./layout";
 import type { StreamKind } from "./streams";
 import Tile from "./Tile";
@@ -40,6 +42,12 @@ interface WallProps {
   onReconnecting?: (camera: string, reconnecting: boolean) => void;
   /** The layout changed in Edit layout mode and should be saved. */
   onLayout: (layout: SavedLayout) => void;
+  /** What the Dynamic wall shows for now; the saved layout is left as it is. */
+  dynamic?: DynamicView;
+  /** The Dynamic wall's custom hero slots; empty for the automatic layout. */
+  heroSlots?: string[];
+  /** Told the wall area's size whenever it changes. */
+  onSize?: (size: WallSize) => void;
 }
 
 /** The wall's size, followed as the window resizes. */
@@ -82,14 +90,27 @@ export default function Wall({
   onPlaying,
   onReconnecting,
   onLayout,
+  dynamic,
+  heroSlots = [],
+  onSize,
 }: WallProps) {
   const [box, size] = useSize();
+  useEffect(() => onSize?.(size), [size, onSize]);
   const names = useMemo(() => cameras.map((camera) => camera.name), [cameras]);
   const items = useMemo(() => toGridItems(wallPlacements(names, layout)), [names, layout]);
   const byName = useMemo(() => new Map(cameras.map((camera) => [camera.name, camera])), [cameras]);
   const hidden = layout?.hidden ?? [];
   const open = maximised && items.some((item) => item.i === maximised) ? maximised : null;
-  const width = fitToWindow ? fitWidth(size.width, size.height, gridRows(items)) : size.width;
+  // Maximising a tile and Edit layout come before the Dynamic wall. Its
+  // views only move tiles or draw one over the rest, so every tile stays
+  // mounted and keeps playing.
+  const view = !open && !editing ? dynamic : undefined;
+  const heroes = view?.kind === "heroes" ? view.heroes : null;
+  const moved = useMemo(() => (heroes ? heroItems(items, heroSlots, heroes, size) : null), [heroes, items, heroSlots, size]);
+  const shown = moved ?? items;
+  const takeover = view?.kind === "takeover" && items.some((item) => item.i === view.camera) ? view.camera : null;
+  const full = open ?? takeover;
+  const width = fitToWindow || moved ? fitWidth(size.width, size.height, gridRows(shown)) : size.width;
 
   useEffect(() => {
     if (!open) return;
@@ -104,8 +125,8 @@ export default function Wall({
   const choiceFor = (camera: Camera) => layout?.tiles.find((tile) => tile.camera === camera.name)?.stream;
 
   return (
-    <div ref={box} className={`wall activity-${activityStyle}${editing ? " is-editing" : ""}${fitToWindow ? " is-fit" : ""}`}>
-      <div className="wall-fit" style={fitToWindow ? { width } : undefined}>
+    <div ref={box} className={`wall activity-${activityStyle}${editing ? " is-editing" : ""}${fitToWindow || moved ? " is-fit" : ""}${moved ? " is-dynamic" : ""}`}>
+      <div className="wall-fit" style={fitToWindow || moved ? { width } : undefined}>
         <GridLayout
           className={lockRatio ? "wall-grid lock-ratio" : "wall-grid"}
           width={width}
@@ -113,7 +134,10 @@ export default function Wall({
           rowHeight={rowHeight(width)}
           margin={[GAP, GAP * ROW_RATIO]}
           containerPadding={[GAP, GAP]}
-          layout={items}
+          layout={shown}
+          // The Dynamic wall's placements are drawn exactly as computed; the
+          // saved layout keeps the grid's usual pull towards the top.
+          compactType={moved ? null : "vertical"}
           // Positioned without transforms, so a maximised tile can be fixed to the window.
           useCSSTransforms={false}
           isDraggable={editing && !open}
@@ -127,11 +151,12 @@ export default function Wall({
           }}
           onResizeStop={save}
         >
+          {/* Children keep their order as tiles move, so no video element is moved in the page. */}
           {items.map((item) => {
             const camera = byName.get(item.i) as Camera;
             // The cell carries the activity too: the Outline between tiles style draws in the gap around it.
             const seen = activity?.[camera.name];
-            const cell = ["wall-cell", item.i === open && "is-maximised", seen?.motion && "has-motion", seen?.review === "alert" && "is-alert"].filter(Boolean).join(" ");
+            const cell = ["wall-cell", item.i === full && "is-maximised", item.i === takeover && "is-takeover", heroes?.includes(item.i) && moved && "is-hero", seen?.motion && "has-motion", seen?.review === "alert" && "is-alert"].filter(Boolean).join(" ");
             return (
               <div key={item.i} className={cell}>
                 <Tile
@@ -139,7 +164,7 @@ export default function Wall({
                   camera={camera}
                   choice={choiceFor(camera)}
                   live={live}
-                  maximised={item.i === open}
+                  maximised={item.i === full}
                   reconnect={reconnects[camera.name] ?? 0}
                   refresh={refresh}
                   editing={editing}

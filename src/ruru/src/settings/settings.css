@@ -297,3 +297,70 @@
     padding: 16px;
   }
 }
+
+/* Dynamic wall: a small picture of the wall, then its choices. */
+.dynamic-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.dynamic-preview-screen {
+  display: flex;
+  width: min(100%, 360px);
+  max-height: 320px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--wall);
+}
+
+.dynamic-preview-grid {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  margin: auto;
+  flex: 1 1 auto;
+}
+
+.dynamic-preview-tile {
+  position: absolute;
+  display: flex;
+  align-items: flex-end;
+  box-sizing: border-box;
+  padding: 2px 4px;
+  overflow: hidden;
+  border: 1px solid var(--wall);
+  border-radius: 3px;
+  background: var(--chrome);
+  color: var(--on-wall);
+  font-size: 0.65rem;
+  white-space: nowrap;
+}
+
+/* Dark text reads on the amber in both light and dark mode. */
+.dynamic-preview-tile.is-hero {
+  background: var(--accent);
+  color: var(--wall);
+  font-weight: 600;
+}
+
+.dynamic-preview-tile.is-priority {
+  outline: 2px solid var(--alert);
+  outline-offset: -2px;
+}
+
+.dynamic-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+
+.dynamic-priority {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}

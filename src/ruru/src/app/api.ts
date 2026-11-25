@@ -38,13 +38,26 @@ export interface WallOptions {
   activity: boolean;
   /** How a tile marks motion and alerts. */
   activityStyle: ActivityStyle;
+  /** The wall rearranges itself around cameras where Frigate sees objects. */
+  dynamicWall: boolean;
 }
+
+/** Mirrors `DynamicWall` in src-tauri/src/settings.rs: one server's Dynamic wall choices. */
+export interface DynamicWall {
+  /** The cameras whose tiles active cameras swap into; empty for the automatic hero layout. */
+  heroSlots: string[];
+  /** The cameras that take the whole wall while Frigate sees a person. */
+  priorityCameras: string[];
+}
+
+/** A server's Dynamic wall choices before any are saved. */
+export const DEFAULT_DYNAMIC_WALL: DynamicWall = { heroSlots: [], priorityCameras: [] };
 
 /** Mirrors `ActivityStyle` in src-tauri/src/settings.rs: how a tile marks motion and alerts. */
 export type ActivityStyle = "ring" | "outline" | "corners" | "strip" | "caption";
 
 /** The wall options before any are saved, as Rust defaults them. */
-export const DEFAULT_WALL_OPTIONS: WallOptions = { lockRatio: true, fitToWindow: true, streamInfo: false, activity: true, activityStyle: "ring" };
+export const DEFAULT_WALL_OPTIONS: WallOptions = { lockRatio: true, fitToWindow: true, streamInfo: false, activity: true, activityStyle: "ring", dynamicWall: false };
 
 /** Mirrors `UpdateChannel` in src-tauri/src/settings.rs: which releases Ruru updates to. */
 export type UpdateChannel = "stable" | "edge";
@@ -89,6 +102,8 @@ export interface Settings {
   /** Updates install, and Ruru restarts on them, without asking. */
   autoUpdate: boolean;
   layouts: Record<string, SavedLayout>;
+  /** Dynamic wall hero slots and priority cameras by Frigate server. */
+  dynamicWalls: Record<string, DynamicWall>;
 }
 
 /** The saved settings, or the defaults when none are saved. */
@@ -127,6 +142,14 @@ export function saveLayout(server: string, layout: SavedLayout): Promise<void> {
 /** Saves how the wall is drawn: Lock to 16:9, Fit to window, stream info, activity and its style. */
 export function saveWallOptions(options: WallOptions): Promise<void> {
   return invoke<void>("save_wall_options", { options });
+}
+
+/**
+ * Saves the Appearance options with the Dynamic wall choices for `server`
+ * in one step, so a failed save changes neither, and returns the new settings.
+ */
+export function saveDynamicWall(options: WallOptions, server: string | null, dynamic: DynamicWall): Promise<Settings> {
+  return invoke<Settings>("save_dynamic_wall", { options, server, dynamic });
 }
 
 /**
@@ -224,6 +247,19 @@ export function cameraActivity(): Promise<Activity> {
 export async function onCameraActivity(handler: (activity: Activity) => void): Promise<() => void> {
   try {
     return await listen<Activity>("camera-activity", (event) => handler(event.payload));
+  } catch {
+    return () => {};
+  }
+}
+
+/**
+ * Calls `handler` when the Home Assistant connection that brings Frigate's
+ * activity drops or is replaced. Resolves to a function that stops
+ * listening; a backend without events gives a no-op.
+ */
+export async function onActivityLost(handler: () => void): Promise<() => void> {
+  try {
+    return await listen("camera-activity-lost", handler);
   } catch {
     return () => {};
   }
