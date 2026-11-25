@@ -33,6 +33,12 @@ describe("automaticHeroItems", () => {
     expect(automaticHeroItems(["a"], ["a"], { width: 1600, height: 900 })).toEqual([{ i: "a", x: 6, y: 0, w: 12, h: 12 }]);
   });
 
+  it("never places a camera twice", () => {
+    const items = automaticHeroItems(names(3), ["cam1", "cam1"], { width: 1600, height: 900 });
+    expect(items?.map((item) => item.i).sort()).toEqual(["cam0", "cam1", "cam2"]);
+    expect(customHeroItems(saved, ["a", "b"], ["c", "c"])?.map((item) => item.i).sort()).toEqual(["a", "b", "c", "d"]);
+  });
+
   it("keeps the overview when the other feeds would be too small to read", () => {
     expect(automaticHeroItems(names(30), ["cam0", "cam1"], { width: 1280, height: 720 })).toBeNull();
     expect(automaticHeroItems(names(4), [], { width: 1280, height: 720 })).toBeNull();

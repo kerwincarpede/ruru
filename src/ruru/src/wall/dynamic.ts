@@ -34,7 +34,7 @@ export function heroesSideBySide(size: WallSize): boolean {
  * the wall keeps its saved layout instead.
  */
 export function automaticHeroItems(cameras: string[], heroes: string[], size: WallSize): GridItem[] | null {
-  const shown = heroes.filter((camera) => cameras.includes(camera)).slice(0, 2);
+  const shown = [...new Set(heroes)].filter((camera) => cameras.includes(camera)).slice(0, 2);
   if (shown.length === 0 || size.width <= 0 || size.height <= 0) return null;
   const wide = heroesSideBySide(size);
   const hero = wide ? COLUMNS / 2 : COLUMNS;
@@ -80,7 +80,7 @@ export function automaticHeroItems(cameras: string[], heroes: string[], size: Wa
 export function customHeroItems(items: GridItem[], slots: string[], heroes: string[]): GridItem[] | null {
   const on = (camera: string) => items.some((item) => item.i === camera);
   if (slots.length !== 2 || slots[0] === slots[1] || !slots.every(on)) return null;
-  const shown = heroes.filter(on).slice(0, 2);
+  const shown = [...new Set(heroes)].filter(on).slice(0, 2);
   if (shown.length === 0) return null;
   const place = new Map(items.map((item) => [item.i, item]));
   const moved = new Map<string, GridItem>();

@@ -135,6 +135,9 @@ export default function Wall({
           margin={[GAP, GAP * ROW_RATIO]}
           containerPadding={[GAP, GAP]}
           layout={shown}
+          // The Dynamic wall's placements are drawn exactly as computed; the
+          // saved layout keeps the grid's usual pull towards the top.
+          compactType={moved ? null : "vertical"}
           // Positioned without transforms, so a maximised tile can be fixed to the window.
           useCSSTransforms={false}
           isDraggable={editing && !open}

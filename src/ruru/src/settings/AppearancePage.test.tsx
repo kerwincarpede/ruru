@@ -67,6 +67,16 @@ describe("AppearancePage Dynamic wall", () => {
     expect(onSaved).not.toHaveBeenCalled();
   });
 
+  it("never draws a camera twice when both slots pick it", () => {
+    page({ dynamicWall: true });
+    fireEvent.change(screen.getByLabelText("First hero slot"), { target: { value: "yard" } });
+    fireEvent.change(screen.getByLabelText("Second hero slot"), { target: { value: "yard" } });
+    const names = tiles().map((tile) => tile.textContent);
+    expect(names).toHaveLength(10);
+    expect(new Set(names).size).toBe(10);
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
   it("changes nothing when the save fails", async () => {
     mockCommands({
       save_dynamic_wall: () => {

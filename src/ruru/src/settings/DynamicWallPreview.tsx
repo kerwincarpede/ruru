@@ -18,7 +18,7 @@ interface DynamicWallPreviewProps {
  */
 export default function DynamicWallPreview({ cameras, layout, heroSlots, priority, size }: DynamicWallPreviewProps) {
   const saved = toGridItems(wallPlacements(cameras, layout));
-  const custom = heroSlots.length === 2 && heroSlots.every((slot) => cameras.includes(slot));
+  const custom = heroSlots.length === 2 && heroSlots[0] !== heroSlots[1] && heroSlots.every((slot) => cameras.includes(slot));
   const heroes = custom ? heroSlots : cameras.slice(0, 2);
   const moved = cameras.length >= 2 ? heroItems(saved, heroSlots, heroes, size) : null;
   const items = moved ?? saved;

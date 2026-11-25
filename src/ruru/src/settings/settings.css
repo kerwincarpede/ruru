@@ -338,8 +338,11 @@
   white-space: nowrap;
 }
 
+/* Dark text reads on the amber in both light and dark mode. */
 .dynamic-preview-tile.is-hero {
   background: var(--accent);
+  color: var(--wall);
+  font-weight: 600;
 }
 
 .dynamic-preview-tile.is-priority {
