@@ -1,0 +1,25 @@
+{
+  "name": "Dynamic wall",
+  "unique_id": "ruru_0123456789ab_dynamic_wall",
+  "availability_topic": "ruru/0123456789ab/availability",
+  "state_topic": "ruru/0123456789ab/state",
+  "value_template": "{{ value_json.dynamic_wall }}",
+  "command_topic": "ruru/0123456789ab/command/dynamic_wall",
+  "payload_on": "ON",
+  "payload_off": "OFF",
+  "state_on": "ON",
+  "state_off": "OFF",
+  "icon": "mdi:view-quilt",
+  "device": {
+    "identifiers": ["ruru_0123456789ab"],
+    "name": "Ruru on wall",
+    "manufacturer": "Ruru",
+    "model": "Ruru camera wall",
+    "sw_version": "1.2.3"
+  },
+  "origin": {
+    "name": "Ruru",
+    "sw_version": "1.2.3",
+    "support_url": "https://kerwincarpede.github.io/ruru/"
+  }
+}

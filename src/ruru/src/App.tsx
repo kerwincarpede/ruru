@@ -235,6 +235,21 @@ function App() {
   }, []);
   const toggleFullScreen = useCallback(() => changeFullScreen(!fullScreenRef.current), [changeFullScreen]);
 
+  // Home Assistant's Dynamic wall switch saves the setting as Settings ›
+  // Appearance does. Until the settings have loaded there is nothing to change.
+  const wallRef = useRef<WallOptions | null>(null);
+  useEffect(() => {
+    wallRef.current = settings?.wall ?? null;
+  }, [settings]);
+  const changeDynamicWall = useCallback((on: boolean) => {
+    const wall = wallRef.current;
+    if (!wall || wall.dynamicWall === on) return;
+    const next = { ...wall, dynamicWall: on };
+    wallRef.current = next;
+    setSettings((current) => (current ? { ...current, wall: next } : current));
+    void saveWallOptions(next).catch(() => {});
+  }, []);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const shortcut = shortcutFor(event);
@@ -309,6 +324,9 @@ function App() {
         case "streams":
           setStreams(command.on);
           break;
+        case "dynamicWall":
+          changeDynamicWall(command.on);
+          break;
       }
     }).then((unlisten) => {
       if (current) stop = unlisten;
@@ -318,7 +336,7 @@ function App() {
       current = false;
       stop?.();
     };
-  }, [changeFullScreen, setStreams]);
+  }, [changeFullScreen, setStreams, changeDynamicWall]);
 
   // The toolbar shows while the pointer moves, then fades away.
   const wake = () => {
@@ -351,6 +369,7 @@ function App() {
   // Home Assistant hears the wall's state and every tile's problems. The
   // backend only publishes them while Settings › Home Assistant is on.
   const fullScreenNow = settings?.fullScreen ?? false;
+  const dynamicWallOn = wallOptions.dynamicWall;
   const onWallNow = url && cameras ? wallPlacements(cameras.map((camera) => camera.name), layout).map((tile) => tile.camera) : null;
   const onWallKey = onWallNow ? JSON.stringify(onWallNow) : null;
   // The same array while the cameras on the wall are the same.
@@ -380,9 +399,9 @@ function App() {
   }, []);
   useEffect(() => {
     if (onWallKey === null) return;
-    const report = { maximised: shownMaximised, fullScreen: fullScreenNow, windowShown: live, streams, cameras: JSON.parse(onWallKey) as string[] };
+    const report = { maximised: shownMaximised, fullScreen: fullScreenNow, windowShown: live, streams, dynamicWall: dynamicWallOn, cameras: JSON.parse(onWallKey) as string[] };
     void reportWallState(report).catch(() => {});
-  }, [onWallKey, shownMaximised, fullScreenNow, live, streams]);
+  }, [onWallKey, shownMaximised, fullScreenNow, live, streams, dynamicWallOn]);
   const onProblem = useCallback((camera: string, problem: boolean) => {
     void reportTileProblem(camera, problem).catch(() => {});
   }, []);

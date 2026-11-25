@@ -561,6 +561,15 @@ fn check_due(last_check: Option<Instant>, now: Instant) -> bool {
 pub struct MqttState(Mutex<Inner>);
 
 impl MqttState {
+    /// The state at launch. The saved Dynamic wall setting is known before
+    /// the page first reports, so Home Assistant never hears it wrong while
+    /// the wall is still loading.
+    fn starting(saved: &Settings) -> Self {
+        let mut inner = Inner::default();
+        inner.wall.state.dynamic_wall = saved.wall.dynamic_wall;
+        Self(Mutex::new(inner))
+    }
+
     fn lock(&self) -> MutexGuard<'_, Inner> {
         // A panic while holding the lock leaves the state as it was.
         self.0
@@ -571,7 +580,8 @@ impl MqttState {
 
 /// Hands the state to the app and connects if the connection is on.
 pub fn manage(app: &tauri::App) {
-    app.manage(MqttState::default());
+    let state = MqttState::starting(settings::lock(&app.state::<SharedSettings>()).current());
+    app.manage(state);
     restart(app.handle());
 }
 
@@ -965,6 +975,8 @@ pub struct WallReport {
     pub window_shown: bool,
     /// The tiles play their streams, rather than showing snapshots.
     pub streams: bool,
+    /// The Dynamic wall is turned on in Settings › Appearance.
+    pub dynamic_wall: bool,
     /// Every camera on the Frigate server, in Frigate's order.
     pub cameras: Vec<String>,
 }
@@ -993,6 +1005,7 @@ impl Wall {
             full_screen: report.full_screen,
             window_shown: report.window_shown,
             streams: report.streams,
+            dynamic_wall: report.dynamic_wall,
         };
         self.reported = true;
         let changed = self.cameras != report.cameras;
@@ -1311,6 +1324,7 @@ mod tests {
                 "homeassistant/button/0123456789ab/restore/config",
                 "homeassistant/switch/0123456789ab/full_screen/config",
                 "homeassistant/switch/0123456789ab/streams/config",
+                "homeassistant/switch/0123456789ab/dynamic_wall/config",
                 "homeassistant/update/0123456789ab/update/config",
                 "homeassistant/button/0123456789ab/check_for_updates/config",
                 "homeassistant/switch/0123456789ab/display/config",
@@ -1325,14 +1339,14 @@ mod tests {
             ]
         );
         assert_eq!(messages[0].payload, "online");
-        assert_eq!(messages[14].payload, "OFF");
-        assert_eq!(messages[16].payload, "ON");
+        assert_eq!(messages[15].payload, "OFF");
+        assert_eq!(messages[17].payload, "ON");
         assert!(messages.iter().all(|message| message.retain));
         // Without a way to turn the screen off, the Display switch is
         // removed rather than offered, and its state an earlier run left
         // is cleared too.
-        assert!(messages[10].payload.is_empty());
         assert!(messages[11].payload.is_empty());
+        assert!(messages[12].payload.is_empty());
     }
 
     #[test]
@@ -1570,12 +1584,14 @@ mod tests {
             full_screen: true,
             window_shown: false,
             streams: false,
+            dynamic_wall: true,
             cameras: vec!["garage".into(), "yard".into()],
         };
         assert!(wall.report(report.clone()));
         assert!(!wall.report(report.clone()));
         assert_eq!(wall.state.maximised.as_deref(), Some("garage"));
         assert!(wall.state.full_screen && !wall.state.window_shown && !wall.state.streams);
+        assert!(wall.state.dynamic_wall);
         assert!(wall.set_problem("yard", true));
         assert!(!wall.set_problem("yard", true));
         assert!(wall.report(WallReport {
@@ -1587,12 +1603,30 @@ mod tests {
     }
 
     #[test]
+    fn the_saved_dynamic_wall_is_known_before_the_page_reports() {
+        let mut saved = Settings::default();
+        assert!(!MqttState::starting(&saved).lock().wall.state.dynamic_wall);
+        saved.wall.dynamic_wall = true;
+        let state = MqttState::starting(&saved);
+        let inner = state.lock();
+        assert!(inner.wall.state.dynamic_wall);
+        assert_eq!(
+            inner.wall.state,
+            WallState {
+                dynamic_wall: true,
+                ..WallState::default()
+            }
+        );
+    }
+
+    #[test]
     fn reports_with_bad_camera_names_are_refused() {
         let good = WallReport {
             maximised: None,
             full_screen: false,
             window_shown: true,
             streams: true,
+            dynamic_wall: false,
             cameras: vec!["garage".into()],
         };
         assert!(validate_report(&good).is_ok());

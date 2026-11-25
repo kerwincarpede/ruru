@@ -67,6 +67,24 @@ describe("AppearancePage Dynamic wall", () => {
     expect(onSaved).not.toHaveBeenCalled();
   });
 
+  it("follows a change from Home Assistant until the toggle is changed here", async () => {
+    const calls = mockCommands({ save_dynamic_wall: () => settings });
+    const props = { mqttEnabled: true, server: SERVER, dynamic: DEFAULT_DYNAMIC_WALL, cameras: ten, layout: undefined, wallSize: { width: 1920, height: 1080 }, onSaved: vi.fn(), onDynamicSaved: vi.fn(), onClose: vi.fn() };
+    const { rerender } = render(<AppearancePage {...props} wall={DEFAULT_WALL_OPTIONS} />);
+    const toggle = screen.getByRole("checkbox", { name: "Dynamic wall" });
+    rerender(<AppearancePage {...props} wall={{ ...DEFAULT_WALL_OPTIONS, dynamicWall: true }} />);
+    expect(toggle).toBeChecked();
+    // Nothing changed here, so there is nothing to save.
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.click(toggle);
+    rerender(<AppearancePage {...props} wall={{ ...DEFAULT_WALL_OPTIONS, dynamicWall: false }} />);
+    rerender(<AppearancePage {...props} wall={{ ...DEFAULT_WALL_OPTIONS, dynamicWall: true }} />);
+    // The choice made here stays, and Save keeps it.
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls).toEqual([{ cmd: "save_dynamic_wall", payload: { options: DEFAULT_WALL_OPTIONS, server: SERVER, dynamic: DEFAULT_DYNAMIC_WALL } }]));
+  });
+
   it("never draws a camera twice when both slots pick it", () => {
     page({ dynamicWall: true });
     fireEvent.change(screen.getByLabelText("First hero slot"), { target: { value: "yard" } });

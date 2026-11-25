@@ -44,6 +44,7 @@ It also has controls:
 | **Restore** | A button that shows the whole wall again. |
 | **Full screen** | A switch that turns full screen on and off. |
 | **Streams** | A switch that stops every tile's stream and starts them again. See [Streams](#streams). |
+| **Dynamic wall** | A switch that turns the Dynamic wall on and off. See [Dynamic wall](#dynamic-wall). |
 | **Update** | Shows when a newer version is out on your update channel, and installs it. |
 | **Check for updates** | A button that checks your update channel now, rather than waiting for the next check. |
 | **Display** | A switch that turns the screen off and on. Only where Ruru can do it: see [Display](#display). |
@@ -157,6 +158,12 @@ Turn the **Streams** switch off to stop every tile's stream, such as overnight w
 
 You can also right-click the wall and choose **Stop streams** or **Start streams**. Ruru always starts with its streams on.
 
+## Dynamic wall
+
+The **Dynamic wall** switch turns the [Dynamic wall](/ruru/wall/watch/#dynamic-wall) on and off, such as from an automation that turns it on when everyone leaves home. It is the same setting as **Dynamic wall** in **Settings → Appearance**: Ruru saves a change from either one and shows it in the other. If **Settings → Appearance** is open when the switch changes, its checkbox follows the switch unless you have already changed it there; choose **Save** and your choice wins. The hero slots and priority cameras stay as you set them in **Settings → Appearance**.
+
+The Dynamic wall needs this connection for Frigate's activity. While Ruru is disconnected, the switch shows as unavailable and Ruru keeps the Dynamic wall as it was. When Ruru connects again, the switch shows the saved setting.
+
 ## Activity on the tiles
 
 Frigate publishes what it sees to the same broker. While Ruru is connected, each tile shows its camera's activity:
@@ -188,7 +195,7 @@ Ruru publishes under `ruru/<device id>/`, where the device id is made once for e
 | Topic | Payload |
 | --- | --- |
 | `ruru/<device id>/availability` | `online`, or `offline` when Ruru goes away. |
-| `ruru/<device id>/state` | JSON with `version`, `maximised`, `full_screen`, `window_shown` and `streams`. |
+| `ruru/<device id>/state` | JSON with `version`, `maximised`, `full_screen`, `window_shown`, `streams` and `dynamic_wall`. |
 | `ruru/<device id>/problem/<camera>` | `ON` or `OFF`. |
 | `ruru/<device id>/update` | JSON with `installed_version`, `latest_version`, `title`, `release_url` and `in_progress`, for the update entity. |
 | `ruru/<device id>/display` | `ON` or `OFF`, as Ruru last turned the screen. Only where the **Display** switch is offered. |
@@ -201,6 +208,7 @@ Home Assistant sends commands to `ruru/<device id>/command/<command>`:
 | `restore` | Anything. |
 | `full_screen` | `ON` or `OFF`. |
 | `streams` | `ON` or `OFF`. |
+| `dynamic_wall` | `ON` or `OFF`. |
 | `check_for_updates` | Anything. |
 | `install` | Anything. |
 | `display` | `ON` or `OFF`. |
