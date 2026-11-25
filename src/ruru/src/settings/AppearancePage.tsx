@@ -30,7 +30,10 @@ export default function AppearancePage({ wall, mqttEnabled, server, dynamic, cam
   const [activity, setActivity] = useState(wall.activity);
   const [activityStyle, setActivityStyle] = useState(wall.activityStyle);
   const [streamInfo, setStreamInfo] = useState(wall.streamInfo);
-  const [dynamicWall, setDynamicWall] = useState(wall.dynamicWall);
+  // Home Assistant can turn the Dynamic wall on or off while this page is
+  // open, so the checkbox follows the saved setting until it is changed here.
+  const [dynamicWallPick, setDynamicWallPick] = useState<boolean | null>(null);
+  const dynamicWall = dynamicWallPick ?? wall.dynamicWall;
   const [slots, setSlots] = useState<[string, string]>([dynamic.heroSlots[0] ?? "", dynamic.heroSlots[1] ?? ""]);
   const [priority, setPriority] = useState(dynamic.priorityCameras);
   const [saving, setSaving] = useState(false);
@@ -124,7 +127,7 @@ export default function AppearancePage({ wall, mqttEnabled, server, dynamic, cam
               type="checkbox"
               checked={dynamicWall}
               aria-describedby={mqttEnabled ? "dynamic-wall-hint" : "dynamic-wall-hint dynamic-wall-source"}
-              onChange={(event) => setDynamicWall(event.target.checked)}
+              onChange={(event) => setDynamicWallPick(event.target.checked === wall.dynamicWall ? null : event.target.checked)}
             />
             <label className="field-label" htmlFor="dynamic-wall">Dynamic wall</label>
             <span id="dynamic-wall-hint" className="field-hint">

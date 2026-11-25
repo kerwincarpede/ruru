@@ -7,8 +7,8 @@
 use serde_json::{Value, json};
 
 use super::commands::{
-    CHECK_FOR_UPDATES, DISPLAY, FULL_SCREEN, INSTALL, INSTALL_PAYLOAD, MAXIMISE, NONE, PRESS,
-    RESTORE, STREAMS,
+    CHECK_FOR_UPDATES, DISPLAY, DYNAMIC_WALL, FULL_SCREEN, INSTALL, INSTALL_PAYLOAD, MAXIMISE,
+    NONE, PRESS, RESTORE, STREAMS,
 };
 use super::topics::{Topics, object_id};
 
@@ -186,8 +186,8 @@ pub fn device_configs(topics: &Topics, device: &Device) -> Vec<Message> {
 pub const PROBLEM_SUFFIX: &str = "_problem";
 
 /// The wall's controls that do not depend on the cameras: the Restore button,
-/// the Full screen and Streams switches, the update entity and the Check for
-/// updates button.
+/// the Full screen, Streams and Dynamic wall switches, the update entity and
+/// the Check for updates button.
 pub fn control_configs(topics: &Topics, device: &Device) -> Vec<Message> {
     let mut restore = base(topics, device, RESTORE, "Restore");
     restore.insert("command_topic".into(), topics.command(RESTORE).into());
@@ -238,6 +238,21 @@ pub fn control_configs(topics: &Topics, device: &Device) -> Vec<Message> {
                 "state_on": "ON",
                 "state_off": "OFF",
                 "icon": "mdi:cctv",
+            }),
+        ),
+        state_entity(
+            topics,
+            device,
+            "switch",
+            DYNAMIC_WALL,
+            "Dynamic wall",
+            json!({
+                "command_topic": topics.command(DYNAMIC_WALL),
+                "payload_on": "ON",
+                "payload_off": "OFF",
+                "state_on": "ON",
+                "state_off": "OFF",
+                "icon": "mdi:view-quilt",
             }),
         ),
         Message::retained(
@@ -369,6 +384,8 @@ pub struct WallState {
     /// The tiles play their streams; off, they show snapshots and use no
     /// network.
     pub streams: bool,
+    /// The Dynamic wall is turned on in Settings › Appearance.
+    pub dynamic_wall: bool,
 }
 
 impl Default for WallState {
@@ -378,6 +395,7 @@ impl Default for WallState {
             full_screen: false,
             window_shown: true,
             streams: true,
+            dynamic_wall: false,
         }
     }
 }
@@ -390,6 +408,7 @@ pub fn state(topics: &Topics, device: &Device, wall: &WallState) -> Message {
         "full_screen": on_off(wall.full_screen),
         "window_shown": on_off(wall.window_shown),
         "streams": on_off(wall.streams),
+        "dynamic_wall": on_off(wall.dynamic_wall),
     });
     Message::retained(topics.state(), payload.to_string())
 }
@@ -504,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    fn the_wall_has_restore_full_screen_streams_update_and_check_controls() {
+    fn the_wall_has_restore_full_screen_streams_dynamic_wall_update_and_check_controls() {
         let configs = control_configs(&topics(), &device());
         let topics: Vec<&str> = configs.iter().map(|m| m.topic.as_str()).collect();
         assert_eq!(
@@ -513,6 +532,7 @@ mod tests {
                 "homeassistant/button/0123456789ab/restore/config",
                 "homeassistant/switch/0123456789ab/full_screen/config",
                 "homeassistant/switch/0123456789ab/streams/config",
+                "homeassistant/switch/0123456789ab/dynamic_wall/config",
                 "homeassistant/update/0123456789ab/update/config",
                 "homeassistant/button/0123456789ab/check_for_updates/config",
             ]
@@ -532,10 +552,14 @@ mod tests {
         );
         assert_eq!(
             payload(&configs[3]),
-            fixture(include_str!("fixtures/discovery-update.json"))
+            fixture(include_str!("fixtures/discovery-dynamic-wall.json"))
         );
         assert_eq!(
             payload(&configs[4]),
+            fixture(include_str!("fixtures/discovery-update.json"))
+        );
+        assert_eq!(
+            payload(&configs[5]),
             fixture(include_str!("fixtures/discovery-check-for-updates.json"))
         );
     }
@@ -629,18 +653,20 @@ mod tests {
             full_screen: true,
             window_shown: false,
             streams: false,
+            dynamic_wall: true,
         };
         let message = state(&topics, &device(), &wall);
         assert_eq!(message.topic, "ruru/0123456789ab/state");
         assert!(message.retain);
         assert_eq!(
             payload(&message),
-            json!({"version": "1.2.3", "maximised": "front_door", "full_screen": "ON", "window_shown": "OFF", "streams": "OFF"})
+            json!({"version": "1.2.3", "maximised": "front_door", "full_screen": "ON", "window_shown": "OFF", "streams": "OFF", "dynamic_wall": "ON"})
         );
         let idle = state(&topics, &device(), &WallState::default());
         assert_eq!(payload(&idle)["maximised"], "none");
         assert_eq!(payload(&idle)["window_shown"], "ON");
         assert_eq!(payload(&idle)["streams"], "ON");
+        assert_eq!(payload(&idle)["dynamic_wall"], "OFF");
     }
 
     #[test]

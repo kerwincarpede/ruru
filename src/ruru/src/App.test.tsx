@@ -807,9 +807,9 @@ describe("App streams", () => {
     render(<App />);
     const reports = () => calls.filter((call) => call.cmd === "report_wall_state").map((call) => (call.payload as { report: unknown }).report);
     const last = () => reports()[reports().length - 1];
-    await waitFor(() => expect(reports()).toEqual([{ maximised: null, fullScreen: false, windowShown: true, streams: true, cameras: ["maingate", "yard"] }]));
+    await waitFor(() => expect(reports()).toEqual([{ maximised: null, fullScreen: false, windowShown: true, streams: true, dynamicWall: false, cameras: ["maingate", "yard"] }]));
     fireEvent.doubleClick(screen.getByRole("figure", { name: "Yard" }));
-    await waitFor(() => expect(last()).toEqual({ maximised: "yard", fullScreen: false, windowShown: true, streams: true, cameras: ["maingate", "yard"] }));
+    await waitFor(() => expect(last()).toEqual({ maximised: "yard", fullScreen: false, windowShown: true, streams: true, dynamicWall: false, cameras: ["maingate", "yard"] }));
     fireEvent.keyDown(window, { key: "F11" });
     await waitFor(() => expect(last()).toMatchObject({ fullScreen: true }));
     setVisibility("hidden");
@@ -886,6 +886,43 @@ describe("App streams", () => {
     expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate_sub"]);
     expect(screen.queryByRole("status", { name: "Streams are off" })).not.toBeInTheDocument();
     await waitFor(() => expect(reports()[reports().length - 1].streams).toBe(true));
+  });
+
+  it("turns the Dynamic wall on and off when Home Assistant asks, saves it and shows it in Settings", async () => {
+    const calls = wall();
+    render(<App />);
+    await screen.findByRole("figure", { name: "Garage" });
+    const saves = () => calls.filter((call) => call.cmd === "save_wall_options").map((call) => call.payload);
+    const reports = () => calls.filter((call) => call.cmd === "report_wall_state").map((call) => (call.payload as { report: { dynamicWall: boolean } }).report);
+    await act(() => emit("wall-command", { kind: "dynamicWall", on: true }));
+    await waitFor(() => expect(saves()).toEqual([{ options: { ...DEFAULT_WALL_OPTIONS, dynamicWall: true } }]));
+    // Home Assistant hears the switch it turned.
+    await waitFor(() => expect(reports()[reports().length - 1].dynamicWall).toBe(true));
+    // Asking for what is already saved saves nothing.
+    await act(() => emit("wall-command", { kind: "dynamicWall", on: true }));
+    expect(saves()).toHaveLength(1);
+    fireEvent.contextMenu(screen.getByRole("main"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Settings…" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Appearance" }));
+    expect(screen.getByRole("checkbox", { name: "Dynamic wall" })).toBeChecked();
+    // A change while Settings is open shows there too.
+    await act(() => emit("wall-command", { kind: "dynamicWall", on: false }));
+    expect(screen.getByRole("checkbox", { name: "Dynamic wall" })).not.toBeChecked();
+    await waitFor(() => expect(saves()).toEqual([{ options: { ...DEFAULT_WALL_OPTIONS, dynamicWall: true } }, { options: DEFAULT_WALL_OPTIONS }]));
+    await waitFor(() => expect(reports()[reports().length - 1].dynamicWall).toBe(false));
+  });
+
+  it("tells Home Assistant when the Dynamic wall is turned on in Settings", async () => {
+    const calls = wall({ save_dynamic_wall: ({ options }) => ({ ...connected, wall: options }) });
+    render(<App />);
+    await screen.findByRole("figure", { name: "Garage" });
+    const reports = () => calls.filter((call) => call.cmd === "report_wall_state").map((call) => (call.payload as { report: { dynamicWall: boolean } }).report);
+    fireEvent.contextMenu(screen.getByRole("main"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Settings…" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Appearance" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Dynamic wall" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(reports()[reports().length - 1].dynamicWall).toBe(true));
   });
 
   /** Makes the tile's video for `stream` start playing: jsdom never decodes. */

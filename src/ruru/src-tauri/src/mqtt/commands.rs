@@ -1,7 +1,7 @@
 //! The commands Home Assistant sends on Ruru's command topics: maximise a
 //! camera, restore the wall, turn full screen on or off, stop or start every
-//! stream, check for an update, install the pending update and turn the
-//! display off or on. Each one is checked before it is carried out, since
+//! stream, turn the Dynamic wall on or off, check for an update, install the
+//! pending update and turn the display off or on. Each one is checked before it is carried out, since
 //! anything on the broker can publish to these topics.
 
 use serde::Serialize;
@@ -18,6 +18,8 @@ pub const RESTORE: &str = "restore";
 pub const FULL_SCREEN: &str = "full_screen";
 /// The switch that stops and starts every camera's stream.
 pub const STREAMS: &str = "streams";
+/// The switch that turns the Dynamic wall on and off.
+pub const DYNAMIC_WALL: &str = "dynamic_wall";
 /// The button that checks for an update now.
 pub const CHECK_FOR_UPDATES: &str = "check_for_updates";
 /// The update entity's Install.
@@ -49,6 +51,9 @@ pub enum WallCommand {
     FullScreen { on: bool },
     /// Start every tile's stream, or stop them all and leave the snapshots.
     Streams { on: bool },
+    /// Turn the Dynamic wall on or off, and save it as Settings › Appearance
+    /// does.
+    DynamicWall { on: bool },
 }
 
 /// A command from Home Assistant.
@@ -119,6 +124,7 @@ pub fn parse(name: &str, payload: &[u8], cameras: &[String]) -> Result<Command, 
         RESTORE => WallCommand::Restore,
         FULL_SCREEN => WallCommand::FullScreen { on: on_or_off()? },
         STREAMS => WallCommand::Streams { on: on_or_off()? },
+        DYNAMIC_WALL => WallCommand::DynamicWall { on: on_or_off()? },
         CHECK_FOR_UPDATES => return Ok(Command::CheckForUpdates),
         INSTALL => return Ok(Command::Install),
         DISPLAY => return Ok(Command::Display { on: on_or_off()? }),
@@ -209,6 +215,22 @@ mod tests {
     }
 
     #[test]
+    fn the_switch_turns_the_dynamic_wall_on_and_off() {
+        assert_eq!(
+            wall("dynamic_wall", "ON"),
+            Ok(Command::Wall(WallCommand::DynamicWall { on: true }))
+        );
+        assert_eq!(
+            wall("dynamic_wall", "off\n"),
+            Ok(Command::Wall(WallCommand::DynamicWall { on: false }))
+        );
+        assert_eq!(
+            wall("dynamic_wall", "1"),
+            Err(Refused::NotOnOrOff("1".into()))
+        );
+    }
+
+    #[test]
     fn the_switch_turns_the_display_off_and_on() {
         assert_eq!(wall("display", "OFF"), Ok(Command::Display { on: false }));
         assert_eq!(wall("display", " on"), Ok(Command::Display { on: true }));
@@ -263,6 +285,10 @@ mod tests {
         assert_eq!(
             json(WallCommand::Streams { on: false }),
             serde_json::json!({ "kind": "streams", "on": false })
+        );
+        assert_eq!(
+            json(WallCommand::DynamicWall { on: true }),
+            serde_json::json!({ "kind": "dynamicWall", "on": true })
         );
     }
 }

@@ -211,6 +211,8 @@ export interface WallReport {
   windowShown: boolean;
   /** The tiles play their streams, rather than showing snapshots. */
   streams: boolean;
+  /** The Dynamic wall is turned on in Settings › Appearance. */
+  dynamicWall: boolean;
   /** Every camera on the Frigate server, in Frigate's order. */
   cameras: string[];
 }
@@ -275,7 +277,8 @@ export type WallCommand =
   | { kind: "maximise"; camera: string }
   | { kind: "restore" }
   | { kind: "fullScreen"; on: boolean }
-  | { kind: "streams"; on: boolean };
+  | { kind: "streams"; on: boolean }
+  | { kind: "dynamicWall"; on: boolean };
 
 /**
  * Calls `handler` with each command Home Assistant sends the wall. Resolves
