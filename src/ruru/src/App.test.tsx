@@ -15,7 +15,7 @@ vi.mock("./app/updates", async (importOriginal) => ({ ...(await importOriginal<t
 const findUpdateMock = vi.mocked(findUpdate);
 
 const URL_SAVED = "http://frigate:5000";
-const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: DEFAULT_MQTT_SETTINGS, layouts: {} };
+const empty: Settings = { frigateUrl: null, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: DEFAULT_MQTT_SETTINGS, layouts: {}, dynamicWalls: {} };
 const connected: Settings = { ...empty, frigateUrl: URL_SAVED };
 const camera = (name: string): Camera => ({ name, enabled: true, mainStream: name, subStream: `${name}_sub` });
 const cameras = [camera("maingate"), camera("garage")];
@@ -336,9 +336,9 @@ describe("App", () => {
     expect(screen.getByRole("checkbox", { name: "Fit to window" })).not.toBeChecked();
     fireEvent.click(screen.getByRole("checkbox", { name: "Lock to 16:9" }));
     await waitFor(() => expect(calls.filter((call) => call.cmd === "save_wall_options").map((call) => call.payload)).toEqual([
-      { options: { lockRatio: false, fitToWindow: true, streamInfo: true, activity: true, activityStyle: "ring" } },
-      { options: { lockRatio: false, fitToWindow: false, streamInfo: true, activity: true, activityStyle: "ring" } },
-      { options: { lockRatio: true, fitToWindow: false, streamInfo: true, activity: true, activityStyle: "ring" } },
+      { options: { lockRatio: false, fitToWindow: true, streamInfo: true, activity: true, activityStyle: "ring", dynamicWall: false } },
+      { options: { lockRatio: false, fitToWindow: false, streamInfo: true, activity: true, activityStyle: "ring", dynamicWall: false } },
+      { options: { lockRatio: true, fitToWindow: false, streamInfo: true, activity: true, activityStyle: "ring", dynamicWall: false } },
     ]));
   });
 
@@ -1011,5 +1011,64 @@ describe("App streams", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Reconnect" }));
     expect(FakeSocket.all.filter((socket) => socket.url.includes("garage_sub")).map((socket) => socket.closed)).toEqual([true, false]);
     expect(FakeSocket.all.filter((socket) => socket.url.includes("maingate_sub"))).toHaveLength(1);
+  });
+
+  const dynamicOn: Settings = {
+    ...connected,
+    wall: { ...DEFAULT_WALL_OPTIONS, dynamicWall: true },
+    mqtt: { ...DEFAULT_MQTT_SETTINGS, enabled: true, host: "ha.local" },
+    dynamicWalls: { [URL_SAVED]: { heroSlots: [], priorityCameras: ["maingate"] } },
+  };
+  const personAt = (name: string): Activity => ({ [name]: { motion: true, objects: { person: 1 }, review: "alert" } });
+
+  it("lets a person at a priority camera take the wall while the other streams stay connected, until Escape", async () => {
+    wall({ get_settings: () => dynamicOn, frigate_cameras: () => [...cameras, camera("yard")] });
+    render(<App />);
+    const maingate = await screen.findByRole("figure", { name: "Maingate" });
+    const garage = FakeSocket.all.filter((socket) => socket.url.includes("garage_sub"));
+    await act(() => emit("camera-activity", personAt("maingate")));
+    expect(maingate).toHaveClass("is-maximised");
+    expect(maingate.parentElement).toHaveClass("is-takeover");
+    expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate", "yard_sub"]);
+    // Escape puts the takeover away; the camera stays a hero while Frigate sees the person.
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(maingate).not.toHaveClass("is-maximised");
+    expect(maingate.parentElement).toHaveClass("is-hero");
+    expect(maingate.closest(".wall")).toHaveClass("is-dynamic");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(maingate.parentElement).not.toHaveClass("is-hero");
+    // No tile reconnected through the changes of view.
+    expect(FakeSocket.all.filter((socket) => socket.url.includes("garage_sub"))).toEqual(garage);
+    expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate_sub", "yard_sub"]);
+  });
+
+  it("puts heroes aside for Edit layout and a maximised tile, and forgets them when the streams stop", async () => {
+    wall({ get_settings: () => dynamicOn });
+    render(<App />);
+    const garage = await screen.findByRole("figure", { name: "Garage" });
+    await act(() => emit("camera-activity", { garage: { motion: true, objects: { car: 1 }, review: "none" } }));
+    expect(garage.parentElement).toHaveClass("is-hero");
+    fireEvent.click(screen.getByRole("button", { name: "Edit layout" }));
+    expect(garage.parentElement).not.toHaveClass("is-hero");
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(garage.parentElement).toHaveClass("is-hero");
+    const maingate = screen.getByRole("figure", { name: "Maingate" });
+    fireEvent.doubleClick(maingate);
+    expect(garage.parentElement).not.toHaveClass("is-hero");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(maingate).not.toHaveClass("is-maximised");
+    expect(garage.parentElement).toHaveClass("is-hero");
+    // Activity that drops away entirely, as when Home Assistant disconnects, clears it at once.
+    await act(() => emit("camera-activity", {}));
+    expect(garage.parentElement).not.toHaveClass("is-hero");
+  });
+
+  it("leaves the wall alone while Dynamic wall is off", async () => {
+    wall({ get_settings: () => ({ ...dynamicOn, wall: DEFAULT_WALL_OPTIONS }) });
+    render(<App />);
+    const maingate = await screen.findByRole("figure", { name: "Maingate" });
+    await act(() => emit("camera-activity", personAt("maingate")));
+    expect(maingate).not.toHaveClass("is-maximised");
+    expect(maingate.parentElement).not.toHaveClass("is-hero");
   });
 });

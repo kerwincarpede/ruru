@@ -2,7 +2,7 @@ import type { InvokeArgs } from "@tauri-apps/api/core";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import type { AppInfo } from "../app/api";
 import type { Camera, FrigateStatus } from "../app/frigate";
-import type { Activity, HostControlsCredentials, HostControlsStatus, MqttInput, SavedLayout, Settings, UpdateChannel, WallOptions, WallReport } from "../app/api";
+import type { Activity, DynamicWall, HostControlsCredentials, HostControlsStatus, MqttInput, SavedLayout, Settings, UpdateChannel, WallOptions, WallReport } from "../app/api";
 
 /** The Rust commands the page can call, by name, typed by hand from src-tauri/src/. */
 type Commands = {
@@ -17,6 +17,7 @@ type Commands = {
   set_full_screen: (args: { fullScreen: boolean }) => null;
   save_layout: (args: { server: string; layout: SavedLayout }) => null;
   save_wall_options: (args: { options: WallOptions }) => null;
+  save_dynamic_wall: (args: { options: WallOptions; server: string | null; dynamic: DynamicWall }) => Settings;
   test_frigate: (args: { url: string }) => FrigateStatus;
   frigate_cameras: (args: { url: string }) => Camera[];
   host_controls_status: () => HostControlsStatus;

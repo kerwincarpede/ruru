@@ -2,7 +2,8 @@ import "./settings.css";
 import { useState, type FormEvent } from "react";
 import Dialog from "../app/Dialog";
 import type { FrigateStatus } from "../app/frigate";
-import { saveFrigateUrl, testFrigate, type AppInfo, type Settings, type WallOptions } from "../app/api";
+import { DEFAULT_DYNAMIC_WALL, saveFrigateUrl, testFrigate, type AppInfo, type SavedLayout, type Settings, type WallOptions } from "../app/api";
+import type { WallSize } from "../wall/dynamic";
 import type { AvailableUpdate } from "../app/updates";
 import AppearancePage from "./AppearancePage";
 import HomeAssistantPage from "./HomeAssistantPage";
@@ -20,6 +21,14 @@ interface SettingsDialogProps {
   onMqttSaved: (settings: Settings) => void;
   /** The appearance settings were saved; the wall uses the new options. */
   onWallSaved: (options: WallOptions) => void;
+  /** The appearance settings were saved with the Dynamic wall's choices. */
+  onDynamicWallSaved?: (settings: Settings) => void;
+  /** The cameras on the current server's wall, in wall order, for the Dynamic wall. */
+  wallCameras?: string[];
+  /** The current server's saved layout. */
+  wallLayout?: SavedLayout;
+  /** The wall area's size, for the Dynamic wall preview. */
+  wallSize?: WallSize;
   /** Install updates automatically was turned on or off. */
   onAutoUpdateSaved: (settings: Settings) => void;
   /** A check on the Updates page found an update, or found none. */
@@ -43,7 +52,7 @@ function message(error: unknown): string {
 }
 
 /** Settings over the wall, with a page for each group of options. */
-export default function SettingsDialog({ settings, info, onSaved, onChannelSaved, onAutoUpdateSaved, onMqttSaved, onWallSaved, onUpdate, onClose }: SettingsDialogProps) {
+export default function SettingsDialog({ settings, info, onSaved, onChannelSaved, onAutoUpdateSaved, onMqttSaved, onWallSaved, onDynamicWallSaved, wallCameras = [], wallLayout, wallSize, onUpdate, onClose }: SettingsDialogProps) {
   const [page, setPage] = useState<Page>("frigate");
   const [url, setUrl] = useState(settings.frigateUrl ?? "");
   const [test, setTest] = useState<Test>({ kind: "idle" });
@@ -101,7 +110,20 @@ export default function SettingsDialog({ settings, info, onSaved, onChannelSaved
         </svg>
       </button>
       {page === "homeassistant" && <HomeAssistantPage mqtt={settings.mqtt} onSaved={onMqttSaved} onClose={onClose} />}
-      {page === "appearance" && <AppearancePage wall={settings.wall} mqttEnabled={settings.mqtt.enabled} onSaved={onWallSaved} onClose={onClose} />}
+      {page === "appearance" && (
+        <AppearancePage
+          wall={settings.wall}
+          mqttEnabled={settings.mqtt.enabled}
+          server={settings.frigateUrl}
+          dynamic={(settings.frigateUrl ? settings.dynamicWalls[settings.frigateUrl] : undefined) ?? DEFAULT_DYNAMIC_WALL}
+          cameras={wallCameras}
+          layout={wallLayout}
+          wallSize={wallSize ?? { width: window.innerWidth, height: window.innerHeight }}
+          onSaved={onWallSaved}
+          onDynamicSaved={(saved) => (onDynamicWallSaved ? onDynamicWallSaved(saved) : onWallSaved(saved.wall))}
+          onClose={onClose}
+        />
+      )}
       {page === "updates" && (
         <UpdatesPage
           info={info}

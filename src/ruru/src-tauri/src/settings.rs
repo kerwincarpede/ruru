@@ -81,6 +81,25 @@ pub struct WallOptions {
     /// How a tile marks motion and alerts, chosen in Settings › Home Assistant.
     #[serde(deserialize_with = "lenient")]
     pub activity_style: ActivityStyle,
+    /// The wall rearranges itself around cameras where Frigate sees
+    /// objects, set in Settings › Appearance. Off until the user turns it on.
+    pub dynamic_wall: bool,
+}
+
+/// The most hero slots a wall has.
+pub const MAX_HERO_SLOTS: usize = 2;
+
+/// One Frigate server's Dynamic wall choices, set in Settings › Appearance.
+///
+/// Mirrored by `DynamicWall` in `src/app/api.ts`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DynamicWall {
+    /// The cameras whose tiles active cameras swap into. Empty for the
+    /// automatic hero layout.
+    pub hero_slots: Vec<String>,
+    /// The cameras that take the whole wall while Frigate sees a person.
+    pub priority_cameras: Vec<String>,
 }
 
 /// How a tile marks Frigate's motion and alerts. Each keeps the picture as
@@ -111,6 +130,7 @@ impl Default for WallOptions {
             stream_info: false,
             activity: true,
             activity_style: ActivityStyle::Ring,
+            dynamic_wall: false,
         }
     }
 }
@@ -249,6 +269,8 @@ pub struct Settings {
     pub auto_update: bool,
     /// Layouts by normalised Frigate URL.
     pub layouts: BTreeMap<String, SavedLayout>,
+    /// Dynamic wall hero slots and priority cameras by normalised Frigate URL.
+    pub dynamic_walls: BTreeMap<String, DynamicWall>,
 }
 
 impl Settings {
@@ -347,6 +369,31 @@ pub fn validate_layout(layout: &SavedLayout) -> Result<(), SettingsError> {
                 tile.camera
             )));
         }
+    }
+    Ok(())
+}
+
+/// Checks a server's Dynamic wall choices sent by the page before they are saved.
+pub fn validate_dynamic_wall(dynamic: &DynamicWall) -> Result<(), SettingsError> {
+    let slots = &dynamic.hero_slots;
+    if slots.len() > MAX_HERO_SLOTS || (slots.len() == 2 && slots[0] == slots[1]) {
+        return Err(SettingsError::Invalid(
+            "Pick two different cameras for the hero slots.".into(),
+        ));
+    }
+    if dynamic.priority_cameras.len() > MAX_TILES {
+        return Err(SettingsError::Invalid(format!(
+            "A wall can have at most {MAX_TILES} priority cameras."
+        )));
+    }
+    if slots
+        .iter()
+        .chain(&dynamic.priority_cameras)
+        .any(|name| !valid_camera_name(name))
+    {
+        return Err(SettingsError::Invalid(
+            "The Dynamic wall names a camera that is not valid.".into(),
+        ));
     }
     Ok(())
 }
@@ -469,6 +516,25 @@ impl SettingsStore {
         self.update(|settings| settings.auto_update = auto_update)
     }
 
+    /// Saves how the wall is drawn and, for the Frigate server at `server`,
+    /// the Dynamic wall's hero slots and priority cameras, together: a
+    /// failed check or save changes neither.
+    pub fn set_dynamic_wall(
+        &mut self,
+        wall: WallOptions,
+        server: Option<&str>,
+        dynamic: DynamicWall,
+    ) -> Result<&Settings, SettingsError> {
+        let server = server.map(normalise_frigate_url).transpose()?;
+        validate_dynamic_wall(&dynamic)?;
+        self.update(|settings| {
+            settings.wall = wall;
+            if let Some(server) = server {
+                settings.dynamic_walls.insert(server, dynamic);
+            }
+        })
+    }
+
     /// Saves the layout for the Frigate server at `server`.
     pub fn set_layout(
         &mut self,
@@ -577,7 +643,8 @@ pub async fn save_layout(
         .map_err(|err| err.to_string())
 }
 
-/// Saves how the wall is drawn: Lock to 16:9, Fit to window and stream info.
+/// Saves how the wall is drawn: Lock to 16:9, Fit to window, stream info,
+/// activity and the Dynamic wall toggle.
 #[tauri::command]
 pub async fn save_wall_options(
     state: State<'_, SharedSettings>,
@@ -586,6 +653,21 @@ pub async fn save_wall_options(
     lock(&state)
         .set_wall_options(options)
         .map(|_| ())
+        .map_err(|err| err.to_string())
+}
+
+/// Saves Settings › Appearance with the Dynamic wall choices for the
+/// Frigate server at `server`, in one step, and returns the new settings.
+#[tauri::command]
+pub async fn save_dynamic_wall(
+    state: State<'_, SharedSettings>,
+    options: WallOptions,
+    server: Option<String>,
+    dynamic: DynamicWall,
+) -> Result<Settings, String> {
+    lock(&state)
+        .set_dynamic_wall(options, server.as_deref(), dynamic)
+        .map(Settings::for_page)
         .map_err(|err| err.to_string())
 }
 
@@ -729,6 +811,7 @@ mod tests {
                 stream_info: true,
                 activity: true,
                 activity_style: ActivityStyle::Ring,
+                dynamic_wall: false,
             }
         );
     }
@@ -743,6 +826,7 @@ mod tests {
             stream_info: true,
             activity: false,
             activity_style: ActivityStyle::Corners,
+            dynamic_wall: true,
         };
         assert_eq!(store.set_wall_options(wall).unwrap().wall, wall);
         assert_eq!(SettingsStore::open(Some(dir.file())).current().wall, wall);
@@ -863,6 +947,7 @@ mod tests {
             },
             auto_update: true,
             layouts: BTreeMap::new(),
+            dynamic_walls: BTreeMap::new(),
         };
         settings.layouts.insert(
             "http://a".into(),
@@ -876,7 +961,7 @@ mod tests {
             serde_json::json!({
                 "frigateUrl": "http://a",
                 "fullScreen": true,
-                "wall": {"lockRatio": true, "fitToWindow": true, "streamInfo": false, "activity": true, "activityStyle": "ring"},
+                "wall": {"lockRatio": true, "fitToWindow": true, "streamInfo": false, "activity": true, "activityStyle": "ring", "dynamicWall": false},
                 "updateChannel": "edge",
                 "autoUpdate": true,
                 "mqtt": {
@@ -890,7 +975,8 @@ mod tests {
                     "deviceId": "0123456789ab",
                     "passwordStorage": "file"
                 },
-                "layouts": {"http://a": {"tiles": [{"camera": "cam", "x": 1, "y": 2, "w": 3, "h": 4}], "hidden": []}}
+                "layouts": {"http://a": {"tiles": [{"camera": "cam", "x": 1, "y": 2, "w": 3, "h": 4}], "hidden": []}},
+                "dynamicWalls": {}
             })
         );
         // The file keeps the password the page never sees.
@@ -1022,6 +1108,81 @@ mod tests {
                 .to_string()
                 .contains("at most")
         );
+    }
+
+    fn dynamic(slots: &[&str], priority: &[&str]) -> DynamicWall {
+        DynamicWall {
+            hero_slots: slots.iter().map(|name| name.to_string()).collect(),
+            priority_cameras: priority.iter().map(|name| name.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn old_settings_load_with_the_dynamic_wall_off() {
+        let settings: Settings = serde_json::from_str(
+            r#"{"frigateUrl": "http://a", "wall": {"activity": false}, "layouts": {}}"#,
+        )
+        .unwrap();
+        assert!(!settings.wall.dynamic_wall);
+        assert!(settings.dynamic_walls.is_empty());
+    }
+
+    #[test]
+    fn the_dynamic_wall_saves_with_the_wall_options_for_one_server() {
+        let dir = TempDir::new("dynamic");
+        let mut store = SettingsStore::open(Some(dir.file()));
+        let wall = WallOptions {
+            dynamic_wall: true,
+            ..WallOptions::default()
+        };
+        let choices = dynamic(&["front", "back"], &["maingate"]);
+        let saved = store
+            .set_dynamic_wall(wall, Some("http://a/"), choices.clone())
+            .unwrap();
+        assert!(saved.wall.dynamic_wall);
+        assert_eq!(saved.dynamic_walls["http://a"], choices);
+        let reopened = SettingsStore::open(Some(dir.file()));
+        assert_eq!(reopened.current().wall, wall);
+        assert_eq!(reopened.current().dynamic_walls["http://a"], choices);
+        // Without a server only the options change.
+        let off = WallOptions::default();
+        let saved = store
+            .set_dynamic_wall(off, None, DynamicWall::default())
+            .unwrap();
+        assert!(!saved.wall.dynamic_wall);
+        assert_eq!(saved.dynamic_walls["http://a"], choices);
+    }
+
+    #[test]
+    fn invalid_dynamic_wall_choices_change_nothing() {
+        let dir = TempDir::new("dynamic-invalid");
+        let mut store = SettingsStore::open(Some(dir.file()));
+        let wall = WallOptions {
+            dynamic_wall: true,
+            ..WallOptions::default()
+        };
+        for (server, choices) in [
+            ("nope", dynamic(&[], &[])),
+            ("http://a", dynamic(&["a", "a"], &[])),
+            ("http://a", dynamic(&["a", "b", "c"], &[])),
+            ("http://a", dynamic(&[" "], &[])),
+            ("http://a", dynamic(&[], &[""])),
+        ] {
+            assert!(store.set_dynamic_wall(wall, Some(server), choices).is_err());
+        }
+        let crowded = DynamicWall {
+            hero_slots: vec![],
+            priority_cameras: (0..=MAX_TILES).map(|i| format!("c{i}")).collect(),
+        };
+        assert!(
+            store
+                .set_dynamic_wall(wall, Some("http://a"), crowded)
+                .unwrap_err()
+                .to_string()
+                .contains("at most")
+        );
+        assert!(!dir.file().exists());
+        assert_eq!(store.current(), &Settings::default());
     }
 
     #[test]

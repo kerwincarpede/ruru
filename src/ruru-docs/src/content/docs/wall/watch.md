@@ -39,6 +39,18 @@ The arrow keys move through the menu, `Home` and `End` jump to the first and las
 
 With [Home Assistant](/ruru/guides/home-assistant/#activity-on-the-tiles) connected, a tile is marked in yellow while its camera sees motion, shows a chip such as **Person** for each kind of object moving, and is marked in red with **Alert** in its caption during a Frigate alert. Choose how tiles are marked with **Activity style** in **Settings → Appearance**. Untick **Show activity** in the right-click menu to hide them.
 
+## Dynamic wall
+
+With [Home Assistant](/ruru/guides/home-assistant/#activity-on-the-tiles) connected, the Dynamic wall moves the cameras where Frigate sees objects to the front for a while. Turn it on with **Dynamic wall** in **Settings → Appearance**. It is off until you do.
+
+- **Heroes:** when Frigate sees an object, such as a person or a car, on one or two cameras, those cameras become large heroes at the top of the wall. On a wide screen they sit side by side; on a tall screen they stack. The other cameras shrink into an even grid below. A hero stays for at least 10 seconds, and for 5 seconds after Frigate stops seeing its objects. When more cameras get busy, the two heroes stay until one of them goes quiet. If the other cameras would be too small to make out, the wall keeps its layout.
+- **Hero slots:** leave **First hero slot** and **Second hero slot** on **Automatic** for the layout above. To use your own layout instead, pick the two tiles that should show busy cameras. A busy camera swaps places with the camera in a slot until it goes quiet. If a slot's camera is hidden or gone from Frigate, Ruru uses **Automatic**.
+- **Priority cameras:** tick a camera under **Priority cameras**, such as the main gate, and it fills the whole wall while Frigate sees a person there. When several priority cameras see a person, the one already shown stays, and otherwise the first on the wall wins. The wall goes back to the heroes, or to your layout, once the person leaves.
+
+The preview under **Dynamic wall** shows the heroes at the size of your wall. With fewer than two cameras on the wall it shows your layout and says heroes need two.
+
+Press `Esc` to put a takeover away, and again to put the heroes away. They stay away until Frigate stops seeing those objects. Maximising a tile and **Edit layout** come first: the Dynamic wall waits until you restore the tile or choose **Done**. Your saved layout never changes, and every stream keeps playing while tiles move or a camera fills the wall. The Dynamic wall starts afresh when you stop the streams or connect to another Frigate server, and turning it off puts your layout back straight away.
+
 ## Full screen
 
 Press `F11` (`Ctrl+⌘ F` on macOS), or right-click and choose **Enter full screen**, to fill the screen. Press it again, or choose **Exit full screen**, to leave.
