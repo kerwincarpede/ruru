@@ -374,6 +374,8 @@ function App() {
   const onWallKey = onWallNow ? JSON.stringify(onWallNow) : null;
   // The same array while the cameras on the wall are the same.
   const onWall = useMemo(() => (onWallKey === null ? null : (JSON.parse(onWallKey) as string[])), [onWallKey]);
+  // The object labels Frigate tracks on the wall's cameras, for the Dynamic wall's choices.
+  const wallObjects = [...new Set((cameras ?? []).filter((camera) => onWall?.includes(camera.name)).flatMap((camera) => camera.trackedObjects ?? []))].sort();
   const shownMaximised = maximised && onWall?.includes(maximised) ? maximised : null;
 
   // The wall stays covered until every tile on it has played, or for
@@ -411,12 +413,15 @@ function App() {
   const dynamicWall = (url ? settings?.dynamicWalls[url] : undefined) ?? DEFAULT_DYNAMIC_WALL;
   const priorityKey = JSON.stringify(dynamicWall.priorityCameras);
   const priority = useMemo(() => JSON.parse(priorityKey) as string[], [priorityKey]);
+  const ignoredKey = JSON.stringify(dynamicWall.ignoredObjects);
+  const ignoredObjects = useMemo(() => JSON.parse(ignoredKey) as string[], [ignoredKey]);
   const [dynamicView, dismissDynamic] = useDynamicWall({
     enabled: wallOptions.dynamicWall && (settings?.mqtt.enabled ?? false) && streams,
     cameras: onWall ?? NO_CAMERAS,
     activity,
     activityAt,
     priority,
+    ignored: ignoredObjects,
     reset: `${url ?? ""}\n${streams}\n${activityLost}`,
   });
   const dynamicShown = dynamicView.kind !== "overview" && !shownMaximised && !editing;
@@ -602,6 +607,7 @@ function App() {
           onWallSaved={(wall) => setSettings((current) => ({ ...(current ?? NO_SETTINGS), wall }))}
           onDynamicWallSaved={setSettings}
           wallCameras={onWall ?? []}
+          wallObjects={wallObjects}
           wallLayout={layout}
           wallSize={wallSize}
           onAutoUpdateSaved={(saved) => {

@@ -26,11 +26,38 @@ describe("automaticHeroItems", () => {
     expect(items?.slice(2).every((item) => item.y >= 48 && item.w < 24)).toBe(true);
   });
 
-  it("centres a single hero and leaves cameras off the wall out", () => {
+  it("puts a single hero in the corner with the other feeds down its side and along the bottom", () => {
+    const items = automaticHeroItems(names(10), ["cam1"], { width: 1920, height: 1080 });
+    expect(items).toEqual([
+      { i: "cam1", x: 0, y: 0, w: 20, h: 20 },
+      ...["cam0", "cam2", "cam3", "cam4", "cam5"].map((i, row) => ({ i, x: 20, y: row * 4, w: 4, h: 4 })),
+      ...["cam6", "cam7", "cam8", "cam9"].map((i, column) => ({ i, x: column * 4, y: 20, w: 4, h: 4 })),
+    ]);
+  });
+
+  it("keeps the feeds the centred layout would use and fills the wall's height", () => {
+    const items = automaticHeroItems(names(4), ["cam1"], { width: 1920, height: 1080 });
+    expect(items).toEqual([
+      { i: "cam1", x: 0, y: 0, w: 16, h: 16 },
+      { i: "cam0", x: 16, y: 0, w: 8, h: 8 },
+      { i: "cam2", x: 16, y: 8, w: 8, h: 8 },
+      { i: "cam3", x: 0, y: 16, w: 8, h: 8 },
+    ]);
+  });
+
+  it("leaves cameras off the wall out and centres a hero with no other feeds", () => {
     const items = automaticHeroItems(["a", "b"], ["gone", "b"], { width: 1600, height: 900 });
-    expect(items?.[0]).toEqual({ i: "b", x: 6, y: 0, w: 12, h: 12 });
-    expect(items).toHaveLength(2);
+    expect(items).toEqual([
+      { i: "b", x: 0, y: 0, w: 16, h: 16 },
+      { i: "a", x: 16, y: 0, w: 8, h: 8 },
+    ]);
     expect(automaticHeroItems(["a"], ["a"], { width: 1600, height: 900 })).toEqual([{ i: "a", x: 6, y: 0, w: 12, h: 12 }]);
+  });
+
+  it("keeps a single hero above the others on a tall wall", () => {
+    const items = automaticHeroItems(names(5), ["cam0"], { width: 1080, height: 1920 });
+    expect(items?.[0]).toEqual({ i: "cam0", x: 0, y: 0, w: 24, h: 24 });
+    expect(items?.slice(1).every((item) => item.y >= 24)).toBe(true);
   });
 
   it("never places a camera twice", () => {
@@ -80,6 +107,6 @@ describe("customHeroItems", () => {
     expect(customHeroItems(saved, ["a", "a"], ["c"])).toBeNull();
     expect(customHeroItems(saved, ["a", "b"], ["gone"])).toBeNull();
     const automatic = heroItems(saved, ["a", "gone"], ["c"], { width: 1600, height: 900 });
-    expect(automatic?.[0]).toEqual({ i: "c", x: 6, y: 0, w: 12, h: 12 });
+    expect(automatic?.[0]).toEqual({ i: "c", x: 0, y: 0, w: 16, h: 16 });
   });
 });

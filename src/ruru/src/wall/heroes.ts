@@ -37,12 +37,14 @@ export interface DynamicInput {
   activity: Activity;
   /** The cameras that take the wall while Frigate sees a person. */
   priority: string[];
+  /** Object labels that do not make a camera a hero. Missing for none. */
+  ignored?: string[];
   now: number;
 }
 
-/** Frigate sees at least one object on the camera. */
-export function seesObjects(activity: CameraActivity | undefined): boolean {
-  return Object.values(activity?.objects ?? {}).some((count) => count > 0);
+/** Frigate sees at least one object on the camera, other than the `ignored` labels. */
+export function seesObjects(activity: CameraActivity | undefined, ignored: string[] = []): boolean {
+  return Object.entries(activity?.objects ?? {}).some(([label, count]) => count > 0 && !ignored.includes(label));
 }
 
 /** Frigate sees at least one person on the camera. */
@@ -55,10 +57,10 @@ function stays(pick: Pick, qualifies: boolean, now: number): boolean {
   return qualifies || now - pick.seen < HERO_GRACE_MS || now - pick.since < HERO_HOLD_MS;
 }
 
-function qualifiers({ cameras, activity, priority }: Omit<DynamicInput, "now">) {
+function qualifiers({ cameras, activity, priority, ignored = [] }: Omit<DynamicInput, "now">) {
   const onWall = new Set(cameras);
   return {
-    hero: (camera: string) => onWall.has(camera) && seesObjects(activity[camera]),
+    hero: (camera: string) => onWall.has(camera) && seesObjects(activity[camera], ignored),
     takeover: (camera: string) => onWall.has(camera) && priority.includes(camera) && seesPerson(activity[camera]),
   };
 }

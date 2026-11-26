@@ -88,6 +88,10 @@ pub struct WallOptions {
 
 /// The most hero slots a wall has.
 pub const MAX_HERO_SLOTS: usize = 2;
+/// The most object labels a wall can leave out of its heroes.
+pub const MAX_IGNORED_OBJECTS: usize = 64;
+/// The longest object label Ruru keeps.
+const MAX_OBJECT_LABEL: usize = 64;
 
 /// One Frigate server's Dynamic wall choices, set in Settings › Appearance.
 ///
@@ -100,6 +104,8 @@ pub struct DynamicWall {
     pub hero_slots: Vec<String>,
     /// The cameras that take the whole wall while Frigate sees a person.
     pub priority_cameras: Vec<String>,
+    /// Object labels, such as `dog`, that do not make a camera a hero.
+    pub ignored_objects: Vec<String>,
 }
 
 /// How a tile marks Frigate's motion and alerts. Each keeps the picture as
@@ -393,6 +399,20 @@ pub fn validate_dynamic_wall(dynamic: &DynamicWall) -> Result<(), SettingsError>
     {
         return Err(SettingsError::Invalid(
             "The Dynamic wall names a camera that is not valid.".into(),
+        ));
+    }
+    if dynamic.ignored_objects.len() > MAX_IGNORED_OBJECTS {
+        return Err(SettingsError::Invalid(format!(
+            "A wall can leave out at most {MAX_IGNORED_OBJECTS} kinds of object."
+        )));
+    }
+    if dynamic
+        .ignored_objects
+        .iter()
+        .any(|label| label.trim().is_empty() || label.len() > MAX_OBJECT_LABEL)
+    {
+        return Err(SettingsError::Invalid(
+            "The Dynamic wall names an object that is not valid.".into(),
         ));
     }
     Ok(())
@@ -1114,6 +1134,7 @@ mod tests {
         DynamicWall {
             hero_slots: slots.iter().map(|name| name.to_string()).collect(),
             priority_cameras: priority.iter().map(|name| name.to_string()).collect(),
+            ignored_objects: vec![],
         }
     }
 
@@ -1135,7 +1156,10 @@ mod tests {
             dynamic_wall: true,
             ..WallOptions::default()
         };
-        let choices = dynamic(&["front", "back"], &["maingate"]);
+        let choices = DynamicWall {
+            ignored_objects: vec!["dog".into(), "cat".into()],
+            ..dynamic(&["front", "back"], &["maingate"])
+        };
         let saved = store
             .set_dynamic_wall(wall, Some("http://a/"), choices.clone())
             .unwrap();
@@ -1167,12 +1191,33 @@ mod tests {
             ("http://a", dynamic(&["a", "b", "c"], &[])),
             ("http://a", dynamic(&[" "], &[])),
             ("http://a", dynamic(&[], &[""])),
+            (
+                "http://a",
+                DynamicWall {
+                    ignored_objects: vec![" ".into()],
+                    ..dynamic(&[], &[])
+                },
+            ),
+            (
+                "http://a",
+                DynamicWall {
+                    ignored_objects: vec!["x".repeat(MAX_OBJECT_LABEL + 1)],
+                    ..dynamic(&[], &[])
+                },
+            ),
+            (
+                "http://a",
+                DynamicWall {
+                    ignored_objects: (0..=MAX_IGNORED_OBJECTS).map(|i| format!("o{i}")).collect(),
+                    ..dynamic(&[], &[])
+                },
+            ),
         ] {
             assert!(store.set_dynamic_wall(wall, Some(server), choices).is_err());
         }
         let crowded = DynamicWall {
-            hero_slots: vec![],
             priority_cameras: (0..=MAX_TILES).map(|i| format!("c{i}")).collect(),
+            ..DynamicWall::default()
         };
         assert!(
             store

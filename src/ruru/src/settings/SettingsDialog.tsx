@@ -25,6 +25,8 @@ interface SettingsDialogProps {
   onDynamicWallSaved?: (settings: Settings) => void;
   /** The cameras on the current server's wall, in wall order, for the Dynamic wall. */
   wallCameras?: string[];
+  /** The object labels Frigate tracks on those cameras, for the Dynamic wall's hero objects. */
+  wallObjects?: string[];
   /** The current server's saved layout. */
   wallLayout?: SavedLayout;
   /** The wall area's size, for the Dynamic wall preview. */
@@ -52,7 +54,7 @@ function message(error: unknown): string {
 }
 
 /** Settings over the wall, with a page for each group of options. */
-export default function SettingsDialog({ settings, info, onSaved, onChannelSaved, onAutoUpdateSaved, onMqttSaved, onWallSaved, onDynamicWallSaved, wallCameras = [], wallLayout, wallSize, onUpdate, onClose }: SettingsDialogProps) {
+export default function SettingsDialog({ settings, info, onSaved, onChannelSaved, onAutoUpdateSaved, onMqttSaved, onWallSaved, onDynamicWallSaved, wallCameras = [], wallObjects = [], wallLayout, wallSize, onUpdate, onClose }: SettingsDialogProps) {
   const [page, setPage] = useState<Page>("frigate");
   const [url, setUrl] = useState(settings.frigateUrl ?? "");
   const [test, setTest] = useState<Test>({ kind: "idle" });
@@ -117,6 +119,7 @@ export default function SettingsDialog({ settings, info, onSaved, onChannelSaved
           server={settings.frigateUrl}
           dynamic={(settings.frigateUrl ? settings.dynamicWalls[settings.frigateUrl] : undefined) ?? DEFAULT_DYNAMIC_WALL}
           cameras={wallCameras}
+          objects={wallObjects}
           layout={wallLayout}
           wallSize={wallSize ?? { width: window.innerWidth, height: window.innerHeight }}
           onSaved={onWallSaved}

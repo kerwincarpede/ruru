@@ -48,10 +48,12 @@ export interface DynamicWall {
   heroSlots: string[];
   /** The cameras that take the whole wall while Frigate sees a person. */
   priorityCameras: string[];
+  /** Object labels, such as `dog`, that do not make a camera a hero. */
+  ignoredObjects: string[];
 }
 
 /** A server's Dynamic wall choices before any are saved. */
-export const DEFAULT_DYNAMIC_WALL: DynamicWall = { heroSlots: [], priorityCameras: [] };
+export const DEFAULT_DYNAMIC_WALL: DynamicWall = { heroSlots: [], priorityCameras: [], ignoredObjects: [] };
 
 /** Mirrors `ActivityStyle` in src-tauri/src/settings.rs: how a tile marks motion and alerts. */
 export type ActivityStyle = "ring" | "outline" | "corners" | "strip" | "caption";

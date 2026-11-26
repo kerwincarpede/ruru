@@ -46,7 +46,7 @@ describe("saveDynamicWall", () => {
   it("saves the options with one server's Dynamic wall choices", async () => {
     const calls = mockCommands({ save_dynamic_wall: () => settings });
     const options = { ...DEFAULT_WALL_OPTIONS, dynamicWall: true };
-    const dynamic = { heroSlots: ["a", "b"], priorityCameras: ["a"] };
+    const dynamic = { heroSlots: ["a", "b"], priorityCameras: ["a"], ignoredObjects: ["dog"] };
     await expect(saveDynamicWall(options, "http://f", dynamic)).resolves.toEqual(settings);
     expect(calls).toEqual([{ cmd: "save_dynamic_wall", payload: { options, server: "http://f", dynamic } }]);
   });

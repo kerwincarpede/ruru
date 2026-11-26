@@ -12,6 +12,8 @@ interface DynamicWallOptions {
   activityAt: number;
   /** Keep the same array while it is unchanged. */
   priority: string[];
+  /** Object labels that do not make a camera a hero. Keep the same array while it is unchanged. */
+  ignored: string[];
   /** Changing it, such as for another Frigate server or a lost Home Assistant connection, forgets what was picked. */
   reset: string;
 }
@@ -22,6 +24,7 @@ interface Stepped {
   cameras: string[];
   activity: Activity;
   priority: string[];
+  ignored: string[];
   reset: string;
   now: number;
   state: DynamicState;
@@ -32,17 +35,17 @@ interface Stepped {
  * again whenever a pick's hold or grace runs out. Returns the view and a
  * function that dismisses it until its activity clears.
  */
-export function useDynamicWall({ enabled, cameras, activity, activityAt, priority, reset }: DynamicWallOptions): [DynamicView, () => void] {
+export function useDynamicWall({ enabled, cameras, activity, activityAt, priority, ignored, reset }: DynamicWallOptions): [DynamicView, () => void] {
   const [clock, setClock] = useState(activityAt);
   const now = Math.max(clock, activityAt);
-  const [stepped, setStepped] = useState<Stepped>({ enabled, cameras, activity, priority, reset, now, state: IDLE });
-  if (stepped.enabled !== enabled || stepped.cameras !== cameras || stepped.activity !== activity || stepped.priority !== priority || stepped.reset !== reset || stepped.now !== now) {
+  const [stepped, setStepped] = useState<Stepped>({ enabled, cameras, activity, priority, ignored, reset, now, state: IDLE });
+  if (stepped.enabled !== enabled || stepped.cameras !== cameras || stepped.activity !== activity || stepped.priority !== priority || stepped.ignored !== ignored || stepped.reset !== reset || stepped.now !== now) {
     const fresh = !enabled || stepped.reset !== reset;
-    const state = fresh ? IDLE : stepDynamic(stepped.state, { cameras, activity, priority, now });
-    setStepped({ enabled, cameras, activity, priority, reset, now, state });
+    const state = fresh ? IDLE : stepDynamic(stepped.state, { cameras, activity, priority, ignored, now });
+    setStepped({ enabled, cameras, activity, priority, ignored, reset, now, state });
   }
 
-  const due = nextExpiry(stepped.state, { cameras, activity, priority, now });
+  const due = nextExpiry(stepped.state, { cameras, activity, priority, ignored, now });
   useEffect(() => {
     if (due === null) return;
     const timer = setTimeout(() => setClock(Math.max(Date.now(), due)), Math.max(0, due - Date.now()));

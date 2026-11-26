@@ -14,6 +14,8 @@ interface AppearancePageProps {
   dynamic: DynamicWall;
   /** The cameras on that server's wall, in wall order. */
   cameras: string[];
+  /** The object labels Frigate tracks on those cameras. */
+  objects: string[];
   layout: SavedLayout | undefined;
   /** The wall area's size, for the preview. */
   wallSize: WallSize;
@@ -26,7 +28,7 @@ interface AppearancePageProps {
 /** The same cameras, in any order. */
 const sameCameras = (a: string[], b: string[]) => a.length === b.length && a.every((camera) => b.includes(camera));
 
-export default function AppearancePage({ wall, mqttEnabled, server, dynamic, cameras, layout, wallSize, onSaved, onDynamicSaved, onClose }: AppearancePageProps) {
+export default function AppearancePage({ wall, mqttEnabled, server, dynamic, cameras, objects, layout, wallSize, onSaved, onDynamicSaved, onClose }: AppearancePageProps) {
   const [activity, setActivity] = useState(wall.activity);
   const [activityStyle, setActivityStyle] = useState(wall.activityStyle);
   const [streamInfo, setStreamInfo] = useState(wall.streamInfo);
@@ -36,16 +38,19 @@ export default function AppearancePage({ wall, mqttEnabled, server, dynamic, cam
   const dynamicWall = dynamicWallPick ?? wall.dynamicWall;
   const [slots, setSlots] = useState<[string, string]>([dynamic.heroSlots[0] ?? "", dynamic.heroSlots[1] ?? ""]);
   const [priority, setPriority] = useState(dynamic.priorityCameras);
+  const [ignored, setIgnored] = useState(dynamic.ignoredObjects);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Both slots on Automatic, or two different cameras.
   const slotsValid = slots[0] === slots[1] ? slots[0] === "" : slots[0] !== "" && slots[1] !== "";
   const heroSlots = slots[0] && slots[1] ? [...slots] : [];
-  const dynamicChanged = dynamicWall !== wall.dynamicWall || (server !== null && (heroSlots.join("\n") !== dynamic.heroSlots.join("\n") || !sameCameras(priority, dynamic.priorityCameras)));
+  const dynamicChanged = dynamicWall !== wall.dynamicWall || (server !== null && (heroSlots.join("\n") !== dynamic.heroSlots.join("\n") || !sameCameras(priority, dynamic.priorityCameras) || !sameCameras(ignored, dynamic.ignoredObjects)));
   const changed = activity !== wall.activity || activityStyle !== wall.activityStyle || streamInfo !== wall.streamInfo || dynamicChanged;
   const offerChoices = server !== null && cameras.length > 0;
   // A saved slot for a camera no longer on the wall is still offered, so it can be seen and changed.
   const slotChoices = [...cameras, ...slots.filter((slot) => slot && !cameras.includes(slot))];
+  // Likewise a left-out object Frigate no longer tracks, so it can be ticked again.
+  const objectChoices = [...objects, ...ignored.filter((label) => !objects.includes(label))];
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -53,7 +58,7 @@ export default function AppearancePage({ wall, mqttEnabled, server, dynamic, cam
     setError(null);
     const options = { ...wall, activity, activityStyle, streamInfo, dynamicWall };
     try {
-      if (dynamicChanged) onDynamicSaved(await saveDynamicWall(options, server, { heroSlots, priorityCameras: priority }));
+      if (dynamicChanged) onDynamicSaved(await saveDynamicWall(options, server, { heroSlots, priorityCameras: priority, ignoredObjects: ignored }));
       else {
         await saveWallOptions(options);
         onSaved(options);
@@ -165,6 +170,24 @@ export default function AppearancePage({ wall, mqttEnabled, server, dynamic, cam
                   ? "Automatic puts active cameras in a row above the others. Pick two tiles of your layout to swap active cameras into them instead; the cameras they show move to the active cameras’ places for a while."
                   : "Pick two different cameras, or leave both on Automatic."}
               </span>
+              {objectChoices.length > 0 && (
+                <fieldset className="dynamic-priority" disabled={!dynamicWall} aria-describedby="hero-objects-hint">
+                  <legend className="field-label">Hero objects</legend>
+                  <span id="hero-objects-hint" className="field-hint">
+                    A camera becomes a hero when Frigate sees one of these. Untick an object, such as a dog, to leave its cameras where they are.
+                  </span>
+                  {objectChoices.map((label) => (
+                    <label key={label} className="field-check">
+                      <input
+                        type="checkbox"
+                        checked={!ignored.includes(label)}
+                        onChange={(event) => setIgnored((now) => (event.target.checked ? now.filter((name) => name !== label) : [...now, label]))}
+                      />
+                      <span>{cameraLabel(label)}</span>
+                    </label>
+                  ))}
+                </fieldset>
+              )}
               <fieldset className="dynamic-priority" disabled={!dynamicWall} aria-describedby="priority-hint">
                 <legend className="field-label">Priority cameras</legend>
                 <span id="priority-hint" className="field-hint">

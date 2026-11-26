@@ -10,6 +10,8 @@ export interface Camera {
   enabled: boolean;
   mainStream: string;
   subStream: string;
+  /** The labels Frigate tracks on the camera, such as `person` or `dog`. */
+  trackedObjects?: string[];
 }
 
 /** The camera's latest snapshot, which shows until its video arrives. */

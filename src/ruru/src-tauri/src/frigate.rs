@@ -37,7 +37,7 @@ pub struct FrigateStatus {
 
 /// One camera on the wall, with the go2rtc streams its tile plays: `sub`
 /// in the grid and `main` when maximised. A camera with one stream has it
-/// as both.
+/// as both, and the object labels Frigate tracks on it.
 ///
 /// Mirrored by `Camera` in `src/app/frigate.ts`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -47,6 +47,8 @@ pub struct Camera {
     pub enabled: bool,
     pub main_stream: String,
     pub sub_stream: String,
+    /// The labels in the camera's `objects.track`, such as `person` or `dog`.
+    pub tracked_objects: Vec<String>,
 }
 
 /// Why Frigate could not be read.
@@ -109,6 +111,7 @@ struct CameraConfig {
     ui: UiConfig,
     live: LiveConfig,
     ffmpeg: FfmpegConfig,
+    objects: ObjectsConfig,
 }
 
 impl Default for CameraConfig {
@@ -118,6 +121,7 @@ impl Default for CameraConfig {
             ui: UiConfig::default(),
             live: LiveConfig::default(),
             ffmpeg: FfmpegConfig::default(),
+            objects: ObjectsConfig::default(),
         }
     }
 }
@@ -126,6 +130,19 @@ impl Default for CameraConfig {
 #[serde(default)]
 struct UiConfig {
     order: i64,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct ObjectsConfig {
+    /// The labels Frigate tracks; `null` reads as none.
+    #[serde(deserialize_with = "list_or_null")]
+    track: Vec<String>,
+}
+
+/// Reads a list, or `null` as an empty one.
+fn list_or_null<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<String>, D::Error> {
+    Ok(Option::<Vec<String>>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -272,6 +289,12 @@ fn cameras_from(config: Config, go2rtc: Option<&HashSet<String>>) -> Vec<Camera>
         .map(|(name, camera)| {
             let (main_stream, sub_stream) = pick_streams(&name, &camera, go2rtc);
             let order = camera.ui.order;
+            let mut tracked_objects = Vec::new();
+            for label in camera.objects.track {
+                if !tracked_objects.contains(&label) {
+                    tracked_objects.push(label);
+                }
+            }
             (
                 order,
                 Camera {
@@ -279,6 +302,7 @@ fn cameras_from(config: Config, go2rtc: Option<&HashSet<String>>) -> Vec<Camera>
                     enabled: camera.enabled,
                     main_stream,
                     sub_stream,
+                    tracked_objects,
                 },
             )
         })
@@ -399,6 +423,7 @@ mod tests {
             enabled,
             main_stream: main.into(),
             sub_stream: sub.into(),
+            tracked_objects: vec![],
         }
     }
 
@@ -594,10 +619,21 @@ mod tests {
     }
 
     #[test]
+    fn tracked_objects_are_read_once_each_in_order() {
+        let config = config(serde_json::json!({"cameras": {
+            "a": {"objects": {"track": ["person", "dog", "person", "car"]}},
+            "b": {"objects": {"track": null}}
+        }}));
+        let cameras = cameras_from(config, None);
+        assert_eq!(cameras[0].tracked_objects, ["person", "dog", "car"]);
+        assert!(cameras[1].tracked_objects.is_empty());
+    }
+
+    #[test]
     fn serialises_as_the_page_expects() {
         assert_eq!(
             serde_json::to_value(camera("a", true, "a", "a_sub")).unwrap(),
-            serde_json::json!({"name": "a", "enabled": true, "mainStream": "a", "subStream": "a_sub"})
+            serde_json::json!({"name": "a", "enabled": true, "mainStream": "a", "subStream": "a_sub", "trackedObjects": []})
         );
         assert_eq!(
             serde_json::to_value(FrigateStatus {

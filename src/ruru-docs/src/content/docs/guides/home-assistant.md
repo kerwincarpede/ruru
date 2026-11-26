@@ -160,7 +160,7 @@ You can also right-click the wall and choose **Stop streams** or **Start streams
 
 ## Dynamic wall
 
-The **Dynamic wall** switch turns the [Dynamic wall](/ruru/wall/watch/#dynamic-wall) on and off, such as from an automation that turns it on when everyone leaves home. It is the same setting as **Dynamic wall** in **Settings → Appearance**: Ruru saves a change from either one and shows it in the other. If **Settings → Appearance** is open when the switch changes, its checkbox follows the switch unless you have already changed it there; choose **Save** and your choice wins. The hero slots and priority cameras stay as you set them in **Settings → Appearance**.
+The **Dynamic wall** switch turns the [Dynamic wall](/ruru/wall/watch/#dynamic-wall) on and off, such as from an automation that turns it on when everyone leaves home. It is the same setting as **Dynamic wall** in **Settings → Appearance**: Ruru saves a change from either one and shows it in the other. If **Settings → Appearance** is open when the switch changes, its checkbox follows the switch unless you have already changed it there; choose **Save** and your choice wins. The hero slots, hero objects and priority cameras stay as you set them in **Settings → Appearance**.
 
 The Dynamic wall needs this connection for Frigate's activity. While Ruru is disconnected, the switch shows as unavailable and Ruru keeps the Dynamic wall as it was. When Ruru connects again, the switch shows the saved setting.
 

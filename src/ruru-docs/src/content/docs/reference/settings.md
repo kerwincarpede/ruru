@@ -39,6 +39,7 @@ Choose **Save** to connect, or to disconnect when **Connect to Home Assistant** 
 | **Show stream info** | Shows playback details on each tile. Also in the tile’s right-click menu. See [Stream info](/ruru/wall/streams/#stream-info). |
 | **Dynamic wall** | Shows busy cameras large above the rest while Frigate sees objects. Off by default. The preview shows how it looks at your wall's size. Home Assistant's **Dynamic wall** switch changes it too. See [Dynamic wall](/ruru/wall/watch/#dynamic-wall). |
 | **First hero slot**, **Second hero slot** | **Automatic**, or two tiles of your layout that busy cameras swap into. Saved for each Frigate server. |
+| **Hero objects** | The objects Frigate tracks on your wall's cameras. Untick one, such as a dog, so it no longer makes a camera a hero. All are ticked by default. Saved for each Frigate server. |
 | **Priority cameras** | Cameras that fill the wall while Frigate sees a person there. Press `Esc` to go back. Saved for each Frigate server. |
 
 Choose **Save** to apply these settings. Card highlighting and the Dynamic wall use activity from the MQTT broker configured in **Settings → Home Assistant**.
