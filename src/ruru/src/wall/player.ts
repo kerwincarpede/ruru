@@ -34,6 +34,8 @@ export const RETRY_MAX_MS = 30000;
 export const KEEP_S = 5;
 /** MSE playback that falls this far behind the newest frame skips ahead. */
 export const MAX_LAG_S = 1.5;
+/** A brief burst of frames can put the buffered end ahead for a few updates. */
+const LAG_GRACE_MS = 1000;
 /** MSE playback closer to the newest frame than this waits, because a frame that arrives after its turn is never shown. */
 export const MIN_LAG_S = 0.35;
 /** A skip or a wait leaves playback this far behind the newest frame, which is room for frames that arrive late. */
@@ -414,6 +416,7 @@ export class Go2rtcPlayer {
     // blanks the picture for a frame or two, shows whatever is behind the
     // video, and can show a frame it has already shown.
     let skippedAt = -Infinity;
+    let behindSince: number | undefined;
     let waiting = true;
     // A hardware decoder can hold each frame back until several more have
     // arrived, so a frame is ready only after its turn and is never shown.
@@ -461,10 +464,14 @@ export class Go2rtcPlayer {
         if (shown > 0 && arrived >= SHOWN_MIN_FRAMES && shown < arrived * SHOWN_RATIO) extra = Math.min(extra + LAG_STEP_S, MAX_EXTRA_LAG_S);
         recount();
       }
-      const rested = Date.now() - skippedAt >= SKIP_REST_MS;
+      const now = performance.now();
+      behindSince = lag > MAX_LAG_S + extra ? (behindSince ?? now) : undefined;
+      const sustained = behindSince !== undefined && now - behindSince >= LAG_GRACE_MS;
+      const rested = now - skippedAt >= SKIP_REST_MS;
       // Video older than KEEP_S is gone, so playback that far back has to move.
-      if (lag > KEEP_S || (lag > MAX_LAG_S + extra && rested)) {
-        skippedAt = Date.now();
+      if (lag > KEEP_S || (sustained && rested)) {
+        skippedAt = now;
+        behindSince = undefined;
         video.currentTime = end - TARGET_LAG_S - extra;
         recount();
       } else if (lag < MIN_LAG_S + extra) {
