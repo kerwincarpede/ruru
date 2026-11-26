@@ -123,7 +123,11 @@ function useClock(active: boolean) {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [active]);
-  const tick = useCallback(() => setNow(Date.now()), []);
+  const tick = useCallback(() => {
+    const current = Date.now();
+    setNow(current);
+    return current;
+  }, []);
   return [now, tick] as const;
 }
 
@@ -171,20 +175,25 @@ export default function Tile({ base, camera, choice, live, maximised = false, re
       setFrozen(false);
       return;
     }
-    if (state === "stalled" || state === "retrying" || state === "failed") {
-      const at = player.lastFrameAt();
-      if (at !== undefined) setFrozenAt(at);
-      tick();
-    }
+    if (state !== "stalled" && state !== "retrying" && state !== "failed") return;
+    const lastFrame = player.lastFrameAt();
+    if (lastFrame !== undefined) setFrozenAt(lastFrame);
+    const now = tick();
     // Called before the player clears the video, so its last frame can be kept.
+    if (state !== "retrying" || lastFrame === undefined || now - lastFrame >= KEEP_FROZEN_MS) return;
     const video = slot === 0 ? videoA.current : videoB.current;
     const canvas = freeze.current;
-    if ((state === "retrying" || state === "failed") && video && canvas && video.readyState >= 2 && video.videoWidth > 0) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      canvas.getContext("2d")?.drawImage(video, 0, 0);
-      setFrozen(true);
-    }
+    if (!video || !canvas || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
+    const bounds = video.getBoundingClientRect();
+    const ratio = window.devicePixelRatio || 1;
+    const scale = Math.min(1, bounds.width * ratio / video.videoWidth, bounds.height * ratio / video.videoHeight);
+    if (scale <= 0) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    setFrozen(true);
   }, [tick]);
 
   const [slots, setSlots] = useState<Slots>({ front: 0, streams: [null, null] });
@@ -232,6 +241,16 @@ export default function Tile({ base, camera, choice, live, maximised = false, re
   // The dimmed last frame stays up only while it is recent; then the owl takes over.
   const held = playing || (stale && frozen);
   const recent = frozenAt !== null && clock - frozenAt < KEEP_FROZEN_MS;
+  const keepFrozen = live && recent && !failed && frontState !== "playing";
+  if (frozen && !keepFrozen) setFrozen(false);
+  // Returning to the live picture or the owl retires the canvas backing bitmap.
+  useEffect(() => {
+    const canvas = freeze.current;
+    if (!keepFrozen && canvas?.width) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+  }, [keepFrozen]);
   const lost = reconnecting && !(held && recent);
   if (lost) status = null;
   const reportProblem = useRef(onProblem);
@@ -280,7 +299,7 @@ export default function Tile({ base, camera, choice, live, maximised = false, re
           Waiting for a picture
         </div>
       )}
-      <canvas ref={freeze} className={`tile-freeze${stale && frozen && !playing && !lost ? " is-shown" : ""}`} aria-hidden="true" />
+      <canvas ref={freeze} width={0} height={0} className={`tile-freeze${stale && frozen && !playing && !lost ? " is-shown" : ""}`} aria-hidden="true" />
       {lost && (
         <div className="tile-waiting tile-lost">
           <Owl mood="searching" className="on-wall" />
