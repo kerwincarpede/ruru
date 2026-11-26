@@ -14,6 +14,8 @@ Each tile plays over **WebRTC** first, so what you see is close to real time. Wh
 - When a server's WebRTC does not connect, Ruru uses MSE for that server for the next 10 minutes, then tries WebRTC again.
 - On Linux, MSE is the usual case. Most distributions, Ubuntu and Debian among them, build their webview (WebKitGTK) without WebRTC.
 
+MSE plays at normal speed through short bursts of incoming frames. If the tile stays behind for a second, it can skip ahead to catch up. If it falls more than five seconds behind, it catches up immediately.
+
 ## Main and sub streams
 
 Most cameras send two streams: a full-size main stream for recording and a smaller sub stream for detection. Ruru finds both from Frigate's config. A camera with only one stream uses it for both.

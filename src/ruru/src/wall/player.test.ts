@@ -686,6 +686,37 @@ describe("Go2rtcPlayer", () => {
     player.stop();
   });
 
+  it("plays through recurring short bursts without jumping but catches sustained lag", () => {
+    const element = video();
+    let decoded = 0;
+    countFrames(element, () => ++decoded);
+    let end = 1;
+    const { player, update } = mse(element, () => ({ start: Math.max(0, end - KEEP_S), end }));
+    // Two minutes of 1x playback. Once a minute, frames arrive in a batch.
+    for (let tick = 0; tick < 1200; tick++) {
+      const position = tick / 10;
+      element.currentTime = position;
+      const phase = tick % 600;
+      if (phase === 300) end = position + 1.8;
+      end = Math.max(end, position + 0.8);
+      update();
+      expect(element.currentTime).toBe(position);
+      vi.advanceTimersByTime(100);
+    }
+    end = 122;
+    element.currentTime = 120;
+    update();
+    expect(element.currentTime).toBe(120);
+    vi.advanceTimersByTime(1000);
+    end++;
+    element.currentTime++;
+    update();
+    expect(element.currentTime).toBe(end - TARGET_LAG_S);
+    expect(element.pause).not.toHaveBeenCalled();
+    expect(element.playbackRate).toBe(1);
+    player.stop();
+  });
+
   it("stays further behind the live edge while frames arrive but are not shown", () => {
     const element = video();
     element.cancelVideoFrameCallback = vi.fn();
