@@ -53,6 +53,7 @@ function videoFor(stream: string): HTMLVideoElement {
 
 /** Gives `video` a decoded picture, so the tile can keep its last frame. */
 function withPicture(video: HTMLVideoElement) {
+  vi.spyOn(video, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 400, 180));
   Object.defineProperty(video, "videoWidth", { configurable: true, value: 640 });
   Object.defineProperty(video, "videoHeight", { configurable: true, value: 360 });
 }
@@ -69,6 +70,7 @@ beforeEach(() => {
   vi.stubGlobal("WebSocket", FakeSocket);
   vi.stubGlobal("MediaSource", FakeMediaSource);
   vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:source", revokeObjectURL: () => {} }));
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D);
   HTMLMediaElement.prototype.play = vi.fn().mockResolvedValue(undefined);
 });
 
@@ -138,6 +140,7 @@ describe("Tile", () => {
     // A new frame ends it.
     fire(videoFor("cam_sub"), "playing");
     expect(figure).not.toHaveClass("is-stale");
+    expect(figure.querySelector("canvas")!.width).toBe(0);
     expect(figure).toHaveTextContent(/^Cam$/);
   });
 
@@ -149,17 +152,34 @@ describe("Tile", () => {
     act(() => vi.advanceTimersByTime(STALL_MS));
     expect(figure).toHaveClass("is-reconnecting");
     expect(figure).toHaveTextContent("Cam · Reconnecting · 10 s old");
-    expect(document.querySelector(".tile-freeze")).toHaveClass("is-shown");
+    const canvas = figure.querySelector("canvas")!;
+    expect(canvas).toHaveClass("is-shown");
+    expect([canvas.width, canvas.height]).toEqual([320, 180]);
     act(() => vi.advanceTimersByTime(KEEP_FROZEN_MS - STALL_MS));
     expect(figure).toHaveClass("is-lost");
     expect(figure).toHaveTextContent("Reconnecting…");
     // The caption no longer gives an age, since no old picture is shown.
     expect(figure.querySelector("figcaption")).toHaveTextContent(/^Cam$/);
-    expect(document.querySelector(".tile-freeze")).not.toHaveClass("is-shown");
+    expect(canvas).not.toHaveClass("is-shown");
+    expect([canvas.width, canvas.height]).toEqual([0, 0]);
     // Video coming back puts the owl away.
     fire(videoFor("cam_sub"), "playing");
     expect(figure).not.toHaveClass("is-lost");
     expect(figure).not.toHaveClass("is-reconnecting");
+  });
+
+  it("discards the last frame when a reconnecting tile stops streaming", () => {
+    const { rerender } = render(<Tile base={base} camera={camera} live />);
+    const video = videoFor("cam_sub");
+    withPicture(video);
+    fire(video, "playing");
+    fire(video, "error");
+    const canvas = screen.getByRole("figure").querySelector("canvas")!;
+    expect(canvas.width).toBe(320);
+    rerender(<Tile base={base} camera={camera} live={false} />);
+    expect([canvas.width, canvas.height]).toEqual([0, 0]);
+    rerender(<Tile base={base} camera={camera} live />);
+    expect(canvas).not.toHaveClass("is-shown");
   });
 
   it("shows the owl at once when it reconnects with no frame of its own", () => {

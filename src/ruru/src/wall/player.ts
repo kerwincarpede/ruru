@@ -32,6 +32,10 @@ export const RETRY_BASE_MS = 1000;
 export const RETRY_MAX_MS = 30000;
 /** MSE keeps this many seconds of video behind the newest frame. */
 export const KEEP_S = 5;
+/** Per-player backlog before the SourceBuffer: 8 MiB allows two seconds at 32 Mbit/s. */
+export const MAX_PENDING_BYTES = 8 * 1024 * 1024;
+/** Bound queue bookkeeping too, even when the server delivers tiny fragments. */
+const MAX_PENDING_FRAGMENTS = 512;
 /** MSE playback that falls this far behind the newest frame skips ahead. */
 export const MAX_LAG_S = 1.5;
 /** MSE playback closer to the newest frame than this waits, because a frame that arrives after its turn is never shown. */
@@ -111,6 +115,8 @@ export class Go2rtcPlayer {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private watchdog: ReturnType<typeof setInterval> | null = null;
   private onPlaying: (() => void) | null = null;
+  private firstFrame: number | null = null;
+  private disposeMse: (() => void) | null = null;
   private onError: (() => void) | null = null;
   private attempt = 0;
   private stopped = true;
@@ -200,8 +206,10 @@ export class Go2rtcPlayer {
       this.playing();
     };
     this.onPlaying = () => {
-      if (!this.current(generation)) return;
-      if (typeof video.requestVideoFrameCallback === "function") video.requestVideoFrameCallback(show);
+      if (shown || !this.current(generation)) return;
+      if (typeof video.requestVideoFrameCallback === "function") {
+        if (this.firstFrame === null) this.firstFrame = video.requestVideoFrameCallback(show);
+      }
       // WebKit counts no frames on a MediaStream, so WebRTC asks for a picture instead.
       else if (mode === "webrtc" ? video.readyState >= HAVE_CURRENT_DATA : decoded(video)) show();
     };
@@ -396,10 +404,20 @@ export class Go2rtcPlayer {
 
     let buffer: SourceBuffer | null = null;
     const queue: ArrayBuffer[] = [];
+    let queuedBytes = 0;
+    let countFrame: number | undefined;
+    const listeners = new AbortController();
+    this.disposeMse = () => {
+      listeners.abort();
+      queue.length = 0;
+      if (countFrame !== undefined) video.cancelVideoFrameCallback(countFrame);
+    };
     const flush = () => {
       if (!buffer || buffer.updating || queue.length === 0) return;
       try {
-        buffer.appendBuffer(queue.shift() as ArrayBuffer);
+        const chunk = queue.shift()!;
+        queuedBytes -= chunk.byteLength;
+        buffer.appendBuffer(chunk);
       } catch {
         // The element's error, if any, says whether it was a decode error.
         this.retry(generation);
@@ -432,9 +450,9 @@ export class Go2rtcPlayer {
     const count = () => {
       if (!this.current(generation)) return;
       shown++;
-      video.requestVideoFrameCallback(count);
+      countFrame = video.requestVideoFrameCallback(count);
     };
-    if (counts) video.requestVideoFrameCallback(count);
+    if (counts) countFrame = video.requestVideoFrameCallback(count);
     const keepUp = () => {
       if (!buffer || buffer.updating || !video.buffered || video.buffered.length === 0) return;
       const end = video.buffered.end(video.buffered.length - 1);
@@ -498,14 +516,14 @@ export class Go2rtcPlayer {
                 if (!this.current(generation)) return;
                 keepUp();
                 flush();
-              });
+              }, { signal: listeners.signal });
               flush();
             } catch {
               this.retry(generation);
             }
           };
           if (source.readyState === "open") create();
-          else source.addEventListener("sourceopen", create, { once: true });
+          else source.addEventListener("sourceopen", create, { once: true, signal: listeners.signal });
         } else if (message?.type === "error") {
           this.retry(generation);
         }
@@ -513,8 +531,15 @@ export class Go2rtcPlayer {
       }
       // One frame, after the first message. Playback starts once
       // TARGET_LAG_S of video has arrived; see keepUp.
+      const chunk = event.data as ArrayBuffer;
+      if (queuedBytes + chunk.byteLength > MAX_PENDING_BYTES || queue.length >= MAX_PENDING_FRAGMENTS) {
+        // A fresh connection supplies the headers and keyframe needed to resume.
+        this.retry(generation);
+        return;
+      }
       arrived++;
-      queue.push(event.data as ArrayBuffer);
+      queuedBytes += chunk.byteLength;
+      queue.push(chunk);
       flush();
     };
     socket.onclose = () => this.retry(generation);
@@ -522,6 +547,10 @@ export class Go2rtcPlayer {
 
   private teardown(): void {
     this.generation++;
+    this.disposeMse?.();
+    this.disposeMse = null;
+    if (this.firstFrame !== null) this.options.video.cancelVideoFrameCallback(this.firstFrame);
+    this.firstFrame = null;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     if (this.watchdog) clearInterval(this.watchdog);

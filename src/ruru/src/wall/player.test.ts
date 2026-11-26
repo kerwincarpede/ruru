@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DECODE_FAILURES, FAILURE_MEMORY_MS, Go2rtcPlayer, KEEP_S, LAG_STEP_S, RETRY_MAX_MS, SHOWN_CHECK_MS, SKIP_REST_MS, STALE_MS, STALL_CHECK_MS, STALL_MS, TARGET_LAG_S, WEBRTC_TIMEOUT_MS, forgetFailures, isUndecodable, retryDelay, supportedMseCodecs, type PlayerState } from "./player";
+import { DECODE_FAILURES, FAILURE_MEMORY_MS, Go2rtcPlayer, KEEP_S, LAG_STEP_S, MAX_PENDING_BYTES, RETRY_MAX_MS, SHOWN_CHECK_MS, SKIP_REST_MS, STALE_MS, STALL_CHECK_MS, STALL_MS, TARGET_LAG_S, WEBRTC_TIMEOUT_MS, forgetFailures, isUndecodable, retryDelay, supportedMseCodecs, type PlayerState } from "./player";
 
 class FakeSocket {
   static OPEN = 1;
@@ -566,6 +566,7 @@ describe("Go2rtcPlayer", () => {
   it("waits for requestVideoFrameCallback where the webview has it", () => {
     vi.stubGlobal("MediaSource", FakeMediaSource);
     const element = video();
+    element.cancelVideoFrameCallback = vi.fn();
     let frame: (() => void) | null = null;
     element.requestVideoFrameCallback = (callback) => {
       frame = callback as unknown as () => void;
@@ -595,6 +596,45 @@ describe("Go2rtcPlayer", () => {
     const { buffer } = source.buffers[0];
     return { player, socket, update: () => buffer.dispatchEvent(new Event("updateend")), buffer };
   }
+
+  it("reconnects at the live edge when a stalled MSE buffer exceeds its pending byte budget", () => {
+    const element = video();
+    const { player, socket, buffer, update } = mse(element, () => ({ start: 0, end: 0 }));
+    const chunk = new ArrayBuffer(MAX_PENDING_BYTES);
+    socket.message(chunk);
+    buffer.updating = true;
+    socket.message(chunk);
+    expect(socket.closed).toBe(false);
+    socket.message(new ArrayBuffer(1));
+    expect(socket.closed).toBe(true);
+    expect(states[states.length - 1]).toBe("retrying");
+    buffer.updating = false;
+    update();
+    expect(buffer.appended).toHaveLength(1);
+    vi.advanceTimersByTime(retryDelay(0));
+    const nextSource = FakeMediaSource.last!;
+    nextSource.open();
+    const next = FakeSocket.all[1];
+    next.message(JSON.stringify({ type: "mse", value: "video/mp4" }));
+    const fresh = new ArrayBuffer(4);
+    next.message(fresh);
+    expect(nextSource.buffers[0].buffer.appended).toEqual([fresh]);
+    player.stop();
+  });
+
+  it("cancels both pending frame callbacks when a player stops", () => {
+    const element = video();
+    let id = 0;
+    element.requestVideoFrameCallback = vi.fn(() => ++id);
+    element.cancelVideoFrameCallback = vi.fn();
+    const { player } = mse(element, () => ({ start: 0, end: 0 }));
+    element.dispatchEvent(new Event("playing"));
+    element.dispatchEvent(new Event("playing"));
+    player.stop();
+    expect(id).toBe(2);
+    expect(element.cancelVideoFrameCallback).toHaveBeenCalledWith(1);
+    expect(element.cancelVideoFrameCallback).toHaveBeenCalledWith(2);
+  });
 
   it("keeps MSE near the live edge at normal speed and trims the old buffer", () => {
     const element = video();
@@ -648,6 +688,7 @@ describe("Go2rtcPlayer", () => {
 
   it("stays further behind the live edge while frames arrive but are not shown", () => {
     const element = video();
+    element.cancelVideoFrameCallback = vi.fn();
     let frame: (() => void) | null = null;
     element.requestVideoFrameCallback = (callback) => {
       frame = callback as unknown as () => void;
