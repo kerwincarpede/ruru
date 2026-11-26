@@ -114,7 +114,7 @@ class Changes(unittest.TestCase):
 
 
 RELEASE_PACKAGES = [
-    "Ruru_universal.app.tar.gz",
+    "Ruru_aarch64.app.tar.gz",
     "Ruru_0.4.0_amd64.AppImage",
     "Ruru_0.4.0_amd64.deb",
     "Ruru-0.4.0-1.x86_64.rpm",
@@ -186,8 +186,14 @@ class Platforms(unittest.TestCase):
             found["linux-aarch64-deb"]["url"], "https://dl/Ruru_0.4.0_arm64.deb"
         )
 
-    def test_requires_intel_macs_and_arm64_linux(self):
-        self.assertIn("darwin-x86_64", manifest.REQUIRED)
+    def test_lists_the_arm_mac_app_only_for_apple_silicon(self):
+        found = platforms_for(["Ruru_aarch64.app.tar.gz"])
+        self.assertEqual(sorted(found), ["darwin-aarch64", "darwin-aarch64-app"])
+        self.assertEqual(found["darwin-aarch64"]["url"], "https://dl/Ruru_aarch64.app.tar.gz")
+
+    def test_requires_apple_silicon_and_arm64_linux_but_not_intel_macs(self):
+        self.assertIn("darwin-aarch64", manifest.REQUIRED)
+        self.assertNotIn("darwin-x86_64", manifest.REQUIRED)
         self.assertIn("linux-aarch64", manifest.REQUIRED)
 
 

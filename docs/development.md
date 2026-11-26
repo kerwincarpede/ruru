@@ -113,7 +113,7 @@ python3 -m unittest discover .github/scripts
 | Checks | Ubuntu 24.04 | `npm run lint`, the release script tests, `npm run test:coverage`, `npm run build`, `cargo fmt --check`, `cargo clippy` with warnings as errors, and the Rust tests under `cargo llvm-cov` |
 | Rust tests | Windows and macOS | `cargo test`, so code behind `#[cfg(windows)]` and `#[cfg(target_os = "macos")]` is tested as well as built |
 | build-route | Ubuntu 24.04 | Decides whether the Build jobs package installers |
-| Build | Ubuntu 24.04 (x86_64 and arm64), Windows, macOS (universal) | Builds the app on each platform |
+| Build | Ubuntu 24.04 (x86_64 and arm64), Windows, macOS (Apple silicon) | Builds the app on each platform |
 
 Checks measures coverage while it runs the tests. `npm run test:coverage` fails below 90% of lines or 83% of branches. `cargo llvm-cov` (pinned in `ci.yml`, and needing the `llvm-tools-preview` rustup component) prints a line summary in the job log and fails below 61% of lines (1 point below the coverage measured when the floor was set; raise it as Rust code gains tests). The HTML and lcov reports for both are uploaded as one `coverage` artifact, even when a test or a floor fails.
 
@@ -127,7 +127,7 @@ Ordinary pull requests link the native app with `tauri build --no-bundle` and pr
 - `.github/scripts/` or a workflow
 - a `package.json`, `package-lock.json`, `.cargo/` or `.gitattributes`
 
-A packaging build runs `tauri-action` and uploads the installers as one artifact per runner (`ruru-<runner>`): `.deb`, `.rpm` and `.AppImage` for Linux, `.msi` and `-setup.exe` for Windows, and a universal `.dmg` for macOS.
+A packaging build runs `tauri-action` and uploads the installers as one artifact per runner (`ruru-<runner>`): `.deb`, `.rpm` and `.AppImage` for Linux, `.msi` and `-setup.exe` for Windows, and an Apple silicon `_aarch64.dmg` for macOS. macOS builds target `aarch64-apple-darwin` only, so Rust compiles once rather than building both Apple silicon and Intel binaries.
 
 To force packaging for any branch, open **Actions → CI → Run workflow** on GitHub and leave **Build and upload installers on every platform** ticked, or from a terminal:
 
@@ -156,7 +156,7 @@ npm run build    # into dist/
 
 `install.sh` at the repository root is the Linux one-line installer from the README. It reads the latest Stable release from the GitHub API (or the tag in `RURU_VERSION`) and picks the installer by matching the asset names above, so renaming the Linux installers means updating its patterns. Check it with `sh -n install.sh` and by running it in an Ubuntu container.
 
-Each non-docs push to `main`, such as a merged code pull request, is released as an Edge build: a [GitHub release](https://github.com/kerwincarpede/ruru/releases) of that commit, marked as a pre-release and never as the latest release, with the installers attached (`.msi` and `-setup.exe` for Windows, a universal `.dmg` for macOS, and `.AppImage`, `.deb` and `.rpm` for Linux). Copies on the Edge update channel offer it. A Stable release is an Edge release promoted later, with the same installers (see [Promoting to Stable](#promoting-to-stable)), and Stable copies offer only those.
+Each non-docs push to `main`, such as a merged code pull request, is released as an Edge build: a [GitHub release](https://github.com/kerwincarpede/ruru/releases) of that commit, marked as a pre-release and never as the latest release, with the installers attached (`.msi` and `-setup.exe` for Windows, an Apple silicon `_aarch64.dmg` for macOS, and `.AppImage`, `.deb` and `.rpm` for Linux). Copies on the Edge update channel offer it. A Stable release is an Edge release promoted later, with the same installers (see [Promoting to Stable](#promoting-to-stable)), and Stable copies offer only those.
 
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) has three jobs:
 

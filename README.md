@@ -36,7 +36,7 @@ Ruru connects to Frigate's unauthenticated port, usually 5000. Logging in to Fri
 
 ## Download
 
-Download the installer for your platform from the [latest release](https://github.com/kerwincarpede/ruru/releases/latest): `.msi` or `-setup.exe` for Windows, the universal `.dmg` for macOS, and `.AppImage`, `.deb` or `.rpm` for Linux. Ruru checks for a newer release when it starts and asks before installing it.
+Download the installer for your platform from the [latest release](https://github.com/kerwincarpede/ruru/releases/latest): `.msi` or `-setup.exe` for Windows, the `_aarch64.dmg` for macOS (Apple silicon only), and `.AppImage`, `.deb` or `.rpm` for Linux. Ruru checks for a newer release when it starts and asks before installing it.
 
 On Linux you can install the latest Stable release with one command. It uses the `.deb` on Debian and Ubuntu, the `.rpm` on Fedora and openSUSE, and the `.AppImage` anywhere else:
 
