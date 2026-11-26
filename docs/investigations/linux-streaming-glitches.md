@@ -70,7 +70,7 @@ The MSE player now plays at normal speed and never changes `playbackRate`.
 - Playback starts once 0.5 s of video has arrived.
 - More than 1.5 s behind the newest frame, it skips to 0.5 s behind, once, and then leaves playback alone for 5 s.
 - Less than 0.35 s behind, it pauses until it is 0.5 s behind again.
-- Every 4 s it compares the frames that arrived with the frames `requestVideoFrameCallback` reported as shown. If fewer than 90% were shown, it stays 0.2 s further behind, up to 2 s more. A webview that reports no frames at all is left alone.
+- Every 4 s it compares the frames that arrived with the frames `requestVideoFrameCallback` reported as shown. If fewer than 90% were shown, it stays 0.2 s further behind, up to 2 s more. A webview that reports no frames at all is left alone. This check missed tiles that showed nearly every frame, but late. [Late frames on the wall](late-frames-on-the-wall.md) records that and the check that replaced it.
 - The snapshot is hidden while a tile plays, so nothing old can show through.
 
 Measured on the wall with the real layout for 15 minutes:

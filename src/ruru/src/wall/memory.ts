@@ -29,3 +29,35 @@ export class ExpiringSet {
     this.until.clear();
   }
 }
+
+/**
+ * Values remembered for a while and then forgotten, such as how far behind a
+ * stream had to play. Forgetting lets the value be found again, in case what
+ * it depended on has changed.
+ */
+export class ExpiringMap<Value> {
+  private readonly entries = new Map<string, { value: Value; until: number }>();
+
+  constructor(
+    private readonly ttlMs: number,
+    private readonly now: () => number = () => Date.now(),
+  ) {}
+
+  /** Remembers `value` under `key` for the next `ttlMs`. */
+  set(key: string, value: Value): void {
+    this.entries.set(key, { value, until: this.now() + this.ttlMs });
+  }
+
+  /** The value set under `key` less than `ttlMs` ago, or undefined. */
+  get(key: string): Value | undefined {
+    const entry = this.entries.get(key);
+    if (!entry) return undefined;
+    if (this.now() < entry.until) return entry.value;
+    this.entries.delete(key);
+    return undefined;
+  }
+
+  clear(): void {
+    this.entries.clear();
+  }
+}

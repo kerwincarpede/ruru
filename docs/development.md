@@ -18,7 +18,7 @@ Ruru is built with Rust and [Tauri 2](https://tauri.app/), with a React + TypeSc
 | `AGENTS.md` | The rules every change follows, and which standard to read for which task |
 | `docs/standards/` | The Rust, frontend, writing and PR standards |
 | `docs/issues/` | Known problems being investigated, such as [Linux playback](issues/linux-playback.md) |
-| `docs/investigations/` | Measurements behind a fix, such as [Linux streaming glitches](investigations/linux-streaming-glitches.md) |
+| `docs/investigations/` | Measurements behind a fix, such as [Linux streaming glitches](investigations/linux-streaming-glitches.md) and [Late frames on the wall](investigations/late-frames-on-the-wall.md) |
 
 ## Prerequisites
 
