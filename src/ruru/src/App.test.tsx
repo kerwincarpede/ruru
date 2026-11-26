@@ -1054,7 +1054,7 @@ describe("App streams", () => {
     ...connected,
     wall: { ...DEFAULT_WALL_OPTIONS, dynamicWall: true },
     mqtt: { ...DEFAULT_MQTT_SETTINGS, enabled: true, host: "ha.local" },
-    dynamicWalls: { [URL_SAVED]: { heroSlots: [], priorityCameras: ["maingate"] } },
+    dynamicWalls: { [URL_SAVED]: { heroSlots: [], priorityCameras: ["maingate"], ignoredObjects: [] } },
   };
   const personAt = (name: string): Activity => ({ [name]: { motion: true, objects: { person: 1 }, review: "alert" } });
 

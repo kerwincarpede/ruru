@@ -19,6 +19,17 @@ describe("stepDynamic", () => {
     expect(seesObjects(car)).toBe(true);
   });
 
+  it("ignores the left-out objects when picking heroes", () => {
+    expect(seesObjects(objects({ dog: 1 }), ["dog"])).toBe(false);
+    expect(seesObjects(objects({ dog: 1, car: 1 }), ["dog"])).toBe(true);
+    const dog = objects({ dog: 2 });
+    const state = stepDynamic(IDLE, { cameras, activity: { yard: dog, drive: car }, priority: [], ignored: ["dog"], now: 0 });
+    expect(dynamicView(state)).toEqual({ kind: "heroes", heroes: ["drive"] });
+    // A takeover still needs a person, whatever is left out.
+    const gate = stepDynamic(IDLE, { cameras, activity: { maingate: person }, priority: ["maingate"], ignored: ["person"], now: 0 });
+    expect(dynamicView(gate)).toEqual({ kind: "takeover", camera: "maingate" });
+  });
+
   it("picks two active cameras in wall order and keeps the pair when more arrive", () => {
     let state = run([[0, { yard: car, garage: car }]]);
     expect(dynamicView(state)).toEqual({ kind: "heroes", heroes: ["garage", "yard"] });

@@ -8,7 +8,7 @@ const SERVER = "http://frigate:5000";
 const ten = ["maingate", "garage", "yard", "drive", "porch", "side", "back", "shed", "pool", "gate"];
 const settings: Settings = { frigateUrl: SERVER, fullScreen: false, wall: DEFAULT_WALL_OPTIONS, updateChannel: "stable", autoUpdate: false, mqtt: { ...DEFAULT_MQTT_SETTINGS, enabled: true }, layouts: {}, dynamicWalls: {} };
 
-function page({ cameras = ten, dynamic = DEFAULT_DYNAMIC_WALL, server = SERVER as string | null, dynamicWall = false } = {}) {
+function page({ cameras = ten, objects = [] as string[], dynamic = DEFAULT_DYNAMIC_WALL, server = SERVER as string | null, dynamicWall = false } = {}) {
   const onSaved = vi.fn();
   const onDynamicSaved = vi.fn();
   const onClose = vi.fn();
@@ -19,6 +19,7 @@ function page({ cameras = ten, dynamic = DEFAULT_DYNAMIC_WALL, server = SERVER a
       server={server}
       dynamic={dynamic}
       cameras={cameras}
+      objects={objects}
       layout={undefined}
       wallSize={{ width: 1920, height: 1080 }}
       onSaved={onSaved}
@@ -61,15 +62,38 @@ describe("AppearancePage Dynamic wall", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Maingate" }));
     fireEvent.click(save);
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
-    const dynamic: DynamicWall = { heroSlots: ["yard", "drive"], priorityCameras: ["maingate"] };
+    const dynamic: DynamicWall = { heroSlots: ["yard", "drive"], priorityCameras: ["maingate"], ignoredObjects: [] };
     expect(calls).toEqual([{ cmd: "save_dynamic_wall", payload: { options: { ...DEFAULT_WALL_OPTIONS, dynamicWall: true }, server: SERVER, dynamic } }]);
     expect(onDynamicSaved).toHaveBeenCalledWith(saved);
     expect(onSaved).not.toHaveBeenCalled();
   });
 
+  it("leaves out unticked hero objects and still offers one Frigate no longer tracks", async () => {
+    const saved: Settings = { ...settings, wall: { ...DEFAULT_WALL_OPTIONS, dynamicWall: true } };
+    const calls = mockCommands({ save_dynamic_wall: () => saved });
+    const { onClose } = page({ dynamicWall: true, objects: ["car", "dog", "person"], dynamic: { ...DEFAULT_DYNAMIC_WALL, ignoredObjects: ["cat"] } });
+    const group = screen.getByRole("group", { name: "Hero objects" });
+    const box = (name: string) => within(group).getByRole("checkbox", { name });
+    expect(within(group).getAllByRole("checkbox").map((input) => input.closest("label")?.textContent)).toEqual(["Car", "Dog", "Person", "Cat"]);
+    expect(box("Dog")).toBeChecked();
+    expect(box("Cat")).not.toBeChecked();
+    const save = screen.getByRole("button", { name: "Save" });
+    expect(save).toBeDisabled();
+    fireEvent.click(box("Dog"));
+    fireEvent.click(box("Cat"));
+    fireEvent.click(save);
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(calls[0].payload).toMatchObject({ dynamic: { ignoredObjects: ["dog"] } });
+  });
+
+  it("offers no hero objects until Frigate tracks some", () => {
+    page({ dynamicWall: true });
+    expect(screen.queryByRole("group", { name: "Hero objects" })).not.toBeInTheDocument();
+  });
+
   it("follows a change from Home Assistant until the toggle is changed here", async () => {
     const calls = mockCommands({ save_dynamic_wall: () => settings });
-    const props = { mqttEnabled: true, server: SERVER, dynamic: DEFAULT_DYNAMIC_WALL, cameras: ten, layout: undefined, wallSize: { width: 1920, height: 1080 }, onSaved: vi.fn(), onDynamicSaved: vi.fn(), onClose: vi.fn() };
+    const props = { mqttEnabled: true, server: SERVER, dynamic: DEFAULT_DYNAMIC_WALL, cameras: ten, objects: [], layout: undefined, wallSize: { width: 1920, height: 1080 }, onSaved: vi.fn(), onDynamicSaved: vi.fn(), onClose: vi.fn() };
     const { rerender } = render(<AppearancePage {...props} wall={DEFAULT_WALL_OPTIONS} />);
     const toggle = screen.getByRole("checkbox", { name: "Dynamic wall" });
     rerender(<AppearancePage {...props} wall={{ ...DEFAULT_WALL_OPTIONS, dynamicWall: true }} />);
@@ -101,7 +125,7 @@ describe("AppearancePage Dynamic wall", () => {
         throw "The settings could not be saved: disk full";
       },
     });
-    const { onDynamicSaved, onClose } = page({ dynamicWall: true, dynamic: { heroSlots: [], priorityCameras: ["garage"] } });
+    const { onDynamicSaved, onClose } = page({ dynamicWall: true, dynamic: { heroSlots: [], priorityCameras: ["garage"], ignoredObjects: [] } });
     expect(screen.getByRole("checkbox", { name: "Garage" })).toBeChecked();
     fireEvent.click(screen.getByRole("checkbox", { name: "Garage" }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
