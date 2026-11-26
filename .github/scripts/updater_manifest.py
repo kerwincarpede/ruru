@@ -22,8 +22,8 @@ fields.
 
 Ruru's updater looks for `<os>-<arch>-<installer>` first, so each kind
 of install updates with its own kind of package, and then `<os>-<arch>`.
-A universal macOS package runs on both Apple silicon and Intel, so it is
-listed under both darwin architectures.
+macOS releases support Apple silicon only. Historical universal packages
+are still recognised when reading older releases.
 """
 
 import argparse
@@ -47,7 +47,6 @@ PACKAGES = [
 # Every release must update these, or it is not published.
 REQUIRED = [
     "darwin-aarch64",
-    "darwin-x86_64",
     "linux-aarch64",
     "linux-x86_64",
     "windows-x86_64",

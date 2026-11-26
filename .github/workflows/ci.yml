@@ -202,19 +202,16 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      # The universal macOS app joins an Apple silicon and an Intel build.
+      # macOS supports Apple silicon only.
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin' || '' }}
 
-      # rust-cache does not re-save a cache whose key matched exactly, so a
-      # key that ignored the targets would keep restoring a
-      # single-architecture cache. Naming the targets in the key gives the
-      # universal build a cache of its own.
+      # Keep the Apple silicon cache separate from older universal builds.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/ruru/src-tauri
-          key: ${{ runner.os == 'macOS' && 'universal-apple-darwin' || '' }}
+          key: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin' || '' }}
 
       - name: Install frontend dependencies
         run: npm ci
@@ -289,12 +286,11 @@ jobs:
       # packages with their .sig files, are also uploaded to the draft
       # release; without one, tauri-action only builds. latest.json is left
       # to release.yml, which writes it once every platform is in.
-      # On macOS one universal build serves both Apple silicon and Intel, and
-      # lands under target/universal-apple-darwin/ rather than target/.
+      # The macOS build lands under target/aarch64-apple-darwin/.
       - name: Link native app without bundling
         if: needs.build-route.outputs.package == 'false'
         working-directory: src/ruru
-        run: npm run tauri -- build --no-bundle ${{ runner.os == 'macOS' && '--target universal-apple-darwin' || '' }}
+        run: npm run tauri -- build --no-bundle ${{ runner.os == 'macOS' && '--target aarch64-apple-darwin' || '' }}
 
       - name: Build installers
         if: needs.build-route.outputs.package == 'true'
@@ -308,7 +304,7 @@ jobs:
           projectPath: src/ruru
           releaseId: ${{ inputs.release_id }}
           includeUpdaterJson: false
-          args: ${{ runner.os == 'macOS' && '--target universal-apple-darwin' || '' }}
+          args: ${{ runner.os == 'macOS' && '--target aarch64-apple-darwin' || '' }}
 
       # A designated requirement naming a cdhash is the per-build identity
       # that loses permissions on update; a certificate one is stable.
@@ -316,7 +312,7 @@ jobs:
         if: runner.os == 'macOS' && steps.macos-signing.outputs.identity != ''
         shell: bash
         run: |
-          app=src/ruru/src-tauri/target/universal-apple-darwin/release/bundle/macos/Ruru.app
+          app=src/ruru/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Ruru.app
           codesign --verify --strict --verbose=2 "$app"
           requirement=$(codesign -d -r- "$app" 2>&1 | sed -n 's/^designated => //p')
           echo "Designated requirement: $requirement"
@@ -338,4 +334,4 @@ jobs:
             src/ruru/src-tauri/target/release/bundle/appimage/*.AppImage
             src/ruru/src-tauri/target/release/bundle/msi/*.msi
             src/ruru/src-tauri/target/release/bundle/nsis/*.exe
-            src/ruru/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            src/ruru/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
