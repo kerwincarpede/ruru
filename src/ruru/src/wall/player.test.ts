@@ -1,5 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DECODE_FAILURES, FAILURE_MEMORY_MS, Go2rtcPlayer, KEEP_S, LAG_STEP_S, MAX_PENDING_BYTES, RETRY_MAX_MS, SHOWN_CHECK_MS, SKIP_REST_MS, STALE_MS, STALL_CHECK_MS, STALL_MS, TARGET_LAG_S, WEBRTC_TIMEOUT_MS, forgetFailures, isUndecodable, retryDelay, supportedMseCodecs, type PlayerState } from "./player";
+import {
+  DECODE_FAILURES,
+  FAILURE_MEMORY_MS,
+  Go2rtcPlayer,
+  KEEP_S,
+  LAG_MEMORY_MS,
+  LAG_STEP_S,
+  LATE_MARGIN_S,
+  LATE_REST_MS,
+  MAX_PENDING_BYTES,
+  RETRY_MAX_MS,
+  SETTLE_MS,
+  SHOWN_CHECK_MS,
+  SKIP_REST_MS,
+  STALE_MS,
+  STALL_CHECK_MS,
+  STALL_MS,
+  TARGET_LAG_S,
+  WEBRTC_TIMEOUT_MS,
+  forgetFailures,
+  forgetLags,
+  isUndecodable,
+  retryDelay,
+  supportedMseCodecs,
+  type PlayerState,
+} from "./player";
 
 class FakeSocket {
   static OPEN = 1;
@@ -160,6 +185,7 @@ describe("Go2rtcPlayer", () => {
     FakePeer.all = [];
     FakeMediaSource.last = null;
     forgetFailures();
+    forgetLags();
     states = [];
     vi.stubGlobal("WebSocket", FakeSocket);
     vi.stubGlobal(
@@ -738,6 +764,7 @@ describe("Go2rtcPlayer", () => {
     };
     element.currentTime = 10 - TARGET_LAG_S;
     update();
+    vi.advanceTimersByTime(SETTLE_MS);
 
     // Every frame shown: playback stays where it is.
     play(20, 20);
@@ -757,6 +784,180 @@ describe("Go2rtcPlayer", () => {
     update();
     expect(element.play).toHaveBeenCalledTimes(1);
     player.stop();
+  });
+
+  /** An MSE player that reports each frame it shows, `late` seconds after the frame's turn. */
+  function lateFrames(range: () => { start: number; end: number }) {
+    const element = video();
+    element.cancelVideoFrameCallback = vi.fn();
+    let frame: VideoFrameRequestCallback | null = null;
+    element.requestVideoFrameCallback = (callback) => {
+      frame = callback;
+      return 1;
+    };
+    // The picture keeps moving, so the watchdog leaves the stream alone.
+    let decoded = 0;
+    countFrames(element, () => ++decoded);
+    FakeSocket.all = [];
+    const { player, socket, update } = mse(element, range);
+    /** One check's worth of frames, every one of them shown. */
+    const play = (late: number[]) => {
+      for (const by of late) {
+        socket.message(new ArrayBuffer(4));
+        frame?.(0, { mediaTime: element.currentTime - by } as VideoFrameCallbackMetadata);
+      }
+      vi.advanceTimersByTime(SHOWN_CHECK_MS);
+      update();
+    };
+    return { element, player, update, play };
+  }
+  const onTime = (count: number) => Array.from({ length: count }, () => 0.016);
+
+  it("stays behind by as much as frames shown late needed", () => {
+    let range = { start: 5, end: 10 };
+    const { element, player, update, play } = lateFrames(() => range);
+    element.currentTime = 10 - TARGET_LAG_S;
+    update();
+    // Frames shown while the decoder catches up say nothing.
+    play([1, 1, 1, 1]);
+    expect(element.pause).not.toHaveBeenCalled();
+
+    // On time, a frame is reported a screen refresh after it is shown.
+    play(onTime(20));
+    expect(element.pause).not.toHaveBeenCalled();
+    // One late frame alone is the page being busy, not the decoder.
+    play([...onTime(9), 0.5]);
+    expect(element.pause).not.toHaveBeenCalled();
+
+    // Frames keep coming late: it waits until they would have been on time, with room to spare.
+    play([...onTime(17), 0.2, 0.15, 0.15]);
+    expect(element.pause).toHaveBeenCalledTimes(1);
+    element.paused = true;
+    range = { start: 5, end: 10 + 0.15 };
+    update();
+    expect(element.play).not.toHaveBeenCalled();
+    range = { start: 5, end: 10.01 + 0.15 + LATE_MARGIN_S };
+    update();
+    expect(element.play).toHaveBeenCalledTimes(1);
+    element.paused = false;
+
+    // From there the same frames are on time, and playback is left alone.
+    vi.advanceTimersByTime(SETTLE_MS);
+    play(onTime(20));
+    play(onTime(20));
+    expect(element.pause).toHaveBeenCalledTimes(1);
+    expect(element.playbackRate).toBe(1);
+    player.stop();
+  });
+
+  it("measures the distance behind only once the decoder has caught up", () => {
+    let range = { start: 5, end: 10 };
+    const { element, player, update, play } = lateFrames(() => range);
+    element.currentTime = 10 - TARGET_LAG_S;
+    update();
+    // The play position stood still while the first frames were decoded: playback is really 1 s behind.
+    vi.advanceTimersByTime(SETTLE_MS);
+    range = { start: 5, end: 10.5 };
+    play([...onTime(17), 0.2, 0.2, 0.2]);
+    expect(element.pause).toHaveBeenCalledTimes(1);
+    element.paused = true;
+    range = { start: 5, end: 10.5 + 0.2 };
+    update();
+    expect(element.play).not.toHaveBeenCalled();
+    range = { start: 5, end: 10.51 + 0.2 + LATE_MARGIN_S };
+    update();
+    expect(element.play).toHaveBeenCalledTimes(1);
+    player.stop();
+  });
+
+  it("stops falling back when frames are as late from further behind", () => {
+    let range = { start: 5, end: 10 };
+    const { element, player, update, play } = lateFrames(() => range);
+    element.currentTime = 10 - TARGET_LAG_S;
+    update();
+    vi.advanceTimersByTime(SETTLE_MS);
+    const late = [...onTime(17), 0.2, 0.2, 0.2];
+    play(late);
+    expect(element.pause).toHaveBeenCalledTimes(1);
+    element.paused = true;
+    range = { start: 5, end: 10.01 + 0.2 + LATE_MARGIN_S };
+    update();
+    expect(element.play).toHaveBeenCalledTimes(1);
+    element.paused = false;
+
+    // Just as late: a busy computer, which more distance does not help.
+    vi.advanceTimersByTime(SETTLE_MS);
+    play(late);
+    play(late);
+    expect(element.pause).toHaveBeenCalledTimes(1);
+    // The distance that did not help is not kept for the next connection.
+    player.stop();
+    range = { start: 0, end: TARGET_LAG_S + 0.01 };
+    const next = lateFrames(() => range);
+    next.element.paused = true;
+    next.update();
+    expect(next.element.play).toHaveBeenCalledTimes(1);
+    next.element.paused = false;
+
+    // A new connection looks at late frames afresh.
+    vi.advanceTimersByTime(SETTLE_MS);
+    next.play(late);
+    expect(next.element.pause).toHaveBeenCalledTimes(1);
+    next.player.stop();
+  });
+
+  it("looks at late frames again after a rest", () => {
+    let range = { start: 5, end: 10 };
+    const { element, player, update, play } = lateFrames(() => range);
+    element.currentTime = 10 - TARGET_LAG_S;
+    update();
+    vi.advanceTimersByTime(SETTLE_MS);
+    const late = [...onTime(17), 0.2, 0.2, 0.2];
+    play(late);
+    element.paused = true;
+    range = { start: 5, end: 10.01 + 0.2 + LATE_MARGIN_S };
+    update();
+    element.paused = false;
+    vi.advanceTimersByTime(SETTLE_MS);
+    play(late);
+    expect(element.pause).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(LATE_REST_MS);
+    element.currentTime = range.end - TARGET_LAG_S;
+    play(late);
+    expect(element.pause).toHaveBeenCalledTimes(2);
+    player.stop();
+  });
+
+  it("starts a stream's next connection as far behind as its last one needed, for a while", () => {
+    let range = { start: 5, end: 10 };
+    const first = lateFrames(() => range);
+    first.element.currentTime = 10 - TARGET_LAG_S;
+    first.update();
+    vi.advanceTimersByTime(SETTLE_MS);
+    first.play([...onTime(17), 0.2, 0.2, 0.2]);
+    expect(first.element.pause).toHaveBeenCalledTimes(1);
+    first.player.stop();
+
+    // The same stream again: it starts where the late frames were on time.
+    range = { start: 0, end: TARGET_LAG_S + 0.2 };
+    const second = lateFrames(() => range);
+    second.element.paused = true;
+    second.update();
+    expect(second.element.play).not.toHaveBeenCalled();
+    range = { start: 0, end: TARGET_LAG_S + 0.21 + LATE_MARGIN_S };
+    second.update();
+    expect(second.element.play).toHaveBeenCalledTimes(1);
+    second.player.stop();
+
+    // Later it starts at the usual distance and finds out again.
+    vi.advanceTimersByTime(LAG_MEMORY_MS);
+    range = { start: 0, end: TARGET_LAG_S + 0.01 };
+    const third = lateFrames(() => range);
+    third.element.paused = true;
+    third.update();
+    expect(third.element.play).toHaveBeenCalledTimes(1);
+    third.player.stop();
   });
 
   it("gives way to MSE when WebRTC connects but never shows a frame", () => {

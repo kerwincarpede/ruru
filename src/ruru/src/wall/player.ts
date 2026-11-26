@@ -1,6 +1,6 @@
 import { streamSocketUrl } from "../app/frigate";
 import { inboundVideoFrames, videoFrames, type FrameCounts } from "./diagnostics";
-import { ExpiringSet } from "./memory";
+import { ExpiringMap, ExpiringSet } from "./memory";
 
 /**
  * A live player for one go2rtc stream, modelled on go2rtc's MIT-licensed
@@ -46,15 +46,27 @@ export const MIN_LAG_S = 0.35;
 export const TARGET_LAG_S = 0.5;
 /** After a skip, MSE playback is left alone this long, so a webview that lands short of the target does not skip again and again. */
 export const SKIP_REST_MS = 5000;
-/** How often MSE playback compares the frames that arrived with the frames that were shown. */
+/** How often MSE playback checks whether frames were shown, and shown on time. */
 export const SHOWN_CHECK_MS = 4000;
+/** After playback starts, resumes or skips, the decoder gets this long to catch up before frames are checked. */
+export const SETTLE_MS = 1000;
 /** The comparison needs this many frames to mean anything. */
 export const SHOWN_MIN_FRAMES = 8;
 /** When fewer than this share of the frames that arrived were shown, playback stays further behind. */
 export const SHOWN_RATIO = 0.9;
-/** How much further behind each time, and at most. */
+/** A frame shown this long after its turn was late. A frame on time is reported up to two screen refreshes after it is shown. */
+export const LATE_S = 0.04;
+/** When more than this share of the frames shown were late, and more than one, playback stays further behind. */
+export const LATE_RATIO = 0.05;
+/** Room left between a late frame's turn and the newest frame, for frames that arrive unevenly. */
+export const LATE_MARGIN_S = 0.1;
+/** When frames are as late from further behind, something else holds them up, and lateness is left alone this long. */
+export const LATE_REST_MS = 10 * 60 * 1000;
+/** How much further behind when frames go missing without saying how late they were, and at most. */
 export const LAG_STEP_S = 0.2;
 export const MAX_EXTRA_LAG_S = 2;
+/** How long a stream's extra distance is remembered, so its next connection starts there instead of finding it again. */
+export const LAG_MEMORY_MS = 60 * 60 * 1000;
 
 /** A stream whose picture has not moved for this long is reconnected. */
 export const STALL_MS = 10000;
@@ -78,6 +90,8 @@ const MEDIA_ERR_DECODE = 3;
 const webrtcFailures = new ExpiringSet(FAILURE_MEMORY_MS);
 /** Streams, by base URL and name, the webview recently failed to decode. */
 const undecodable = new ExpiringSet(FAILURE_MEMORY_MS);
+/** How much further behind the newest frame each stream, by base URL and name, recently had to play. */
+const extraLags = new ExpiringMap<number>(LAG_MEMORY_MS);
 const streamKey = (base: string, stream: string) => `${base}\n${stream}`;
 
 /** Whether `stream` recently failed to decode here, so a tile should play another one. */
@@ -89,6 +103,11 @@ export function isUndecodable(base: string, stream: string): boolean {
 export function forgetFailures(): void {
   webrtcFailures.clear();
   undecodable.clear();
+}
+
+/** Forgets how far behind each stream had to play. For tests. */
+export function forgetLags(): void {
+  extraLags.clear();
 }
 
 /**
@@ -437,22 +456,47 @@ export class Go2rtcPlayer {
     let behindSince: number | undefined;
     let waiting = true;
     // A hardware decoder can hold each frame back until several more have
-    // arrived, so a frame is ready only after its turn and is never shown.
-    // The frames shown are counted against the frames that arrived, and
-    // playback stays `extra` seconds further behind while some go missing.
-    let extra = 0;
+    // arrived, so a frame is ready only after its turn: it is shown late,
+    // which makes the picture jerk, or not at all. Each frame shown is
+    // checked against the play position, the frames shown are counted
+    // against the frames that arrived, and playback stays `extra` seconds
+    // further behind, by as much as the late frames needed.
+    const key = streamKey(base, stream);
+    let extra = extraLags.get(key) ?? 0;
     let arrived = 0;
     let shown = 0;
+    let late = 0;
+    // The two latest frames. One alone can be the page being busy, not the decoder.
+    let latest = 0;
+    let nextLatest = 0;
+    // The least distance behind the newest frame, which is when frames had the least time.
+    let closest = Infinity;
+    // What playback last fell back from for late frames, until the next check shows whether that helped.
+    let tried: { extra: number; late: number } | undefined;
+    let lateRestUntil = 0;
     let countedAt = Date.now();
-    const recount = () => {
+    const recount = (settle = 0) => {
       arrived = 0;
       shown = 0;
-      countedAt = Date.now();
+      late = 0;
+      latest = 0;
+      nextLatest = 0;
+      closest = Infinity;
+      countedAt = Date.now() + settle;
     };
     const counts = typeof video.requestVideoFrameCallback === "function";
-    const count = () => {
+    const count = (_now?: number, frame?: VideoFrameCallbackMetadata) => {
       if (!this.current(generation)) return;
-      shown++;
+      if (Date.now() >= countedAt) {
+        shown++;
+        // The play position has already passed a frame that is shown after its turn.
+        const by = frame && !video.paused && !video.seeking ? video.currentTime - frame.mediaTime : 0;
+        if (by > LATE_S) {
+          late++;
+          if (by > latest) [latest, nextLatest] = [by, latest];
+          else if (by > nextLatest) nextLatest = by;
+        }
+      }
       countFrame = video.requestVideoFrameCallback(count);
     };
     if (counts) countFrame = video.requestVideoFrameCallback(count);
@@ -472,14 +516,40 @@ export class Go2rtcPlayer {
       if (waiting) {
         if (lag < TARGET_LAG_S + extra) return;
         waiting = false;
-        recount();
+        recount(SETTLE_MS);
       }
       // Playback that waited, or that paused or ended at the live edge, carries on.
       if (video.paused) play(video);
       if (video.seeking) return;
+      // While the decoder catches up the play position can stand still, so the distance says nothing yet.
+      if (Date.now() >= countedAt) closest = Math.min(closest, lag);
       if (Date.now() - countedAt >= SHOWN_CHECK_MS) {
         // No count at all means the webview is not reporting frames, not that every one was late.
-        if (shown > 0 && arrived >= SHOWN_MIN_FRAMES && shown < arrived * SHOWN_RATIO) extra = Math.min(extra + LAG_STEP_S, MAX_EXTRA_LAG_S);
+        const missing = shown > 0 && arrived >= SHOWN_MIN_FRAMES && shown < arrived * SHOWN_RATIO;
+        let lateFrames = Date.now() >= lateRestUntil && late > 1 && late > shown * LATE_RATIO;
+        if (lateFrames && tried && nextLatest > tried.late / 2) {
+          // As late from further behind: something else holds the frames up,
+          // such as a busy computer, and more distance would not help.
+          extra = tried.extra;
+          extraLags.set(key, extra);
+          lateRestUntil = Date.now() + LATE_REST_MS;
+          lateFrames = false;
+        }
+        tried = undefined;
+        if (missing || lateFrames) {
+          const before = extra;
+          // Far enough behind that the late frames would have been on time.
+          const more = Math.max(lateFrames ? nextLatest + LATE_MARGIN_S : 0, missing ? LAG_STEP_S : 0);
+          extra = Math.min(Math.max(extra, closest + more - TARGET_LAG_S), MAX_EXTRA_LAG_S);
+          extraLags.set(key, extra);
+          // Playback that is closer than that waits for the stream to get ahead.
+          if (lag < TARGET_LAG_S + extra) {
+            if (lateFrames) tried = { extra: before, late: nextLatest };
+            waiting = true;
+            video.pause();
+            return;
+          }
+        }
         recount();
       }
       const now = performance.now();
@@ -491,7 +561,7 @@ export class Go2rtcPlayer {
         skippedAt = now;
         behindSince = undefined;
         video.currentTime = end - TARGET_LAG_S - extra;
-        recount();
+        recount(SETTLE_MS);
       } else if (lag < MIN_LAG_S + extra) {
         waiting = true;
         video.pause();
@@ -544,7 +614,7 @@ export class Go2rtcPlayer {
         this.retry(generation);
         return;
       }
-      arrived++;
+      if (Date.now() >= countedAt) arrived++;
       queuedBytes += chunk.byteLength;
       queue.push(chunk);
       flush();

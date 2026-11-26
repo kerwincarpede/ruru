@@ -16,6 +16,8 @@ Each tile plays over **WebRTC** first, so what you see is close to real time. Wh
 
 MSE plays at normal speed through short bursts of incoming frames. If the tile stays behind for a second, it can skip ahead to catch up. If it falls more than five seconds behind, it catches up immediately.
 
+Some computers' video decoders hold each frame back until several more have arrived. On a slow stream, such as one at 5 frames a second, that can be more than a second, and frames would reach the screen after their turn, which makes the picture jerk. When Ruru sees frames shown late, the tile pauses for a moment, once, and then plays further behind, by as much as those frames needed and at most two seconds more. Ruru remembers this for each stream for an hour, so a tile that reconnects or changes stream starts at the right distance.
+
 ## Main and sub streams
 
 Most cameras send two streams: a full-size main stream for recording and a smaller sub stream for detection. Ruru finds both from Frigate's config. A camera with only one stream uses it for both.
