@@ -905,6 +905,31 @@ describe("Go2rtcPlayer", () => {
     player.stop();
   });
 
+  it("aligns decoder startup lag once after a real frame without changing steady-state skip limits", () => {
+    const range = { start: 0, end: 0.6 };
+    const { element, player, socket, firstFrame, update } = lateFrames(() => range);
+    element.currentTime = 0.1;
+    update();
+    // Cadence alone is not enough: wait for an actual decoded frame.
+    for (let n = 0; n < 10; n++) socket.message(new ArrayBuffer(4));
+    range.end = 1;
+    update();
+    expect(element.currentTime).toBe(0.1);
+    firstFrame(0.1);
+    expect(element.currentTime).toBe(1 - TARGET_LAG_S);
+    expect(element.pause).not.toHaveBeenCalled();
+    expect(element.playbackRate).toBe(1);
+
+    // A later lag increase below the ordinary skip threshold is left alone.
+    range.end = 1.4;
+    element.currentTime = 0.6;
+    update();
+    firstFrame(0.6);
+    expect(element.currentTime).toBe(0.6);
+    expect(element.pause).not.toHaveBeenCalled();
+    player.stop();
+  });
+
   it("uses incoming media cadence for the cap when playback drops every second frame", () => {
     const range = { start: 0, end: 10 };
     const { element, player, socket, firstFrame, update } = lateFrames(() => range);

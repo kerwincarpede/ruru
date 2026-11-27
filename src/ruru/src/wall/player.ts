@@ -553,6 +553,7 @@ export class Go2rtcPlayer {
     let startedLag: number | undefined;
     let firstHoldBack: number | undefined;
     let holdBackSeeded = false;
+    let startupAligned = false;
     // A hardware decoder can hold each frame back until several more have
     // arrived, so a frame is ready only after its turn: it is shown late,
     // which makes the picture jerk, or not at all. Each frame shown is
@@ -615,6 +616,22 @@ export class Go2rtcPlayer {
       }
       counters.presented(delta);
       const mediaTime = frame && typeof frame.mediaTime === "number" && Number.isFinite(frame.mediaTime) ? frame.mediaTime : undefined;
+      // Decoder startup can add lag even when the requested target is capped.
+      // Align once after a real frame and source cadence are available; never
+      // turn this into repeated steady-state seeks or change playback speed.
+      if (!startupAligned && started && frameInterval !== undefined && mediaTime !== undefined &&
+          !video.paused && !video.seeking && video.buffered && video.buffered.length > 0) {
+        startupAligned = true;
+        const end = video.buffered.end(video.buffered.length - 1);
+        if (end - video.currentTime > maxTargetLag() + frameInterval) {
+          clampExtra();
+          video.currentTime = Math.max(video.buffered.start(video.buffered.length - 1), end - TARGET_LAG_S - extra);
+          skippedAt = performance.now();
+          counters.skipped();
+          holdBackSeeded = true;
+          recount(VIEW_REST_MS);
+        }
+      }
       // Measure first-frame decoder hold-back once playback starts, then seed start lag once frameInterval is known.
       if (!holdBackSeeded && firstHoldBack === undefined && startedLag !== undefined && video.buffered && video.buffered.length > 0) {
         const end = video.buffered.end(video.buffered.length - 1);
