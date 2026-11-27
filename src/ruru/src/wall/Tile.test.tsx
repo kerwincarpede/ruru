@@ -177,6 +177,16 @@ describe("Tile", () => {
       expect(main).not.toHaveClass("is-front");
       expect(sub).not.toHaveClass("is-retiring");
 
+      // If the incoming player reconnects, its new connection needs both frames.
+      fire(main, "error");
+      expect(FakeSocket.open()).toEqual(["cam_sub"]);
+      act(() => vi.advanceTimersByTime(retryDelay(0)));
+      expect(FakeSocket.open()).toEqual(["cam_sub", "cam"]);
+      fire(main, "playing");
+      flushFrame(main);
+      expect(sub).toHaveClass("is-front");
+      expect(main).not.toHaveClass("is-front");
+
       // Second painted frame swaps main in front and keeps sub opaque as the retiring underlay.
       flushFrame(main);
       expect(main).toHaveClass("is-front");

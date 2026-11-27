@@ -63,6 +63,8 @@ const showing = (state: PlayerState) => state === "playing" || state === "stalle
 /** One go2rtc player on `video`, running while `stream` is set and the window is live. */
 function usePlayer(video: RefObject<HTMLVideoElement | null>, base: string, stream: string | null, live: boolean, reconnect: number, onState: (state: PlayerState, player: Go2rtcPlayer) => void) {
   const [state, setState] = useState<PlayerState>("connecting");
+  const [connection, setConnection] = useState(0);
+  const connectionRef = useRef(0);
   const player = useRef<Go2rtcPlayer | null>(null);
   const report = useRef(onState);
   useEffect(() => {
@@ -76,6 +78,11 @@ function usePlayer(video: RefObject<HTMLVideoElement | null>, base: string, stre
       stream,
       video: element,
       onState: (next) => {
+        // Retry clears the video and fallback starts a fresh transport. A
+        // queued frame from the old connection cannot qualify the new one.
+        if (next === "connecting" || next === "retrying" || next === "failed") {
+          setConnection(++connectionRef.current);
+        }
         report.current(next, created);
         setState(next);
       },
@@ -88,7 +95,7 @@ function usePlayer(video: RefObject<HTMLVideoElement | null>, base: string, stre
       setState("connecting");
     };
   }, [video, base, stream, live, reconnect]);
-  return { state, player };
+  return { state, player, connection, connectionRef };
 }
 
 /**
@@ -247,8 +254,10 @@ export default function Tile({ base, camera, choice, live, maximised = false, ta
   const frontState = players[slots.front].state;
   const frontStream = slots.streams[slots.front];
   const backStream = slots.streams[back];
-  const [painted, setPainted] = useState<{ handover: number; reconnect: number } | null>(null);
-  const backReady = !hasVideoFrameCallback() || (painted?.handover === slots.handover && painted.reconnect === reconnect);
+  const { state: backState, connection, connectionRef } = players[back];
+  const [painted, setPainted] = useState<{ handover: number; reconnect: number; connection: number } | null>(null);
+  const backReady = !hasVideoFrameCallback() ||
+    (painted?.handover === slots.handover && painted.reconnect === reconnect && painted.connection === connection);
   const set = (frontNext: string | null, backNext: string | null, which = slots.front, retiring = false): Slots => {
     const streams: Slots["streams"] = which === 0 ? [frontNext, backNext] : [backNext, frontNext];
     return { front: which, streams, retiring, handover: slots.handover + 1 };
@@ -258,7 +267,7 @@ export default function Tile({ base, camera, choice, live, maximised = false, ta
     // The stream already starting out of sight takes over once two frames have
     // painted (or once playing where rVFC is missing), keeping the old video
     // opaque underneath briefly. When nothing is showing, switch at once.
-    if (backStream === target && !slots.retiring && live && showing(frontState) && players[back].state === "playing" && backReady) {
+    if (backStream === target && !slots.retiring && live && showing(frontState) && backState === "playing" && backReady) {
       next = set(target, frontStream, back, true);
     } else if (backStream === target && (!live || !showing(frontState))) {
       next = set(target, null, back, false);
@@ -276,7 +285,8 @@ export default function Tile({ base, camera, choice, live, maximised = false, ta
   }, [slots.front]);
 
   // Wait for two painted incoming frames before swapping the new stream in front.
-  const incoming = !slots.retiring && backStream !== null && backStream === target && live;
+  const incoming = !slots.retiring && backStream !== null && backStream === target && live &&
+    backState !== "retrying" && backState !== "failed";
   const backVideo = back === 0 ? videoA : videoB;
   useEffect(() => {
     if (!incoming) return;
@@ -288,10 +298,10 @@ export default function Tile({ base, camera, choice, live, maximised = false, ta
     const handover = slots.handover;
     const onFrame = () => {
       handle = null;
-      if (cancelled) return;
+      if (cancelled || connection !== connectionRef.current) return;
       frames += 1;
       if (frames >= HANDOVER_FRAMES) {
-        setPainted({ handover, reconnect });
+        setPainted({ handover, reconnect, connection });
       } else {
         handle = video.requestVideoFrameCallback(onFrame);
       }
@@ -303,7 +313,7 @@ export default function Tile({ base, camera, choice, live, maximised = false, ta
         video.cancelVideoFrameCallback(handle);
       }
     };
-  }, [incoming, backVideo, slots.handover, reconnect]);
+  }, [incoming, backVideo, slots.handover, reconnect, connection, connectionRef]);
 
   // Keep the outgoing video opaque behind the new front video for HANDOVER_RETIRE_MS,
   // then tear it down so the freshly promoted layer never flashes through.

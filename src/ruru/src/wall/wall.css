@@ -98,8 +98,20 @@
   filter: grayscale(0.6) brightness(0.45);
 }
 
-/* The same tile, drawn over the whole window. */
-.tile.is-maximised {
+/* Enlarge the grid cell during takeover, keeping the playing tile in the
+   same positioning mode. The fixed cell covers the window without clipping
+   to the scroll area. Manual maximise keeps its existing tile behaviour. */
+.wall-cell.is-takeover {
+  /* Override the grid's inline position, offsets and dimensions. */
+  position: fixed !important;
+  inset: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  z-index: 40;
+  border-radius: 0;
+}
+
+.tile.is-maximised:not(.wall-cell.is-takeover > .tile) {
   position: fixed;
   inset: 0;
   z-index: 40;
