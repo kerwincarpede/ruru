@@ -274,6 +274,27 @@ export function reportTileProblem(camera: string, problem: boolean): Promise<voi
   return invoke<void>("report_tile_problem", { camera, problem });
 }
 
+/** Mirrors `StreamPlayback` in src-tauri/src/playback.rs: one stream's playback counters for the last minute. */
+export interface StreamPlayback {
+  connections: number;
+  pausesStart: number;
+  pausesLate: number;
+  pausesMissing: number;
+  pausesClose: number;
+  skips: number;
+  arrived: number;
+  presented: number;
+  late: number;
+  worstLateMs: number;
+  lagS: number;
+  lagFrames: number;
+}
+
+/** Writes one line of playback counters to Ruru's journal. Numbers only; nothing leaves the computer. */
+export function reportPlayback(streams: StreamPlayback[]): Promise<void> {
+  return invoke<void>("report_playback", { streams });
+}
+
 /** Mirrors `WallCommand` in src-tauri/src/mqtt/commands.rs: a change Home Assistant asks the wall for. */
 export type WallCommand =
   | { kind: "maximise"; camera: string }

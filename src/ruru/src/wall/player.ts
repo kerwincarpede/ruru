@@ -1,6 +1,7 @@
 import { streamSocketUrl } from "../app/frigate";
 import { inboundVideoFrames, videoFrames, type FrameCounts } from "./diagnostics";
 import { ExpiringMap, ExpiringSet } from "./memory";
+import { openPlaybackCounter } from "./playbackLog";
 
 /**
  * A live player for one go2rtc stream, modelled on go2rtc's MIT-licensed
@@ -40,16 +41,26 @@ const MAX_PENDING_FRAGMENTS = 512;
 export const MAX_LAG_S = 1.5;
 /** A brief burst of frames can put the buffered end ahead for a few updates. */
 const LAG_GRACE_MS = 1000;
-/** MSE playback closer to the newest frame than this waits, because a frame that arrives after its turn is never shown. */
-export const MIN_LAG_S = 0.35;
+/** Minimum margin below target lag before MSE playback pauses to let the stream get ahead. */
+export const LOW_LAG_MARGIN_S = 0.15;
+/** Low-side pause margin in frame intervals, so slow streams do not pause on normal frame sawtooth. */
+export const LOW_LAG_FRAMES = 1.5;
+/** Playback must stay below the low-side pause floor this long before pausing. */
+export const LOW_LAG_GRACE_MS = 500;
 /** A skip or a wait leaves playback this far behind the newest frame, which is room for frames that arrive late. */
 export const TARGET_LAG_S = 0.5;
 /** After a skip, MSE playback is left alone this long, so a webview that lands short of the target does not skip again and again. */
 export const SKIP_REST_MS = 5000;
 /** How often MSE playback checks whether frames were shown, and shown on time. */
 export const SHOWN_CHECK_MS = 4000;
-/** After playback starts, resumes or skips, the decoder gets this long to catch up before frames are checked. */
+/** After playback resumes or skips, the decoder gets this long to catch up before frames are checked. */
 export const SETTLE_MS = 1000;
+/** After a view change or stream start, frame checks rest this long. */
+export const VIEW_REST_MS = 2000;
+/** A main-thread gap longer than this between animation frames is a hitch. */
+export const HITCH_MS = 35;
+/** Lateness readings within this window of a hitch are discarded. */
+export const HITCH_WINDOW_MS = 100;
 /** The comparison needs this many frames to mean anything. */
 export const SHOWN_MIN_FRAMES = 8;
 /** When fewer than this share of the frames that arrived were shown, playback stays further behind. */
@@ -65,6 +76,12 @@ export const LATE_REST_MS = 10 * 60 * 1000;
 /** How much further behind when frames go missing without saying how late they were, and at most. */
 export const LAG_STEP_S = 0.2;
 export const MAX_EXTRA_LAG_S = 2;
+/** Maximum target lag in frames, keeping below vah264dec's surface-pool flash ceiling. */
+export const MAX_LAG_FRAMES = 12;
+/** Clean playback duration before extra lag steps back down. */
+export const DECAY_CLEAN_MS = 5 * 60 * 1000;
+/** How much extra lag steps down after each clean period. */
+export const DECAY_STEP_S = 0.1;
 /** How long a stream's extra distance is remembered, so its next connection starts there instead of finding it again. */
 export const LAG_MEMORY_MS = 60 * 60 * 1000;
 
@@ -108,6 +125,72 @@ export function forgetFailures(): void {
 /** Forgets how far behind each stream had to play. For tests. */
 export function forgetLags(): void {
   extraLags.clear();
+}
+
+/** Active MSE players' rest callbacks; drives the shared rAF hitch tracker while non-empty. */
+const activeMse = new Set<(until: number) => void>();
+let rafId: number | null = null;
+let lastRaf: number | undefined;
+let lastHitchAt = -Infinity;
+let mseRestUntil = 0;
+let viewListeners: AbortController | null = null;
+
+function onAnimationFrame(): void {
+  rafId = null;
+  if (activeMse.size === 0) return;
+  const now = performance.now();
+  if (lastRaf !== undefined && now - lastRaf > HITCH_MS) lastHitchAt = now;
+  lastRaf = now;
+  rafId = requestAnimationFrame(onAnimationFrame);
+}
+
+/** Whether a main-thread hitch occurred within HITCH_WINDOW_MS, including one in progress before rAF fires. */
+function inHitch(now = performance.now()): boolean {
+  if (now - lastHitchAt <= HITCH_WINDOW_MS) return true;
+  if (lastRaf !== undefined && now - lastRaf > HITCH_MS) {
+    lastHitchAt = now;
+    return true;
+  }
+  return false;
+}
+
+/** Rests MSE frame-timing checks across every running player after a view change or stream start. */
+export function noteViewChange(): void {
+  if (activeMse.size === 0) return;
+  const until = Date.now() + VIEW_REST_MS;
+  if (until > mseRestUntil) mseRestUntil = until;
+  for (const rest of activeMse) rest(mseRestUntil);
+}
+
+function registerMse(rest: (until: number) => void): () => void {
+  const wasEmpty = activeMse.size === 0;
+  activeMse.add(rest);
+  if (wasEmpty) {
+    lastRaf = undefined;
+    lastHitchAt = -Infinity;
+    if (typeof requestAnimationFrame === "function") rafId = requestAnimationFrame(onAnimationFrame);
+    viewListeners = new AbortController();
+    const { signal } = viewListeners;
+    if (typeof window !== "undefined") window.addEventListener("resize", noteViewChange, { signal });
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) noteViewChange();
+      }, { signal });
+    }
+  }
+  noteViewChange();
+  return () => {
+    activeMse.delete(rest);
+    if (activeMse.size === 0) {
+      if (rafId !== null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(rafId);
+      rafId = null;
+      lastRaf = undefined;
+      lastHitchAt = -Infinity;
+      mseRestUntil = 0;
+      viewListeners?.abort();
+      viewListeners = null;
+    }
+  };
 }
 
 /**
@@ -423,13 +506,20 @@ export class Go2rtcPlayer {
     socket.binaryType = "arraybuffer";
     this.socket = socket;
 
+    const key = streamKey(base, stream);
+    const counters = openPlaybackCounter(key);
     let buffer: SourceBuffer | null = null;
     const queue: ArrayBuffer[] = [];
     let queuedBytes = 0;
     let countFrame: number | undefined;
     const listeners = new AbortController();
+    let unregisterMse = () => {};
+    let resizeObserver: ResizeObserver | undefined;
     this.disposeMse = () => {
       listeners.abort();
+      resizeObserver?.disconnect();
+      unregisterMse();
+      counters.close();
       queue.length = 0;
       if (countFrame !== undefined) video.cancelVideoFrameCallback(countFrame);
     };
@@ -445,7 +535,7 @@ export class Go2rtcPlayer {
       }
     };
     // Keep only the last few seconds, and play them at normal speed between
-    // MIN_LAG_S and MAX_LAG_S behind the newest frame. Playback that falls
+    // a safe distance behind the newest frame. Playback that falls
     // further behind, as it does after the network stalls, skips ahead once.
     // Playback that gets too close, where late frames miss their turn, waits
     // for the stream to get ahead again. The speed is never changed instead:
@@ -454,27 +544,48 @@ export class Go2rtcPlayer {
     // video, and can show a frame it has already shown.
     let skippedAt = -Infinity;
     let behindSince: number | undefined;
+    let closeSince: number | undefined;
     let waiting = true;
+    let started = false;
+    let startedLag: number | undefined;
+    let firstHoldBack: number | undefined;
+    let holdBackSeeded = false;
     // A hardware decoder can hold each frame back until several more have
     // arrived, so a frame is ready only after its turn: it is shown late,
     // which makes the picture jerk, or not at all. Each frame shown is
     // checked against the play position, the frames shown are counted
     // against the frames that arrived, and playback stays `extra` seconds
     // further behind, by as much as the late frames needed.
-    const key = streamKey(base, stream);
     let extra = extraLags.get(key) ?? 0;
+    let frameInterval: number | undefined;
+    let prevMediaTime: number | undefined;
+    let cleanSince: number | undefined;
     let arrived = 0;
     let shown = 0;
     let late = 0;
+    let lastPresented: number | undefined;
     // The two latest frames. One alone can be the page being busy, not the decoder.
     let latest = 0;
     let nextLatest = 0;
     // The least distance behind the newest frame, which is when frames had the least time.
     let closest = Infinity;
-    // What playback last fell back from for late frames, until the next check shows whether that helped.
-    let tried: { extra: number; late: number } | undefined;
+    // What playback last fell back from for late or missing frames, until the next check shows whether that helped.
+    let tried: { extra: number; late?: number; missing?: number } | undefined;
     let lateRestUntil = 0;
     let countedAt = Date.now();
+    const maxTargetLag = (interval = frameInterval) =>
+      interval === undefined
+        ? TARGET_LAG_S + MAX_EXTRA_LAG_S
+        : Math.min(TARGET_LAG_S + MAX_EXTRA_LAG_S, Math.max(TARGET_LAG_S, MAX_LAG_FRAMES * interval));
+    const maxExtraLag = (interval = frameInterval) => Math.max(0, maxTargetLag(interval) - TARGET_LAG_S);
+    const clampExtra = (interval = frameInterval) => {
+      const cap = maxExtraLag(interval);
+      if (extra > cap) {
+        extra = cap;
+        extraLags.set(key, extra);
+      }
+      return cap;
+    };
     const recount = (settle = 0) => {
       arrived = 0;
       shown = 0;
@@ -482,16 +593,83 @@ export class Go2rtcPlayer {
       latest = 0;
       nextLatest = 0;
       closest = Infinity;
-      countedAt = Date.now() + settle;
+      countedAt = Math.max(Date.now() + settle, mseRestUntil);
     };
+    unregisterMse = registerMse((until) => {
+      if (until > countedAt) recount(Math.max(0, until - Date.now()));
+    });
+    if (typeof ResizeObserver !== "undefined") {
+      let observedSize: { w: number; h: number } | undefined;
+      resizeObserver = new ResizeObserver(([entry]) => {
+        if (!entry) return;
+        const w = Math.round(entry.contentRect.width);
+        const h = Math.round(entry.contentRect.height);
+        if (observedSize && (observedSize.w !== w || observedSize.h !== h)) noteViewChange();
+        observedSize = { w, h };
+      });
+      resizeObserver.observe(video);
+    }
     const counts = typeof video.requestVideoFrameCallback === "function";
     const count = (_now?: number, frame?: VideoFrameCallbackMetadata) => {
       if (!this.current(generation)) return;
+      let delta = 1;
+      if (frame && typeof frame.presentedFrames === "number") {
+        if (lastPresented !== undefined) {
+          delta = frame.presentedFrames >= lastPresented
+            ? frame.presentedFrames - lastPresented
+            : frame.presentedFrames > 0 ? frame.presentedFrames : 1;
+        }
+        lastPresented = frame.presentedFrames;
+      }
+      counters.presented(delta);
+      const mediaTime = frame && typeof frame.mediaTime === "number" && Number.isFinite(frame.mediaTime) ? frame.mediaTime : undefined;
+      if (mediaTime !== undefined) {
+        if (prevMediaTime !== undefined && delta > 0) {
+          const dt = (mediaTime - prevMediaTime) / delta;
+          if (dt >= 0.01 && dt <= 1) {
+            frameInterval = frameInterval === undefined ? dt : frameInterval * 0.8 + dt * 0.2;
+            clampExtra();
+          }
+        }
+        prevMediaTime = mediaTime;
+      }
+      // Measure first-frame decoder hold-back once playback starts, then seed start lag once frameInterval is known.
+      if (!holdBackSeeded && firstHoldBack === undefined && startedLag !== undefined && video.buffered && video.buffered.length > 0) {
+        const end = video.buffered.end(video.buffered.length - 1);
+        const firstLag = end - (mediaTime ?? video.currentTime);
+        if (firstLag - startedLag > LATE_S && firstLag > TARGET_LAG_S + extra + LATE_S) {
+          firstHoldBack = firstLag;
+        } else {
+          holdBackSeeded = true;
+        }
+      }
+      if (!holdBackSeeded && firstHoldBack !== undefined && frameInterval !== undefined) {
+        holdBackSeeded = true;
+        const seededTarget = Math.min(maxTargetLag(), firstHoldBack + LATE_MARGIN_S);
+        const seededExtra = Math.max(extra, seededTarget - TARGET_LAG_S);
+        if (seededExtra > extra) {
+          extra = seededExtra;
+          extraLags.set(key, extra);
+          cleanSince = Date.now();
+          if (video.buffered && video.buffered.length > 0 && !waiting && !video.seeking) {
+            const lag = video.buffered.end(video.buffered.length - 1) - video.currentTime;
+            if (lag < TARGET_LAG_S + extra) {
+              waiting = true;
+              closeSince = undefined;
+              cleanSince = undefined;
+              counters.paused("start");
+              video.pause();
+            }
+          }
+        }
+      }
       if (Date.now() >= countedAt) {
-        shown++;
+        shown += delta;
         // The play position has already passed a frame that is shown after its turn.
-        const by = frame && !video.paused && !video.seeking ? video.currentTime - frame.mediaTime : 0;
+        // Discard lateness within HITCH_WINDOW_MS of a main-thread rAF hitch.
+        const by = frame && !video.paused && !video.seeking && !inHitch() ? video.currentTime - frame.mediaTime : 0;
         if (by > LATE_S) {
+          counters.late(by);
           late++;
           if (by > latest) [latest, nextLatest] = [by, latest];
           else if (by > nextLatest) nextLatest = by;
@@ -512,11 +690,17 @@ export class Go2rtcPlayer {
           // Trimming is housekeeping; the next update tries again.
         }
       }
+      clampExtra();
       const lag = end - video.currentTime;
+      counters.lag(lag, frameInterval);
       if (waiting) {
         if (lag < TARGET_LAG_S + extra) return;
         waiting = false;
-        recount(SETTLE_MS);
+        const settle = started ? SETTLE_MS : VIEW_REST_MS;
+        if (!started) startedLag = lag;
+        started = true;
+        if (extra > 0 && cleanSince === undefined) cleanSince = Date.now();
+        recount(settle);
       }
       // Playback that waited, or that paused or ended at the live edge, carries on.
       if (video.paused) play(video);
@@ -524,35 +708,73 @@ export class Go2rtcPlayer {
       // While the decoder catches up the play position can stand still, so the distance says nothing yet.
       if (Date.now() >= countedAt) closest = Math.min(closest, lag);
       if (Date.now() - countedAt >= SHOWN_CHECK_MS) {
+        const elapsedS = (Date.now() - countedAt) / 1000;
+        const effectiveInterval =
+          frameInterval ?? (arrived >= SHOWN_MIN_FRAMES && elapsedS > 0 ? Math.min(1, Math.max(0.01, elapsedS / arrived)) : undefined);
+        const capExtra = clampExtra(effectiveInterval);
+        holdBackSeeded = true;
+        const adaptReady = Date.now() >= lateRestUntil;
+        const missingRatio = arrived > 0 ? Math.max(0, 1 - shown / arrived) : 0;
         // No count at all means the webview is not reporting frames, not that every one was late.
-        const missing = shown > 0 && arrived >= SHOWN_MIN_FRAMES && shown < arrived * SHOWN_RATIO;
-        let lateFrames = Date.now() >= lateRestUntil && late > 1 && late > shown * LATE_RATIO;
-        if (lateFrames && tried && nextLatest > tried.late / 2) {
-          // As late from further behind: something else holds the frames up,
+        const missingFrames = shown > 0 && arrived >= SHOWN_MIN_FRAMES && shown < arrived * SHOWN_RATIO;
+        const genuinelyLate = late > 1 && late > shown * LATE_RATIO;
+        let missing = adaptReady && missingFrames;
+        let lateFrames = adaptReady && genuinelyLate;
+        const unhelped =
+          tried !== undefined &&
+          ((lateFrames && tried.late !== undefined && nextLatest > tried.late / 2) ||
+            (missing && tried.missing !== undefined && missingRatio > tried.missing / 2));
+        if (unhelped && tried) {
+          // As late or missing from further behind: something else holds the frames up,
           // such as a busy computer, and more distance would not help.
-          extra = tried.extra;
+          extra = Math.min(tried.extra, capExtra);
           extraLags.set(key, extra);
           lateRestUntil = Date.now() + LATE_REST_MS;
           lateFrames = false;
+          missing = false;
+          cleanSince = undefined;
         }
         tried = undefined;
         if (missing || lateFrames) {
+          cleanSince = undefined;
           const before = extra;
           // Far enough behind that the late frames would have been on time.
           const more = Math.max(lateFrames ? nextLatest + LATE_MARGIN_S : 0, missing ? LAG_STEP_S : 0);
-          extra = Math.min(Math.max(extra, closest + more - TARGET_LAG_S), MAX_EXTRA_LAG_S);
+          extra = Math.min(Math.max(extra, closest + more - TARGET_LAG_S), capExtra);
           extraLags.set(key, extra);
           // Playback that is closer than that waits for the stream to get ahead.
-          if (lag < TARGET_LAG_S + extra) {
-            if (lateFrames) tried = { extra: before, late: nextLatest };
+          if (lag < TARGET_LAG_S + extra && (extra > before || lag < TARGET_LAG_S + extra - LATE_S)) {
+            tried = {
+              extra: before,
+              ...(lateFrames ? { late: nextLatest } : {}),
+              ...(missing ? { missing: missingRatio } : {}),
+            };
             waiting = true;
+            closeSince = undefined;
+            counters.paused(lateFrames ? "late" : "missing");
             video.pause();
             return;
           }
+        } else if (!missingFrames && !genuinelyLate && shown > 0) {
+          if (extra > 0) {
+            if (cleanSince === undefined) cleanSince = Date.now();
+            else if (Date.now() - cleanSince >= DECAY_CLEAN_MS) {
+              extra = Math.max(0, +(extra - DECAY_STEP_S).toFixed(4));
+              extraLags.set(key, extra);
+              cleanSince = extra > 0 ? Date.now() : undefined;
+            }
+          } else {
+            cleanSince = undefined;
+          }
+        } else {
+          cleanSince = undefined;
         }
         recount();
       }
       const now = performance.now();
+      const target = TARGET_LAG_S + extra;
+      const lowMargin = Math.max(LOW_LAG_MARGIN_S, LOW_LAG_FRAMES * (frameInterval ?? 0));
+      const pauseFloor = Math.max(0, target - lowMargin);
       behindSince = lag > MAX_LAG_S + extra ? (behindSince ?? now) : undefined;
       const sustained = behindSince !== undefined && now - behindSince >= LAG_GRACE_MS;
       const rested = now - skippedAt >= SKIP_REST_MS;
@@ -560,15 +782,27 @@ export class Go2rtcPlayer {
       if (lag > KEEP_S || (sustained && rested)) {
         skippedAt = now;
         behindSince = undefined;
-        video.currentTime = end - TARGET_LAG_S - extra;
+        closeSince = undefined;
+        cleanSince = undefined;
+        counters.skipped();
+        video.currentTime = end - target;
         recount(SETTLE_MS);
-      } else if (lag < MIN_LAG_S + extra) {
-        waiting = true;
-        video.pause();
+      } else if (lag < pauseFloor) {
+        closeSince ??= now;
+        if (now - closeSince >= LOW_LAG_GRACE_MS) {
+          closeSince = undefined;
+          cleanSince = undefined;
+          waiting = true;
+          counters.paused("close");
+          video.pause();
+        }
+      } else {
+        closeSince = undefined;
       }
     };
 
     socket.onopen = () => {
+      counters.connected();
       socket.send(JSON.stringify({ type: "mse", value: supportedMseCodecs((type) => MediaSource.isTypeSupported(type)) }));
     };
     socket.onmessage = (event: MessageEvent) => {
@@ -614,7 +848,11 @@ export class Go2rtcPlayer {
         this.retry(generation);
         return;
       }
-      if (Date.now() >= countedAt) arrived++;
+      // The initial MP4 header supplies metadata rather than a frame.
+      if (chunk.byteLength < 8 || new DataView(chunk).getUint32(4) !== 0x66747970 /* ftyp */) {
+        counters.arrived();
+        if (Date.now() >= countedAt) arrived++;
+      }
       queuedBytes += chunk.byteLength;
       queue.push(chunk);
       flush();

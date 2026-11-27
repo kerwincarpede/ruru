@@ -1,13 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { forgetPlayback } from "./playbackLog";
 import {
+  DECAY_CLEAN_MS,
+  DECAY_STEP_S,
   DECODE_FAILURES,
   FAILURE_MEMORY_MS,
   Go2rtcPlayer,
+  HITCH_MS,
+  HITCH_WINDOW_MS,
   KEEP_S,
   LAG_MEMORY_MS,
   LAG_STEP_S,
   LATE_MARGIN_S,
   LATE_REST_MS,
+  LOW_LAG_GRACE_MS,
+  MAX_LAG_FRAMES,
   MAX_PENDING_BYTES,
   RETRY_MAX_MS,
   SETTLE_MS,
@@ -17,10 +24,12 @@ import {
   STALL_CHECK_MS,
   STALL_MS,
   TARGET_LAG_S,
+  VIEW_REST_MS,
   WEBRTC_TIMEOUT_MS,
   forgetFailures,
   forgetLags,
   isUndecodable,
+  noteViewChange,
   retryDelay,
   supportedMseCodecs,
   type PlayerState,
@@ -201,6 +210,7 @@ describe("Go2rtcPlayer", () => {
   });
 
   afterEach(() => {
+    forgetPlayback();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
@@ -697,8 +707,11 @@ describe("Go2rtcPlayer", () => {
     expect(element.pause).not.toHaveBeenCalled();
     expect(element.playbackRate).toBe(1);
 
-    // Too close to the newest frame: it waits for the stream to get ahead.
+    // Too close to the newest frame: a brief dip rides out the grace, then it waits for the stream to get ahead.
     element.currentTime = 31.9;
+    update();
+    expect(element.pause).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(LOW_LAG_GRACE_MS);
     update();
     expect(element.pause).toHaveBeenCalledTimes(1);
     element.paused = true;
@@ -746,9 +759,9 @@ describe("Go2rtcPlayer", () => {
   it("stays further behind the live edge while frames arrive but are not shown", () => {
     const element = video();
     element.cancelVideoFrameCallback = vi.fn();
-    let frame: (() => void) | null = null;
+    let frame: VideoFrameRequestCallback | undefined;
     element.requestVideoFrameCallback = (callback) => {
-      frame = callback as unknown as () => void;
+      frame = callback;
       return 1;
     };
     // The picture keeps moving, so the watchdog leaves the stream alone.
@@ -756,17 +769,22 @@ describe("Go2rtcPlayer", () => {
     countFrames(element, () => ++decoded);
     let range = { start: 5, end: 10 };
     const { player, socket, update } = mse(element, () => range);
+    let presentedFrames = 0;
     const play = (arrived: number, shown: number) => {
       for (let i = 0; i < arrived; i++) socket.message(new ArrayBuffer(4));
-      for (let i = 0; i < shown; i++) (frame as unknown as () => void)();
+      if (shown > 0) {
+        frame?.(0, { presentedFrames: ++presentedFrames } as VideoFrameCallbackMetadata);
+        presentedFrames += shown - 1;
+        frame?.(0, { presentedFrames } as VideoFrameCallbackMetadata);
+      }
       vi.advanceTimersByTime(SHOWN_CHECK_MS);
       update();
     };
     element.currentTime = 10 - TARGET_LAG_S;
     update();
-    vi.advanceTimersByTime(SETTLE_MS);
+    vi.advanceTimersByTime(VIEW_REST_MS);
 
-    // Every frame shown: playback stays where it is.
+    // Every frame shown, including those between callbacks: playback stays where it is.
     play(20, 20);
     expect(element.pause).not.toHaveBeenCalled();
     // A webview that reports no frames at all says nothing about late ones.
@@ -783,6 +801,11 @@ describe("Go2rtcPlayer", () => {
     range = { start: 5, end: 10.01 + LAG_STEP_S };
     update();
     expect(element.play).toHaveBeenCalledTimes(1);
+    element.paused = false;
+    vi.advanceTimersByTime(SETTLE_MS);
+    play(20, 10);
+    play(20, 10);
+    expect(element.pause).toHaveBeenCalledTimes(1);
     player.stop();
   });
 
@@ -809,9 +832,94 @@ describe("Go2rtcPlayer", () => {
       vi.advanceTimersByTime(SHOWN_CHECK_MS);
       update();
     };
-    return { element, player, update, play };
+    const firstFrame = (mediaTime: number) => frame?.(0, { mediaTime } as VideoFrameCallbackMetadata);
+    return { element, player, update, play, firstFrame };
   }
   const onTime = (count: number) => Array.from({ length: count }, () => 0.016);
+
+  it("ignores lateness while a view settles", () => {
+    const { element, player, update, play } = lateFrames(() => ({ start: 5, end: 10 }));
+    element.currentTime = 10 - TARGET_LAG_S;
+    update();
+    vi.advanceTimersByTime(VIEW_REST_MS);
+    noteViewChange();
+    const late = [...onTime(17), 0.2, 0.2, 0.2];
+    play(late);
+    expect(element.pause).not.toHaveBeenCalled();
+    play(late);
+    expect(element.pause).toHaveBeenCalledTimes(1);
+    player.stop();
+  });
+
+  it("ignores late samples in the window after an animation hitch", () => {
+    let tick: FrameRequestCallback | undefined;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      tick = callback;
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const { element, player, update, play } = lateFrames(() => ({ start: 5, end: 10 }));
+    element.currentTime = 10 - TARGET_LAG_S;
+    update();
+    vi.advanceTimersByTime(VIEW_REST_MS);
+    tick?.(performance.now());
+    vi.advanceTimersByTime(HITCH_MS + 1);
+    tick?.(performance.now());
+    vi.advanceTimersByTime(HITCH_WINDOW_MS - 1);
+    play([...onTime(17), 0.2, 0.2, 0.2]);
+    expect(element.pause).not.toHaveBeenCalled();
+    player.stop();
+  });
+
+  it("caps a first-frame hold-back at twelve measured frame intervals", () => {
+    const interval = 0.1;
+    const cap = MAX_LAG_FRAMES * interval;
+    const range = { start: 0, end: 5 };
+    const { element, player, firstFrame, update } = lateFrames(() => range);
+    element.currentTime = 5 - TARGET_LAG_S;
+    update();
+
+    // The decoder's first frame is more than twelve frames behind.
+    range.end = 6;
+    firstFrame(4.5);
+    element.currentTime = 5;
+    firstFrame(4.5 + interval);
+    expect(element.pause).toHaveBeenCalledTimes(1);
+    element.paused = true;
+    range.end = 5 + cap - 0.01;
+    update();
+    expect(element.play).not.toHaveBeenCalled();
+    range.end = 5 + cap + 0.01;
+    update();
+    expect(element.play).toHaveBeenCalledTimes(1);
+    expect(element.playbackRate).toBe(1);
+    player.stop();
+  });
+
+  it("decays extra lag after five minutes of clean frames", () => {
+    const lateBy = 0.2;
+    const range = { start: 0, end: 10 };
+    const { element, player, update, play } = lateFrames(() => range);
+    element.currentTime = 10 - TARGET_LAG_S;
+    update();
+    vi.advanceTimersByTime(VIEW_REST_MS);
+    play([...onTime(17), lateBy, lateBy, lateBy]);
+    expect(element.pause).toHaveBeenCalledTimes(1);
+    const target = TARGET_LAG_S + lateBy + LATE_MARGIN_S;
+    range.end = element.currentTime + target + 0.01;
+    update();
+    vi.advanceTimersByTime(SETTLE_MS);
+    for (let time = 0; time <= DECAY_CLEAN_MS; time += SHOWN_CHECK_MS) {
+      play(onTime(20));
+    }
+    player.stop();
+
+    const next = lateFrames(() => ({ start: 0, end: target - DECAY_STEP_S / 2 }));
+    next.element.paused = true;
+    next.update();
+    expect(next.element.play).toHaveBeenCalledTimes(1);
+    next.player.stop();
+  });
 
   it("stays behind by as much as frames shown late needed", () => {
     let range = { start: 5, end: 10 };
@@ -856,7 +964,7 @@ describe("Go2rtcPlayer", () => {
     element.currentTime = 10 - TARGET_LAG_S;
     update();
     // The play position stood still while the first frames were decoded: playback is really 1 s behind.
-    vi.advanceTimersByTime(SETTLE_MS);
+    vi.advanceTimersByTime(VIEW_REST_MS);
     range = { start: 5, end: 10.5 };
     play([...onTime(17), 0.2, 0.2, 0.2]);
     expect(element.pause).toHaveBeenCalledTimes(1);
@@ -875,7 +983,7 @@ describe("Go2rtcPlayer", () => {
     const { element, player, update, play } = lateFrames(() => range);
     element.currentTime = 10 - TARGET_LAG_S;
     update();
-    vi.advanceTimersByTime(SETTLE_MS);
+    vi.advanceTimersByTime(VIEW_REST_MS);
     const late = [...onTime(17), 0.2, 0.2, 0.2];
     play(late);
     expect(element.pause).toHaveBeenCalledTimes(1);
@@ -900,7 +1008,7 @@ describe("Go2rtcPlayer", () => {
     next.element.paused = false;
 
     // A new connection looks at late frames afresh.
-    vi.advanceTimersByTime(SETTLE_MS);
+    vi.advanceTimersByTime(VIEW_REST_MS);
     next.play(late);
     expect(next.element.pause).toHaveBeenCalledTimes(1);
     next.player.stop();
@@ -911,7 +1019,7 @@ describe("Go2rtcPlayer", () => {
     const { element, player, update, play } = lateFrames(() => range);
     element.currentTime = 10 - TARGET_LAG_S;
     update();
-    vi.advanceTimersByTime(SETTLE_MS);
+    vi.advanceTimersByTime(VIEW_REST_MS);
     const late = [...onTime(17), 0.2, 0.2, 0.2];
     play(late);
     element.paused = true;
@@ -934,7 +1042,7 @@ describe("Go2rtcPlayer", () => {
     const first = lateFrames(() => range);
     first.element.currentTime = 10 - TARGET_LAG_S;
     first.update();
-    vi.advanceTimersByTime(SETTLE_MS);
+    vi.advanceTimersByTime(VIEW_REST_MS);
     first.play([...onTime(17), 0.2, 0.2, 0.2]);
     expect(first.element.pause).toHaveBeenCalledTimes(1);
     first.player.stop();
