@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Camera } from "../app/frigate";
 import { forgetFailures, retryDelay, STALE_MS, STALL_CHECK_MS, STALL_MS } from "./player";
 import { AUTO_SETTLE_MS, forgetWidths } from "./streams";
-import Tile, { KEEP_FROZEN_MS, PROBLEM_AFTER_MS } from "./Tile";
+import Tile, { HANDOVER_RETIRE_MS, KEEP_FROZEN_MS, PROBLEM_AFTER_MS } from "./Tile";
 
 class FakeSocket {
   static all: FakeSocket[] = [];
@@ -70,7 +70,10 @@ beforeEach(() => {
   vi.stubGlobal("WebSocket", FakeSocket);
   vi.stubGlobal("MediaSource", FakeMediaSource);
   vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:source", revokeObjectURL: () => {} }));
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    drawImage: vi.fn(),
+    getImageData: vi.fn(() => ({ data: new Uint8ClampedArray([128, 128, 128, 255]) })),
+  } as unknown as CanvasRenderingContext2D);
   HTMLMediaElement.prototype.play = vi.fn().mockResolvedValue(undefined);
 });
 
@@ -104,7 +107,7 @@ describe("Tile", () => {
     expect(FakeSocket.open()).toEqual([]);
   });
 
-  it("keeps showing the current stream until the new one shows a frame", () => {
+  it("keeps showing the current stream until the new one shows a frame, then retires it briefly", () => {
     const { rerender } = render(<Tile base={base} camera={camera} live />);
     fire(videoFor("cam_sub"), "playing");
     expect(screen.getByRole("figure")).toHaveClass("is-playing");
@@ -115,14 +118,163 @@ describe("Tile", () => {
     expect(videoFor("cam_sub")).toHaveClass("is-front");
     expect(screen.getByRole("figure")).toHaveClass("is-playing");
     fire(videoFor("cam"), "playing");
-    expect(FakeSocket.open()).toEqual(["cam"]);
     expect(videoFor("cam")).toHaveClass("is-front");
+    expect(videoFor("cam_sub")).toHaveClass("is-retiring");
+    expect(FakeSocket.open()).toEqual(["cam_sub", "cam"]);
+    act(() => vi.advanceTimersByTime(HANDOVER_RETIRE_MS - 1));
+    expect(videoFor("cam_sub")).toHaveClass("is-retiring");
+    act(() => vi.advanceTimersByTime(1));
+    expect(FakeSocket.open()).toEqual(["cam"]);
+    expect(document.querySelector("video.is-retiring")).toBeNull();
 
     // Back on the wall, the main stream plays until the sub stream is back.
     rerender(<Tile base={base} camera={camera} live />);
     expect(FakeSocket.open()).toEqual(["cam", "cam_sub"]);
     fire(videoFor("cam_sub"), "playing");
+    expect(videoFor("cam_sub")).toHaveClass("is-front");
+    expect(videoFor("cam")).toHaveClass("is-retiring");
+    act(() => vi.advanceTimersByTime(HANDOVER_RETIRE_MS));
     expect(FakeSocket.open()).toEqual(["cam_sub"]);
+  });
+
+  it("waits for two requestVideoFrameCallback frames before swapping streams and retires the outgoing video", () => {
+    const pending = new Map<HTMLVideoElement, Map<number, VideoFrameRequestCallback>>();
+    let nextId = 1;
+    const cancel = vi.fn(function (this: HTMLVideoElement, id: number) {
+      pending.get(this)?.delete(id);
+    });
+    const originalRequest = HTMLVideoElement.prototype.requestVideoFrameCallback;
+    const originalCancel = HTMLVideoElement.prototype.cancelVideoFrameCallback;
+    HTMLVideoElement.prototype.requestVideoFrameCallback = function (callback: VideoFrameRequestCallback) {
+      const id = nextId++;
+      const map = pending.get(this) ?? new Map<number, VideoFrameRequestCallback>();
+      map.set(id, callback);
+      pending.set(this, map);
+      return id;
+    };
+    HTMLVideoElement.prototype.cancelVideoFrameCallback = cancel;
+    const flushFrame = (video: HTMLVideoElement) => {
+      const entries = [...(pending.get(video)?.entries() ?? [])];
+      pending.get(video)?.clear();
+      act(() => {
+        for (const [, callback] of entries) callback(0, {} as VideoFrameCallbackMetadata);
+      });
+    };
+
+    try {
+      const { rerender } = render(<Tile base={base} camera={camera} live />);
+      const sub = videoFor("cam_sub");
+      fire(sub, "playing");
+      flushFrame(sub);
+      expect(screen.getByRole("figure")).toHaveClass("is-playing");
+
+      rerender(<Tile base={base} camera={camera} live maximised />);
+      const main = videoFor("cam");
+      fire(main, "playing");
+      // One frame makes the player report playing, but the handover waits for a second painted frame.
+      flushFrame(main);
+      expect(sub).toHaveClass("is-front");
+      expect(main).not.toHaveClass("is-front");
+      expect(sub).not.toHaveClass("is-retiring");
+
+      // If the incoming player reconnects, its new connection needs both frames.
+      fire(main, "error");
+      expect(FakeSocket.open()).toEqual(["cam_sub"]);
+      act(() => vi.advanceTimersByTime(retryDelay(0)));
+      expect(FakeSocket.open()).toEqual(["cam_sub", "cam"]);
+      fire(main, "playing");
+      flushFrame(main);
+      expect(sub).toHaveClass("is-front");
+      expect(main).not.toHaveClass("is-front");
+
+      // Second painted frame swaps main in front and keeps sub opaque as the retiring underlay.
+      flushFrame(main);
+      expect(main).toHaveClass("is-front");
+      expect(sub).not.toHaveClass("is-front");
+      expect(sub).toHaveClass("is-retiring");
+      expect(FakeSocket.open()).toEqual(["cam_sub", "cam"]);
+
+      act(() => vi.advanceTimersByTime(HANDOVER_RETIRE_MS));
+      expect(sub).not.toHaveClass("is-retiring");
+      expect(FakeSocket.open()).toEqual(["cam"]);
+
+      // Changing back mid-handover cancels the pending callback cleanly.
+      rerender(<Tile base={base} camera={camera} live />);
+      flushFrame(videoFor("cam_sub"));
+      rerender(<Tile base={base} camera={camera} live maximised />);
+      expect(cancel).toHaveBeenCalled();
+      expect(main).toHaveClass("is-front");
+
+      // Going hidden clears a retiring underlay immediately.
+      rerender(<Tile base={base} camera={camera} live />);
+      const subAgain = videoFor("cam_sub");
+      fire(subAgain, "playing");
+      flushFrame(subAgain);
+      flushFrame(subAgain);
+      expect(main).toHaveClass("is-retiring");
+      rerender(<Tile base={base} camera={camera} live={false} />);
+      expect(main).not.toHaveClass("is-retiring");
+    } finally {
+      HTMLVideoElement.prototype.requestVideoFrameCallback = originalRequest;
+      HTMLVideoElement.prototype.cancelVideoFrameCallback = originalCancel;
+    }
+  });
+
+  it("shows the owl at once when the frozen-frame canvas draws transparent", () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      drawImage: vi.fn(),
+      getImageData: vi.fn(() => ({ data: new Uint8ClampedArray([0, 0, 0, 0]) })),
+    } as unknown as CanvasRenderingContext2D);
+    render(<Tile base={base} camera={camera} live />);
+    withPicture(videoFor("cam_sub"));
+    fire(videoFor("cam_sub"), "playing");
+    const figure = screen.getByRole("figure");
+    act(() => vi.advanceTimersByTime(STALL_MS));
+    expect(figure).toHaveClass("is-reconnecting", "is-lost");
+    expect(figure).toHaveTextContent("Reconnecting…");
+    expect(figure.querySelector("figcaption")).toHaveTextContent(/^Cam$/);
+    const canvas = figure.querySelector("canvas")!;
+    expect(canvas).not.toHaveClass("is-shown");
+    expect([canvas.width, canvas.height]).toEqual([0, 0]);
+  });
+
+  it("keeps the saved-layout stream during takeovers and uses window width only for manual maximise", () => {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const onAutomatic = vi.fn();
+    const { rerender } = render(<Tile base={base} camera={camera} live savedWidth={400} onAutomatic={onAutomatic} />);
+    expect(onAutomatic).toHaveBeenLastCalledWith("sub");
+    expect(FakeSocket.open()).toEqual(["cam_sub"]);
+    fire(window, "resize");
+    expect(onAutomatic).toHaveBeenLastCalledWith("sub");
+
+    // A Dynamic wall takeover fills the window visually without switching Automatic to main.
+    rerender(<Tile base={base} camera={camera} live maximised takeover savedWidth={400} onAutomatic={onAutomatic} />);
+    expect(screen.getByRole("figure")).toHaveClass("is-maximised");
+    expect(onAutomatic).toHaveBeenLastCalledWith("sub");
+    expect(FakeSocket.open()).toEqual(["cam_sub"]);
+
+    // Manual maximise uses the window width and switches Automatic to main.
+    rerender(<Tile base={base} camera={camera} live maximised savedWidth={400} onAutomatic={onAutomatic} />);
+    expect(onAutomatic).toHaveBeenLastCalledWith("main");
+  });
+
+  it("waits for the saved-layout width to settle before switching Automatic streams", () => {
+    const onAutomatic = vi.fn();
+    const props = { base, camera, live: true, onAutomatic };
+    const { rerender } = render(<Tile {...props} savedWidth={400} />);
+    expect(FakeSocket.open()).toEqual(["cam_sub"]);
+
+    rerender(<Tile {...props} savedWidth={1000} />);
+    act(() => vi.advanceTimersByTime(AUTO_SETTLE_MS - 1));
+    expect(FakeSocket.open()).toEqual(["cam_sub"]);
+    rerender(<Tile {...props} savedWidth={400} />);
+    act(() => vi.advanceTimersByTime(AUTO_SETTLE_MS));
+    expect(FakeSocket.open()).toEqual(["cam_sub"]);
+
+    rerender(<Tile {...props} savedWidth={1000} />);
+    act(() => vi.advanceTimersByTime(AUTO_SETTLE_MS));
+    expect(onAutomatic).toHaveBeenLastCalledWith("main");
+    expect(FakeSocket.open()).toEqual(["cam"]);
   });
 
   it("dims a frozen picture and says how old it is", () => {

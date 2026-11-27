@@ -1,13 +1,17 @@
-import { render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import type { CSSProperties, ReactNode, Ref } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { Camera } from "../app/frigate";
 import type { GridItem } from "./layout";
+import type { StreamKind } from "./streams";
 import { automaticHeroItems, customHeroItems } from "./dynamic";
-import { toGridItems, wallPlacements } from "./layout";
+import { fitWidth, gridHeight, gridRows, toGridItems, wallPlacements } from "./layout";
 import Wall from "./Wall";
 
 type GridProps = {
+  width: number;
+  style: CSSProperties;
+  innerRef: Ref<HTMLDivElement>;
   children: ReactNode;
   layout: GridItem[];
   compactType: "vertical" | null;
@@ -25,7 +29,7 @@ const grid = vi.hoisted(() => ({ props: null as GridProps | null }));
 vi.mock("react-grid-layout", () => ({
   default: (props: GridProps) => {
     grid.props = props;
-    return <div>{props.children}</div>;
+    return <div ref={props.innerRef} style={props.style}>{props.children}</div>;
   },
 }));
 
@@ -92,6 +96,116 @@ describe("Wall", () => {
     rerender(<Wall {...props} layout={undefined} />);
     expect(grid.props?.layout).toEqual(saved);
     expect(grid.props?.compactType).toBe("vertical");
+  });
+
+  it("keeps the wall container constant across overview and heroes without toggling is-fit", () => {
+    const names = Array.from({ length: 10 }, (_, index) => `cam${index}`);
+    const props = { base: "http://f", cameras: names.map(camera), live: false, editing: false, refresh: 0, onLayout: vi.fn() };
+    const { rerender } = render(<Wall {...props} layout={undefined} fitToWindow={false} />);
+    const wall = screen.getAllByRole("figure")[0].closest(".wall") as HTMLElement;
+    const fitted = wall.firstElementChild as HTMLElement;
+    expect(wall).not.toHaveClass("is-fit", "is-dynamic", "is-editing");
+    expect(fitted.style.width).toBe(`${window.innerWidth}px`);
+    expect(grid.props?.width).toBe(window.innerWidth);
+    const overviewHeight = gridHeight(window.innerWidth, gridRows(toGridItems(wallPlacements(names, undefined))));
+    expect(fitted.style.height).toBe(`${overviewHeight}px`);
+    rerender(<Wall {...props} layout={undefined} fitToWindow={false} dynamic={{ kind: "heroes", heroes: ["cam4"] }} />);
+    expect(wall).not.toHaveClass("is-fit");
+    expect(wall).toHaveClass("is-dynamic");
+    expect(fitted.style.width).toBe(`${window.innerWidth}px`);
+    expect(fitted.firstElementChild).toHaveStyle({ width: `${grid.props?.width}px` });
+    expect(fitted.style.height).toBe(`${overviewHeight}px`);
+    rerender(<Wall {...props} layout={undefined} fitToWindow dynamic={{ kind: "overview" }} />);
+    expect(wall).not.toHaveClass("is-fit", "is-dynamic");
+    const items = toGridItems(wallPlacements(names, undefined));
+    const expected = fitWidth(window.innerWidth, window.innerHeight, gridRows(items));
+    expect(fitted.style.width).toBe(`${expected}px`);
+    expect(grid.props?.width).toBe(expected);
+    expect(fitted.style.height).toBe(`${gridHeight(expected, gridRows(items))}px`);
+  });
+
+  it("keeps the active hero layout underneath a takeover", () => {
+    const names = Array.from({ length: 10 }, (_, index) => `cam${index}`);
+    const size = { width: window.innerWidth, height: window.innerHeight };
+    const props = { base: "http://f", cameras: names.map(camera), live: false, editing: false, refresh: 0, onLayout: vi.fn() };
+    const heroLayout = automaticHeroItems(names, ["cam4", "cam8"], size);
+    const { rerender } = render(<Wall {...props} layout={undefined} dynamic={{ kind: "heroes", heroes: ["cam4", "cam8"] }} />);
+    expect(grid.props?.layout).toEqual(heroLayout);
+
+    rerender(<Wall {...props} layout={undefined} dynamic={{ kind: "takeover", camera: "cam4", heroes: ["cam4", "cam8"] }} />);
+    expect(grid.props?.layout).toEqual(heroLayout);
+    expect(grid.props?.compactType).toBeNull();
+    const cam4 = screen.getByRole("figure", { name: "Cam4" });
+    expect(cam4).toHaveClass("is-maximised");
+    expect(cam4.parentElement).toHaveClass("is-takeover", "is-maximised", "is-hero");
+
+    // A takeover with no active heroes leaves the saved overview layout underneath.
+    rerender(<Wall {...props} layout={undefined} dynamic={{ kind: "takeover", camera: "cam4", heroes: [] }} />);
+    expect(grid.props?.layout).toEqual(toGridItems(wallPlacements(names, undefined)));
+    expect(grid.props?.compactType).toBe("vertical");
+    expect(cam4).toHaveClass("is-maximised");
+    expect(cam4.parentElement).toHaveClass("is-takeover");
+  });
+
+  it("keeps the same takeover cell over the visible wall as the wall scrolls and resizes", () => {
+    const props = { base: "http://f", cameras: [camera("a"), camera("b")], live: false, editing: false, layout: undefined, refresh: 0, onLayout: vi.fn() };
+    const { rerender } = render(<Wall {...props} />);
+    const tile = screen.getByRole("figure", { name: "A" });
+    const cell = tile.parentElement!;
+    const layoutGrid = cell.parentElement!;
+    const wall = tile.closest(".wall")!;
+    let viewportWidth = 900;
+    let scroll = 60;
+    Object.defineProperties(wall, {
+      clientWidth: { get: () => viewportWidth },
+      clientHeight: { value: 600 },
+    });
+    vi.spyOn(wall, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 24, 900, 600));
+    vi.spyOn(layoutGrid, "getBoundingClientRect").mockImplementation(() => new DOMRect(30, 24 - scroll, 840, 1000));
+    rerender(<Wall {...props} dynamic={{ kind: "takeover", camera: "a", heroes: [] }} />);
+    expect(screen.getByRole("figure", { name: "A" }).parentElement).toBe(cell);
+    expect(cell.style.getPropertyValue("--takeover-left")).toBe("-30px");
+    expect(cell.style.getPropertyValue("--takeover-top")).toBe("60px");
+    expect(cell.style.getPropertyValue("--takeover-width")).toBe("900px");
+    expect(cell.style.getPropertyValue("--takeover-height")).toBe("600px");
+
+    scroll = 120;
+    fireEvent.scroll(wall);
+    expect(cell.style.getPropertyValue("--takeover-top")).toBe("120px");
+    viewportWidth = 1000;
+    fireEvent.resize(window);
+    expect(cell.style.getPropertyValue("--takeover-width")).toBe("1000px");
+
+    rerender(<Wall {...props} />);
+    expect(cell.style.getPropertyValue("--takeover-width")).toBe("");
+  });
+
+  it("picks Automatic streams from the saved layout during heroes and takeovers, and from window width on manual maximise", () => {
+    const names = Array.from({ length: 10 }, (_, index) => `cam${index}`);
+    const automatic = new Map<string, StreamKind>();
+    const onAutomatic = (name: string, stream: StreamKind) => { automatic.set(name, stream); };
+    const props = { base: "http://f", cameras: names.map(camera), live: false, editing: false, refresh: 0, onLayout: vi.fn(), onAutomatic };
+    const { rerender, unmount } = render(<Wall {...props} layout={undefined} />);
+    expect(automatic.get("cam4")).toBe("sub");
+
+    // Becoming a large hero or taking over the wall keeps the saved-layout stream.
+    rerender(<Wall {...props} layout={undefined} dynamic={{ kind: "heroes", heroes: ["cam4"] }} />);
+    expect(automatic.get("cam4")).toBe("sub");
+    rerender(<Wall {...props} layout={undefined} dynamic={{ kind: "takeover", camera: "cam4", heroes: ["cam4"] }} />);
+    expect(automatic.get("cam4")).toBe("sub");
+
+    // Manually maximising uses window width and switches Automatic to main.
+    rerender(<Wall {...props} layout={undefined} maximised="cam4" dynamic={{ kind: "takeover", camera: "cam4", heroes: ["cam4"] }} />);
+    expect(automatic.get("cam4")).toBe("main");
+
+    // A tile whose saved layout is already wide enough plays main in overview too.
+    const wide = {
+      tiles: names.map((name, index) => ({ camera: name, x: 0, y: index * 24, w: 24, h: 24 })),
+      hidden: [],
+    };
+    unmount();
+    render(<Wall {...props} layout={wide} />);
+    expect(automatic.get("cam4")).toBe("main");
   });
 
   it("drags and resizes only in Edit layout mode", () => {

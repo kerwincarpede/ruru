@@ -417,7 +417,8 @@ describe("App", () => {
 
   it("shows that it is connecting to Frigate until Frigate answers", async () => {
     let answer: (found: Camera[]) => void = () => {};
-    wall({ frigate_cameras: () => new Promise<Camera[]>((resolve) => (answer = resolve)) });
+    const pending = new Promise<Camera[]>((resolve) => { answer = resolve; });
+    wall({ frigate_cameras: () => pending });
     render(<App />);
     const status = await screen.findByRole("status", { name: "Looking for cameras" });
     expect(status).toHaveTextContent("Asking Frigate at http://frigate:5000");
@@ -1066,7 +1067,7 @@ describe("App streams", () => {
     await act(() => emit("camera-activity", personAt("maingate")));
     expect(maingate).toHaveClass("is-maximised");
     expect(maingate.parentElement).toHaveClass("is-takeover");
-    expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate", "yard_sub"]);
+    expect(FakeSocket.open().sort()).toEqual(["garage_sub", "maingate_sub", "yard_sub"]);
     // Escape puts the takeover away; the camera stays a hero while Frigate sees the person.
     fireEvent.keyDown(window, { key: "Escape" });
     expect(maingate).not.toHaveClass("is-maximised");

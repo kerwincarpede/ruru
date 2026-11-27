@@ -1,13 +1,13 @@
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import "./wall.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import GridLayout from "react-grid-layout";
 import type { Camera } from "../app/frigate";
 import type { Activity, ActivityStyle, SavedLayout } from "../app/api";
-import { heroItems, type WallSize } from "./dynamic";
+import { heroItems, spanWidth, type WallSize } from "./dynamic";
 import type { DynamicView } from "./heroes";
-import { COLUMNS, GAP, ROW_RATIO, fitWidth, fromGridItems, gridRows, hideCamera, rowHeight, toGridItems, wallPlacements, type GridItem } from "./layout";
+import { COLUMNS, GAP, ROW_RATIO, fitWidth, fromGridItems, gridHeight, gridRows, hideCamera, rowHeight, toGridItems, wallPlacements, type GridItem } from "./layout";
 import type { StreamKind } from "./streams";
 import Tile from "./Tile";
 
@@ -95,6 +95,7 @@ export default function Wall({
   onSize,
 }: WallProps) {
   const [box, size] = useSize();
+  const grid = useRef<HTMLDivElement>(null);
   useEffect(() => onSize?.(size), [size, onSize]);
   const names = useMemo(() => cameras.map((camera) => camera.name), [cameras]);
   const items = useMemo(() => toGridItems(wallPlacements(names, layout)), [names, layout]);
@@ -105,12 +106,40 @@ export default function Wall({
   // views only move tiles or draw one over the rest, so every tile stays
   // mounted and keeps playing.
   const view = !open && !editing ? dynamic : undefined;
-  const heroes = view?.kind === "heroes" ? view.heroes : null;
+  const heroes = view?.kind === "heroes" || view?.kind === "takeover" ? (view.heroes.length ? view.heroes : null) : null;
   const moved = useMemo(() => (heroes ? heroItems(items, heroSlots, heroes, size) : null), [heroes, items, heroSlots, size]);
   const shown = moved ?? items;
   const takeover = view?.kind === "takeover" && items.some((item) => item.i === view.camera) ? view.camera : null;
   const full = open ?? takeover;
-  const width = fitToWindow || moved ? fitWidth(size.width, size.height, gridRows(shown)) : size.width;
+  const overviewWidth = fitToWindow ? fitWidth(size.width, size.height, gridRows(items)) : size.width;
+  const overviewHeight = gridHeight(overviewWidth, gridRows(items));
+  const rows = gridRows(shown);
+  const width = moved ? fitWidth(size.width, size.height, rows) : overviewWidth;
+
+  useLayoutEffect(() => {
+    const wall = box.current;
+    const layoutGrid = grid.current;
+    const cell = takeover && layoutGrid?.querySelector<HTMLElement>(".wall-cell.is-takeover");
+    if (!wall || !layoutGrid || !cell) return;
+    const coverWall = () => {
+      const viewport = wall.getBoundingClientRect();
+      const origin = layoutGrid.getBoundingClientRect();
+      cell.style.setProperty("--takeover-left", `${viewport.left + wall.clientLeft - origin.left}px`);
+      cell.style.setProperty("--takeover-top", `${viewport.top + wall.clientTop - origin.top}px`);
+      cell.style.setProperty("--takeover-width", `${wall.clientWidth}px`);
+      cell.style.setProperty("--takeover-height", `${wall.clientHeight}px`);
+    };
+    coverWall();
+    wall.addEventListener("scroll", coverWall);
+    window.addEventListener("resize", coverWall);
+    return () => {
+      wall.removeEventListener("scroll", coverWall);
+      window.removeEventListener("resize", coverWall);
+      for (const name of ["left", "top", "width", "height"]) {
+        cell.style.removeProperty(`--takeover-${name}`);
+      }
+    };
+  }, [box, items, overviewWidth, rows, size, takeover, width]);
 
   useEffect(() => {
     if (!open) return;
@@ -125,9 +154,11 @@ export default function Wall({
   const choiceFor = (camera: Camera) => layout?.tiles.find((tile) => tile.camera === camera.name)?.stream;
 
   return (
-    <div ref={box} className={`wall activity-${activityStyle}${editing ? " is-editing" : ""}${fitToWindow || moved ? " is-fit" : ""}${moved ? " is-dynamic" : ""}`}>
-      <div className="wall-fit" style={fitToWindow || moved ? { width } : undefined}>
+    <div ref={box} className={`wall activity-${activityStyle}${editing ? " is-editing" : ""}${moved ? " is-dynamic" : ""}`}>
+      <div className="wall-fit" style={{ width: overviewWidth, height: overviewHeight }}>
         <GridLayout
+          innerRef={grid}
+          style={{ width }}
           className={lockRatio ? "wall-grid lock-ratio" : "wall-grid"}
           width={width}
           cols={COLUMNS}
@@ -165,6 +196,8 @@ export default function Wall({
                   choice={choiceFor(camera)}
                   live={live}
                   maximised={item.i === full}
+                  takeover={item.i === takeover}
+                  savedWidth={Math.max(0, spanWidth(overviewWidth, item.w))}
                   reconnect={reconnects[camera.name] ?? 0}
                   refresh={refresh}
                   editing={editing}

@@ -1,24 +1,28 @@
-/* The wall fills the space under the toolbar row in Edit layout, and the
-   window only scrolls when the tiles really are taller than it. */
+/* The wall always takes the remaining space under the toolbar row and scrolls
+   its own grid. Keeping its flex and scroll mode constant stops WebKitGTK
+   rebuilding composited video layers when the Dynamic wall switches views.
+   Auto margins centre a fitted grid and still let a taller grid scroll from
+   its top. */
 .wall {
   position: relative;
-  flex: 1 0 auto;
+  display: flex;
+  flex: 1 1 0;
   min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
   background: var(--wall);
 }
 
-/* Fit to window: the wall takes exactly the space left, and the grid,
-   sized to fit it, sits in the middle. Auto margins keep a grid that is
-   still too tall (while dragging) scrollable from its top. */
-.wall.is-fit {
+.wall > .wall-fit {
   display: flex;
-  flex: 1 1 0;
-  overflow: auto;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  margin: auto;
 }
 
-.wall.is-fit > .wall-fit {
+.wall-grid {
   flex: none;
-  margin: auto;
 }
 
 .wall-cell {
@@ -46,14 +50,37 @@
   object-fit: contain;
 }
 
+/* The two video slots share a local stacking context so the front video always
+   paints over a retiring outgoing video regardless of DOM order, while staying
+   under captions, chips and outlines. */
+.tile-videos {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
 /* The snapshot shows until the video plays over it. A tile has a second,
-   hidden video for the stream it is switching to. */
+   hidden video for the stream it is switching to; the outgoing video stays
+   opaque underneath briefly (.is-retiring) while the new layer takes over. */
 .tile-video,
 .tile-freeze {
   opacity: 0;
 }
 
-.tile.is-playing .tile-video.is-front,
+.tile-video {
+  z-index: 0;
+}
+
+.tile-video.is-retiring {
+  z-index: 1;
+  opacity: 1;
+}
+
+.tile.is-playing .tile-video.is-front {
+  z-index: 2;
+  opacity: 1;
+}
+
 .tile-freeze.is-shown {
   opacity: 1;
 }
@@ -78,8 +105,19 @@
   filter: grayscale(0.6) brightness(0.45);
 }
 
-/* The same tile, drawn over the whole window. */
-.tile.is-maximised {
+/* Keep the playing tile and its grid cell in the same positioning mode
+   during takeover. Override only the cell's inline geometry with the
+   visible wall rectangle measured from the grid origin. */
+.wall-cell.is-takeover {
+  left: var(--takeover-left) !important;
+  top: var(--takeover-top) !important;
+  width: var(--takeover-width) !important;
+  height: var(--takeover-height) !important;
+  z-index: 40;
+  border-radius: 0;
+}
+
+.tile.is-maximised:not(.wall-cell.is-takeover > .tile) {
   position: fixed;
   inset: 0;
   z-index: 40;
@@ -405,25 +443,22 @@
   background: var(--alert);
 }
 
+/* Outside Edit layout, tiles jump straight to their places without geometry
+   animation: sliding live video cells hitches the page in WebKitGTK. */
+.wall:not(.is-editing) .react-grid-layout,
+.wall:not(.is-editing) .react-grid-item,
+.wall:not(.is-editing) .wall-cell {
+  transition: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .tile::after {
+  .tile::after,
+  .react-grid-layout,
+  .react-grid-item {
     transition: none;
   }
 
   .wall.activity-caption .tile.is-alert .tile-name::before {
     animation: none;
-  }
-}
-
-/* Dynamic wall: tiles glide to their new places. */
-.wall.is-dynamic .wall-cell,
-.wall-cell.is-hero {
-  transition: left 0.3s ease, top 0.3s ease, width 0.3s ease, height 0.3s ease;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .wall.is-dynamic .wall-cell,
-  .wall-cell.is-hero {
-    transition: none;
   }
 }
