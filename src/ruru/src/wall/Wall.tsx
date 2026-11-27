@@ -1,7 +1,7 @@
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import "./wall.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import GridLayout from "react-grid-layout";
 import type { Camera } from "../app/frigate";
 import type { Activity, ActivityStyle, SavedLayout } from "../app/api";
@@ -95,6 +95,7 @@ export default function Wall({
   onSize,
 }: WallProps) {
   const [box, size] = useSize();
+  const grid = useRef<HTMLDivElement>(null);
   useEffect(() => onSize?.(size), [size, onSize]);
   const names = useMemo(() => cameras.map((camera) => camera.name), [cameras]);
   const items = useMemo(() => toGridItems(wallPlacements(names, layout)), [names, layout]);
@@ -111,7 +112,33 @@ export default function Wall({
   const takeover = view?.kind === "takeover" && items.some((item) => item.i === view.camera) ? view.camera : null;
   const full = open ?? takeover;
   const overviewWidth = fitToWindow ? fitWidth(size.width, size.height, gridRows(items)) : size.width;
-  const width = fitToWindow || moved ? fitWidth(size.width, size.height, gridRows(shown)) : size.width;
+  const rows = gridRows(shown);
+  const width = moved ? fitWidth(size.width, size.height, rows) : overviewWidth;
+
+  useLayoutEffect(() => {
+    const wall = box.current;
+    const layoutGrid = grid.current;
+    const cell = takeover && layoutGrid?.querySelector<HTMLElement>(".wall-cell.is-takeover");
+    if (!wall || !layoutGrid || !cell) return;
+    const coverWall = () => {
+      const viewport = wall.getBoundingClientRect();
+      const origin = layoutGrid.getBoundingClientRect();
+      cell.style.setProperty("--takeover-left", `${viewport.left + wall.clientLeft - origin.left}px`);
+      cell.style.setProperty("--takeover-top", `${viewport.top + wall.clientTop - origin.top}px`);
+      cell.style.setProperty("--takeover-width", `${wall.clientWidth}px`);
+      cell.style.setProperty("--takeover-height", `${wall.clientHeight}px`);
+    };
+    coverWall();
+    wall.addEventListener("scroll", coverWall);
+    window.addEventListener("resize", coverWall);
+    return () => {
+      wall.removeEventListener("scroll", coverWall);
+      window.removeEventListener("resize", coverWall);
+      for (const name of ["left", "top", "width", "height"]) {
+        cell.style.removeProperty(`--takeover-${name}`);
+      }
+    };
+  }, [box, items, overviewWidth, rows, size, takeover, width]);
 
   useEffect(() => {
     if (!open) return;
@@ -127,8 +154,10 @@ export default function Wall({
 
   return (
     <div ref={box} className={`wall activity-${activityStyle}${editing ? " is-editing" : ""}${moved ? " is-dynamic" : ""}`}>
-      <div className="wall-fit" style={fitToWindow || moved ? { width } : undefined}>
+      <div className="wall-fit" style={{ width: overviewWidth }}>
         <GridLayout
+          innerRef={grid}
+          style={{ width }}
           className={lockRatio ? "wall-grid lock-ratio" : "wall-grid"}
           width={width}
           cols={COLUMNS}
