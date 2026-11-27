@@ -5,7 +5,7 @@ import type { Camera } from "../app/frigate";
 import type { GridItem } from "./layout";
 import type { StreamKind } from "./streams";
 import { automaticHeroItems, customHeroItems } from "./dynamic";
-import { fitWidth, gridRows, toGridItems, wallPlacements } from "./layout";
+import { fitWidth, gridHeight, gridRows, toGridItems, wallPlacements } from "./layout";
 import Wall from "./Wall";
 
 type GridProps = {
@@ -107,17 +107,21 @@ describe("Wall", () => {
     expect(wall).not.toHaveClass("is-fit", "is-dynamic", "is-editing");
     expect(fitted.style.width).toBe(`${window.innerWidth}px`);
     expect(grid.props?.width).toBe(window.innerWidth);
+    const overviewHeight = gridHeight(window.innerWidth, gridRows(toGridItems(wallPlacements(names, undefined))));
+    expect(fitted.style.height).toBe(`${overviewHeight}px`);
     rerender(<Wall {...props} layout={undefined} fitToWindow={false} dynamic={{ kind: "heroes", heroes: ["cam4"] }} />);
     expect(wall).not.toHaveClass("is-fit");
     expect(wall).toHaveClass("is-dynamic");
     expect(fitted.style.width).toBe(`${window.innerWidth}px`);
     expect(fitted.firstElementChild).toHaveStyle({ width: `${grid.props?.width}px` });
+    expect(fitted.style.height).toBe(`${overviewHeight}px`);
     rerender(<Wall {...props} layout={undefined} fitToWindow dynamic={{ kind: "overview" }} />);
     expect(wall).not.toHaveClass("is-fit", "is-dynamic");
     const items = toGridItems(wallPlacements(names, undefined));
     const expected = fitWidth(window.innerWidth, window.innerHeight, gridRows(items));
     expect(fitted.style.width).toBe(`${expected}px`);
     expect(grid.props?.width).toBe(expected);
+    expect(fitted.style.height).toBe(`${gridHeight(expected, gridRows(items))}px`);
   });
 
   it("keeps the active hero layout underneath a takeover", () => {

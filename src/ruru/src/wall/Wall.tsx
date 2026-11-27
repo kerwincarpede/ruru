@@ -7,7 +7,7 @@ import type { Camera } from "../app/frigate";
 import type { Activity, ActivityStyle, SavedLayout } from "../app/api";
 import { heroItems, spanWidth, type WallSize } from "./dynamic";
 import type { DynamicView } from "./heroes";
-import { COLUMNS, GAP, ROW_RATIO, fitWidth, fromGridItems, gridRows, hideCamera, rowHeight, toGridItems, wallPlacements, type GridItem } from "./layout";
+import { COLUMNS, GAP, ROW_RATIO, fitWidth, fromGridItems, gridHeight, gridRows, hideCamera, rowHeight, toGridItems, wallPlacements, type GridItem } from "./layout";
 import type { StreamKind } from "./streams";
 import Tile from "./Tile";
 
@@ -112,6 +112,7 @@ export default function Wall({
   const takeover = view?.kind === "takeover" && items.some((item) => item.i === view.camera) ? view.camera : null;
   const full = open ?? takeover;
   const overviewWidth = fitToWindow ? fitWidth(size.width, size.height, gridRows(items)) : size.width;
+  const overviewHeight = gridHeight(overviewWidth, gridRows(items));
   const rows = gridRows(shown);
   const width = moved ? fitWidth(size.width, size.height, rows) : overviewWidth;
 
@@ -154,7 +155,7 @@ export default function Wall({
 
   return (
     <div ref={box} className={`wall activity-${activityStyle}${editing ? " is-editing" : ""}${moved ? " is-dynamic" : ""}`}>
-      <div className="wall-fit" style={{ width: overviewWidth }}>
+      <div className="wall-fit" style={{ width: overviewWidth, height: overviewHeight }}>
         <GridLayout
           innerRef={grid}
           style={{ width }}

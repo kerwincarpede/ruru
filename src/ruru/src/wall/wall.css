@@ -21,6 +21,10 @@
   margin: auto;
 }
 
+.wall-grid {
+  flex: none;
+}
+
 .wall-cell {
   overflow: hidden;
   border-radius: 6px;
