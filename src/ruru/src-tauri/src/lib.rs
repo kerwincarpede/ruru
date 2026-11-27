@@ -8,6 +8,7 @@ pub mod host_controls;
 mod instance;
 mod menu;
 mod mqtt;
+mod playback;
 mod settings;
 mod update;
 mod webview;
@@ -86,6 +87,7 @@ pub fn run() {
             mqtt::save_mqtt,
             mqtt::report_wall_state,
             mqtt::report_tile_problem,
+            playback::report_playback,
             mqtt::camera_activity,
         ])
         .run(tauri::generate_context!())

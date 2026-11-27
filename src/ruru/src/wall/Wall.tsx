@@ -10,6 +10,7 @@ import type { DynamicView } from "./heroes";
 import { COLUMNS, GAP, ROW_RATIO, fitWidth, fromGridItems, gridHeight, gridRows, hideCamera, rowHeight, toGridItems, wallPlacements, type GridItem } from "./layout";
 import type { StreamKind } from "./streams";
 import Tile from "./Tile";
+import { noteViewChange } from "./player";
 
 interface WallProps {
   base: string;
@@ -149,6 +150,10 @@ export default function Wall({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onMaximise]);
+
+  // Equal-sized tiles can move without any resize notification.
+  const placement = JSON.stringify(shown.map(({ i, x, y, w, h }) => [i, x, y, w, h]));
+  useLayoutEffect(noteViewChange, [placement, full, editing, fitToWindow]);
 
   const save = (next: GridItem[]) => onLayout(fromGridItems(next, hidden, layout));
   const choiceFor = (camera: Camera) => layout?.tiles.find((tile) => tile.camera === camera.name)?.stream;

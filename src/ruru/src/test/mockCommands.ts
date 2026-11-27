@@ -2,7 +2,7 @@ import type { InvokeArgs } from "@tauri-apps/api/core";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import type { AppInfo } from "../app/api";
 import type { Camera, FrigateStatus } from "../app/frigate";
-import type { Activity, DynamicWall, HostControlsCredentials, HostControlsStatus, MqttInput, SavedLayout, Settings, UpdateChannel, WallOptions, WallReport } from "../app/api";
+import type { Activity, DynamicWall, HostControlsCredentials, HostControlsStatus, MqttInput, SavedLayout, Settings, StreamPlayback, UpdateChannel, WallOptions, WallReport } from "../app/api";
 
 /** The Rust commands the page can call, by name, typed by hand from src-tauri/src/. */
 type Commands = {
@@ -30,6 +30,7 @@ type Commands = {
   save_mqtt: (args: { input: MqttInput; password: string | null }) => Settings;
   report_wall_state: (args: { report: WallReport }) => null;
   report_tile_problem: (args: { camera: string; problem: boolean }) => null;
+  report_playback: (args: { streams: StreamPlayback[] }) => null;
   camera_activity: () => Activity;
 };
 

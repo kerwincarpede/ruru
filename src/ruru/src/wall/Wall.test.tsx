@@ -7,6 +7,7 @@ import type { StreamKind } from "./streams";
 import { automaticHeroItems, customHeroItems } from "./dynamic";
 import { fitWidth, gridHeight, gridRows, toGridItems, wallPlacements } from "./layout";
 import Wall from "./Wall";
+import { noteViewChange } from "./player";
 
 type GridProps = {
   width: number;
@@ -32,6 +33,8 @@ vi.mock("react-grid-layout", () => ({
     return <div ref={props.innerRef} style={props.style}>{props.children}</div>;
   },
 }));
+
+vi.mock("./player", { spy: true });
 
 const camera = (name: string): Camera => ({ name, enabled: true, mainStream: name, subStream: `${name}_sub` });
 
@@ -241,5 +244,27 @@ describe("Wall", () => {
     });
     grid.props?.onResizeStop([{ i: "a", x: 0, y: 0, w: 6, h: 4 }]);
     expect(onLayout).toHaveBeenLastCalledWith({ tiles: [{ camera: "a", x: 0, y: 0, w: 6, h: 4 }], hidden: ["c"] });
+  });
+
+  it("rests playback when a hero trades positions with an equally sized tile", () => {
+    const props = {
+      base: "http://f", cameras: [camera("a"), camera("b"), camera("c")], live: false, editing: false,
+      refresh: 0, onLayout: vi.fn(), heroSlots: ["a", "c"],
+      layout: { tiles: [
+        { camera: "a", x: 0, y: 0, w: 8, h: 8 },
+        { camera: "b", x: 8, y: 0, w: 8, h: 8 },
+        { camera: "c", x: 16, y: 0, w: 8, h: 8 },
+      ], hidden: [] },
+    };
+    const { rerender } = render(<Wall {...props} />);
+    vi.mocked(noteViewChange).mockClear();
+    rerender(<Wall {...props} dynamic={{ kind: "heroes", heroes: ["b"] }} />);
+    expect(grid.props?.layout).toEqual(expect.arrayContaining([
+      expect.objectContaining({ i: "a", x: 8, w: 8, h: 8 }),
+      expect.objectContaining({ i: "b", x: 0, w: 8, h: 8 }),
+    ]));
+    expect(noteViewChange).toHaveBeenCalledTimes(1);
+    rerender(<Wall {...props} dynamic={{ kind: "heroes", heroes: ["b"] }} />);
+    expect(noteViewChange).toHaveBeenCalledTimes(1);
   });
 });
