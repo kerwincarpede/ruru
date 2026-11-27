@@ -17,6 +17,10 @@ interface TileProps {
   live: boolean;
   /** The tile fills the window. */
   maximised?: boolean;
+  /** True while a Dynamic wall takeover fills the window, so Automatic keeps the saved-layout stream. */
+  takeover?: boolean;
+  /** The tile's width in CSS pixels in the saved overview layout; when given, Automatic uses it instead of measuring the cell. */
+  savedWidth?: number;
   /** Bumped to reconnect the tile's stream. */
   reconnect?: number;
   /** Bumped when cameras are rediscovered, so the snapshot is fetched again. */
@@ -45,6 +49,13 @@ export const PROBLEM_AFTER_MS = 30_000;
  * so the wall never passes off an old picture as the camera's view.
  */
 export const KEEP_FROZEN_MS = 30_000;
+/** How long the outgoing video stays opaque behind the new stream after a handover. */
+export const HANDOVER_RETIRE_MS = 250;
+/** Incoming `requestVideoFrameCallback` frames required before swapping streams in front. */
+const HANDOVER_FRAMES = 2;
+
+const hasVideoFrameCallback = () =>
+  typeof HTMLVideoElement !== "undefined" && typeof HTMLVideoElement.prototype.requestVideoFrameCallback === "function";
 
 /** A player state with a picture on screen. */
 const showing = (state: PlayerState) => state === "playing" || state === "stalled";
@@ -81,19 +92,27 @@ function usePlayer(video: RefObject<HTMLVideoElement | null>, base: string, stre
 }
 
 /**
- * The tile's width in device pixels, for Automatic. The first size counts
- * at once; later ones only once they settle, so resizing a tile does not
- * switch streams on every step. Null until measured.
+ * The tile's width in device pixels, for Automatic. When `savedWidth` is
+ * given, Automatic follows the saved layout instead of the rendered cell so
+ * Dynamic wall hero moves do not switch streams. Otherwise the first measured
+ * size counts at once and later ones wait to settle; null until measured.
  */
-function useDeviceWidth(tile: RefObject<HTMLElement | null>): number | null {
-  const [width, setWidth] = useState<number | null>(() => (typeof ResizeObserver === "undefined" ? 0 : null));
+function useDeviceWidth(tile: RefObject<HTMLElement | null>, savedWidth?: number): number | null {
+  const fixed = savedWidth !== undefined;
+  const [measured, setMeasured] = useState<number | null>(() => (typeof ResizeObserver === "undefined" ? 0 : null));
+  const [, setRatio] = useState(() => window.devicePixelRatio || 1);
   useEffect(() => {
+    if (fixed) {
+      const onResize = () => setRatio(window.devicePixelRatio || 1);
+      window.addEventListener("resize", onResize);
+      return () => window.removeEventListener("resize", onResize);
+    }
     // The grid cell keeps its size while the tile is maximised over the window.
     const element = tile.current?.parentElement ?? tile.current;
     if (!element || typeof ResizeObserver === "undefined") return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let first = true;
-    const measure = () => setWidth(Math.round(element.getBoundingClientRect().width * (window.devicePixelRatio || 1)));
+    const measure = () => setMeasured(Math.round(element.getBoundingClientRect().width * (window.devicePixelRatio || 1)));
     const settle = () => {
       clearTimeout(timer);
       timer = setTimeout(measure, AUTO_SETTLE_MS);
@@ -111,8 +130,8 @@ function useDeviceWidth(tile: RefObject<HTMLElement | null>): number | null {
       observer.disconnect();
       window.removeEventListener("resize", settle);
     };
-  }, [tile]);
-  return width;
+  }, [tile, fixed]);
+  return savedWidth !== undefined ? Math.round(savedWidth * (window.devicePixelRatio || 1)) : measured;
 }
 
 /** The time, updated every second while `active`, and a function to read it now. */
@@ -131,7 +150,7 @@ function useClock(active: boolean) {
   return [now, tick] as const;
 }
 
-type Slots = { front: 0 | 1; streams: [string | null, string | null] };
+type Slots = { front: 0 | 1; streams: [string | null, string | null]; retiring: boolean; handover: number };
 
 /**
  * One camera: its snapshot until the video plays, then the live stream. A
@@ -139,7 +158,7 @@ type Slots = { front: 0 | 1; streams: [string | null, string | null] };
  * frame shows, so the picture never stops moving; a stream the webview
  * cannot decode gives way to the camera's other stream.
  */
-export default function Tile({ base, camera, choice, live, maximised = false, reconnect = 0, refresh = 0, editing = false, streamInfo = false, activity, onOpen, onHide, onAutomatic, onProblem, onPlaying, onReconnecting }: TileProps) {
+export default function Tile({ base, camera, choice, live, maximised = false, takeover = false, savedWidth, reconnect = 0, refresh = 0, editing = false, streamInfo = false, activity, onOpen, onHide, onAutomatic, onProblem, onPlaying, onReconnecting }: TileProps) {
   const figure = useRef<HTMLElement>(null);
   const videoA = useRef<HTMLVideoElement>(null);
   const videoB = useRef<HTMLVideoElement>(null);
@@ -149,9 +168,11 @@ export default function Tile({ base, camera, choice, live, maximised = false, re
   const nameOf = (kind: StreamKind) => (kind === "main" ? camera.mainStream : camera.subStream);
 
   // Automatic: main once the tile is well wider than the sub stream's picture.
-  const measured = useDeviceWidth(figure);
+  // Heroes and takeovers keep the saved-layout stream; manual maximise uses the window width.
+  const manualMaximised = maximised && !takeover;
+  const measured = useDeviceWidth(figure, savedWidth);
   const [subWidth, setSubWidth] = useState(() => knownWidth(base, camera.subStream));
-  const width = maximised ? window.innerWidth * (window.devicePixelRatio || 1) : (measured ?? 0);
+  const width = manualMaximised ? window.innerWidth * (window.devicePixelRatio || 1) : (measured ?? 0);
   const [automatic, setAutomatic] = useState<StreamKind>(() => automaticStream(width, subWidth));
   const nextAutomatic = automaticStream(width, subWidth, automatic);
   if (nextAutomatic !== automatic) setAutomatic(nextAutomatic);
@@ -161,7 +182,7 @@ export default function Tile({ base, camera, choice, live, maximised = false, re
   const other: StreamKind = wanted === "main" ? "sub" : "main";
   const twoStreams = camera.mainStream !== camera.subStream;
   const fallback = twoStreams && isUndecodable(base, nameOf(wanted)) && !isUndecodable(base, nameOf(other));
-  const target = measured === null && !maximised ? null : nameOf(fallback ? other : wanted);
+  const target = measured === null && !manualMaximised ? null : nameOf(fallback ? other : wanted);
 
   // The frozen frame of a stalled or reconnecting stream, and when it last moved.
   const [frozenAt, setFrozenAt] = useState<number | null>(null);
@@ -193,10 +214,25 @@ export default function Tile({ base, camera, choice, live, maximised = false, re
     canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
     canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    // Hardware-decoded video on WebKitGTK can draw a transparent canvas
+    // (alpha === 0); show the owl straight away instead of an empty frame.
+    if (typeof context.getImageData === "function") {
+      try {
+        const alpha = context.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1).data[3];
+        if (alpha === 0) {
+          canvas.width = 0;
+          canvas.height = 0;
+          setFrozen(false);
+          return;
+        }
+      } catch {
+        // A tainted canvas cannot be read back; keep the frame as drawn.
+      }
+    }
     setFrozen(true);
   }, [tick]);
 
-  const [slots, setSlots] = useState<Slots>({ front: 0, streams: [null, null] });
+  const [slots, setSlots] = useState<Slots>({ front: 0, streams: [null, null], retiring: false, handover: 0 });
   const a = usePlayer(videoA, base, slots.streams[0], live, reconnect, (state, player) => onState(0, state, player));
   const b = usePlayer(videoB, base, slots.streams[1], live, reconnect, (state, player) => onState(1, state, player));
   const players = [a, b] as const;
@@ -204,22 +240,77 @@ export default function Tile({ base, camera, choice, live, maximised = false, re
   const frontState = players[slots.front].state;
   const frontStream = slots.streams[slots.front];
   const backStream = slots.streams[back];
-  const set = (frontNext: string | null, backNext: string | null, which = slots.front): Slots => {
+  const [painted, setPainted] = useState<{ handover: number; reconnect: number } | null>(null);
+  const backReady = !hasVideoFrameCallback() || (painted?.handover === slots.handover && painted.reconnect === reconnect);
+  const set = (frontNext: string | null, backNext: string | null, which = slots.front, retiring = false): Slots => {
     const streams: Slots["streams"] = which === 0 ? [frontNext, backNext] : [backNext, frontNext];
-    return { front: which, streams };
+    return { front: which, streams, retiring, handover: slots.handover + 1 };
   };
   let next = slots;
   if (target !== frontStream) {
-    // The stream already starting out of sight takes over once it shows a
-    // frame, or at once when there is no moving picture to keep.
-    if (backStream === target && (players[back].state === "playing" || !live || !showing(frontState))) next = set(target, null, back);
-    else if (!live || !showing(frontState)) next = set(target, null);
-    else if (backStream !== target) next = set(frontStream, target);
-  } else if (backStream !== null) next = set(frontStream, null);
+    // The stream already starting out of sight takes over once two frames have
+    // painted (or once playing where rVFC is missing), keeping the old video
+    // opaque underneath briefly. When nothing is showing, switch at once.
+    if (backStream === target && !slots.retiring && live && showing(frontState) && players[back].state === "playing" && backReady) {
+      next = set(target, frontStream, back, true);
+    } else if (backStream === target && (!live || !showing(frontState))) {
+      next = set(target, null, back, false);
+    } else if (!live || !showing(frontState)) {
+      next = set(target, null, slots.front, false);
+    } else if (backStream !== target || slots.retiring) {
+      next = set(frontStream, target, slots.front, false);
+    }
+  } else if (backStream !== null && (!slots.retiring || !live || !showing(frontState))) {
+    next = set(frontStream, null, slots.front, false);
+  }
   if (next !== slots) setSlots(next);
   useEffect(() => {
     front.current = slots.front;
   }, [slots.front]);
+
+  // Wait for two painted incoming frames before swapping the new stream in front.
+  const incoming = !slots.retiring && backStream !== null && backStream === target && live;
+  const backVideo = back === 0 ? videoA : videoB;
+  useEffect(() => {
+    if (!incoming) return;
+    const video = backVideo.current;
+    if (!video || typeof video.requestVideoFrameCallback !== "function") return;
+    let cancelled = false;
+    let frames = 0;
+    let handle: number | null = null;
+    const handover = slots.handover;
+    const onFrame = () => {
+      handle = null;
+      if (cancelled) return;
+      frames += 1;
+      if (frames >= HANDOVER_FRAMES) {
+        setPainted({ handover, reconnect });
+      } else {
+        handle = video.requestVideoFrameCallback(onFrame);
+      }
+    };
+    handle = video.requestVideoFrameCallback(onFrame);
+    return () => {
+      cancelled = true;
+      if (handle !== null && typeof video.cancelVideoFrameCallback === "function") {
+        video.cancelVideoFrameCallback(handle);
+      }
+    };
+  }, [incoming, backVideo, slots.handover, reconnect]);
+
+  // Keep the outgoing video opaque behind the new front video for HANDOVER_RETIRE_MS,
+  // then tear it down so the freshly promoted layer never flashes through.
+  useEffect(() => {
+    if (!slots.retiring) return;
+    const timer = setTimeout(() => {
+      setSlots((current) => {
+        if (!current.retiring) return current;
+        const streams: Slots["streams"] = current.front === 0 ? [current.streams[0], null] : [null, current.streams[1]];
+        return { front: current.front, streams, retiring: false, handover: current.handover + 1 };
+      });
+    }, HANDOVER_RETIRE_MS);
+    return () => clearTimeout(timer);
+  }, [slots.retiring, slots.front]);
 
   const playing = live && showing(frontState);
   const stale = live && frozenAt !== null && frontState !== "playing" && frontState !== "failed";
@@ -306,19 +397,21 @@ export default function Tile({ base, camera, choice, live, maximised = false, re
           Reconnecting…
         </div>
       )}
-      {([0, 1] as const).map((slot) => (
-        <video
-          key={slot}
-          ref={videos[slot]}
-          className={`tile-video${slot === slots.front ? " is-front" : ""}`}
-          data-stream={slots.streams[slot] ?? undefined}
-          muted
-          playsInline
-          autoPlay
-          onLoadedMetadata={onSize(slot)}
-          onResize={onSize(slot)}
-        />
-      ))}
+      <div className="tile-videos">
+        {([0, 1] as const).map((slot) => (
+          <video
+            key={slot}
+            ref={videos[slot]}
+            className={`tile-video${slot === slots.front ? " is-front" : slots.retiring && slots.streams[slot] !== null ? " is-retiring" : ""}`}
+            data-stream={slots.streams[slot] ?? undefined}
+            muted
+            playsInline
+            autoPlay
+            onLoadedMetadata={onSize(slot)}
+            onResize={onSize(slot)}
+          />
+        ))}
+      </div>
       {streamInfo && live && frontStream && (
         <TileDiagnostics key={`${base}/${frontStream}`} player={players[slots.front].player} video={videos[slots.front]} stream={frontStream} state={frontState} />
       )}

@@ -24,7 +24,7 @@ Most cameras send two streams: a full-size main stream for recording and a small
 
 Right-click a tile that has both to choose which one it plays:
 
-- **Automatic** (the default): the tile plays the sub stream until it is about one and a half times wider, in screen pixels, than the sub stream's picture, and then the main stream. The menu shows which one Automatic is playing, such as **Automatic (Main)**. A maximised tile counts as the width of the window, so on **Automatic** it usually plays the main stream.
+- **Automatic** (the default): the tile plays the sub stream until its saved tile on the wall is about one and a half times wider, in screen pixels, than the sub stream's picture, and then the main stream. The menu shows which one Automatic is playing, such as **Automatic (Main)**. Each tile keeps that stream while the Dynamic wall rearranges heroes or a priority camera takes over, so its picture never restarts. Maximising a tile yourself counts as the width of the window, so on **Automatic** it usually plays the main stream.
 - **Main stream** or **Sub stream**: always play that stream on this tile.
 
 If a stream won't play on your computer, the tile shows the camera's other stream and says so, such as **Main stream can't play · showing sub stream**, without changing your choice.

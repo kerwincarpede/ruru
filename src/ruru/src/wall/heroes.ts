@@ -131,11 +131,11 @@ export function nextExpiry(state: DynamicState, input: DynamicInput): number | n
 export type DynamicView =
   | { kind: "overview" }
   | { kind: "heroes"; heroes: string[] }
-  | { kind: "takeover"; camera: string };
+  | { kind: "takeover"; camera: string; heroes: string[] };
 
-/** The view `state` shows. A takeover pre-empts the heroes, which return after it. */
+/** The view `state` shows. A takeover carries active heroes so the hero layout stays steady underneath it. */
 export function dynamicView(state: DynamicState): DynamicView {
-  if (state.takeover) return { kind: "takeover", camera: state.takeover.camera };
   const heroes = state.heroes.flatMap((pick) => (pick ? [pick.camera] : []));
+  if (state.takeover) return { kind: "takeover", camera: state.takeover.camera, heroes };
   return heroes.length ? { kind: "heroes", heroes } : { kind: "overview" };
 }

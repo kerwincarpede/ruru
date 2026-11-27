@@ -25,9 +25,9 @@ describe("stepDynamic", () => {
     const dog = objects({ dog: 2 });
     const state = stepDynamic(IDLE, { cameras, activity: { yard: dog, drive: car }, priority: [], ignored: ["dog"], now: 0 });
     expect(dynamicView(state)).toEqual({ kind: "heroes", heroes: ["drive"] });
-    // A takeover still needs a person, whatever is left out.
+    // A takeover still needs a person, whatever is left out, and carries empty heroes when none qualify.
     const gate = stepDynamic(IDLE, { cameras, activity: { maingate: person }, priority: ["maingate"], ignored: ["person"], now: 0 });
-    expect(dynamicView(gate)).toEqual({ kind: "takeover", camera: "maingate" });
+    expect(dynamicView(gate)).toEqual({ kind: "takeover", camera: "maingate", heroes: [] });
   });
 
   it("picks two active cameras in wall order and keeps the pair when more arrive", () => {
@@ -65,7 +65,7 @@ describe("stepDynamic", () => {
     expect(dynamicView(state)).toEqual({ kind: "overview" });
     // A priority camera's takeover gets the same grace.
     state = run([[0, { yard: person }], [30_000, {}]], ["yard"]);
-    expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "yard" });
+    expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "yard", heroes: ["yard"] });
     state = run([[30_000 + HERO_GRACE_MS, {}]], ["yard"], state);
     expect(dynamicView(state)).toEqual({ kind: "overview" });
   });
@@ -77,18 +77,18 @@ describe("stepDynamic", () => {
 
   it("lets a person at a priority camera take the wall, breaking ties in wall order", () => {
     const state = run([[0, { yard: person, drive: person, garage: car }]], ["drive", "yard"]);
-    expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "yard" });
+    expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "yard", heroes: ["garage", "yard"] });
     // A person at a camera that is not a priority camera only makes it a hero.
     expect(dynamicView(run([[0, { garage: person }]]))).toEqual({ kind: "heroes", heroes: ["garage"] });
   });
 
   it("holds the current priority camera, then returns to the heroes", () => {
     let state = run([[0, { drive: person }], [9000, { drive: person, yard: person, garage: car }]], ["drive", "yard"]);
-    expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "drive" });
+    expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "drive", heroes: ["drive", "garage"] });
     state = run([[12_000, { yard: person, garage: car }]], ["drive", "yard"], state);
-    expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "drive" });
+    expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "drive", heroes: ["drive", "garage"] });
     state = run([[12_000 + HERO_GRACE_MS, { yard: person, garage: car }]], ["drive", "yard"], state);
-    expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "yard" });
+    expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "yard", heroes: ["yard", "garage"] });
     state = run([[40_000, { garage: car }], [50_000, { garage: car }]], ["drive", "yard"], state);
     expect(dynamicView(state)).toEqual({ kind: "heroes", heroes: ["garage"] });
   });
@@ -107,14 +107,14 @@ describe("stepDynamic", () => {
     expect(dynamicView(state)).toEqual({ kind: "overview" });
     // Once the activity clears, new activity counts again.
     state = run([[3000, {}], [4000, { yard: person }]], ["yard"], state);
-    expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "yard" });
+    expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "yard", heroes: ["yard"] });
   });
 
   it("dismisses every camera busy when Esc is pressed, not only the ones shown", () => {
     const busy = { garage: car, yard: person, drive: person };
     const priority = ["yard", "drive"];
     let state = run([[0, busy]], priority);
-    expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "yard" });
+    expect(dynamicView(state)).toEqual({ kind: "takeover", camera: "yard", heroes: ["garage", "yard"] });
     state = dismissDynamic(state, { cameras, activity: busy, priority });
     // The drive also sees a person, so it does not take over in the yard's place.
     state = run([[1000, busy]], priority, state);

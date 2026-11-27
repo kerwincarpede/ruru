@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { Camera } from "../app/frigate";
 import type { GridItem } from "./layout";
+import type { StreamKind } from "./streams";
 import { automaticHeroItems, customHeroItems } from "./dynamic";
 import { toGridItems, wallPlacements } from "./layout";
 import Wall from "./Wall";
@@ -92,6 +93,69 @@ describe("Wall", () => {
     rerender(<Wall {...props} layout={undefined} />);
     expect(grid.props?.layout).toEqual(saved);
     expect(grid.props?.compactType).toBe("vertical");
+  });
+
+  it("keeps the wall container constant across overview and heroes without toggling is-fit", () => {
+    const names = Array.from({ length: 10 }, (_, index) => `cam${index}`);
+    const props = { base: "http://f", cameras: names.map(camera), live: false, editing: false, refresh: 0, onLayout: vi.fn() };
+    const { rerender } = render(<Wall {...props} layout={undefined} fitToWindow={false} />);
+    const wall = screen.getAllByRole("figure")[0].closest(".wall") as HTMLElement;
+    expect(wall).not.toHaveClass("is-fit", "is-dynamic", "is-editing");
+    rerender(<Wall {...props} layout={undefined} fitToWindow={false} dynamic={{ kind: "heroes", heroes: ["cam4"] }} />);
+    expect(wall).not.toHaveClass("is-fit");
+    expect(wall).toHaveClass("is-dynamic");
+    rerender(<Wall {...props} layout={undefined} fitToWindow dynamic={{ kind: "overview" }} />);
+    expect(wall).not.toHaveClass("is-fit", "is-dynamic");
+  });
+
+  it("keeps the active hero layout underneath a takeover", () => {
+    const names = Array.from({ length: 10 }, (_, index) => `cam${index}`);
+    const size = { width: window.innerWidth, height: window.innerHeight };
+    const props = { base: "http://f", cameras: names.map(camera), live: false, editing: false, refresh: 0, onLayout: vi.fn() };
+    const heroLayout = automaticHeroItems(names, ["cam4", "cam8"], size);
+    const { rerender } = render(<Wall {...props} layout={undefined} dynamic={{ kind: "heroes", heroes: ["cam4", "cam8"] }} />);
+    expect(grid.props?.layout).toEqual(heroLayout);
+
+    rerender(<Wall {...props} layout={undefined} dynamic={{ kind: "takeover", camera: "cam4", heroes: ["cam4", "cam8"] }} />);
+    expect(grid.props?.layout).toEqual(heroLayout);
+    expect(grid.props?.compactType).toBeNull();
+    const cam4 = screen.getByRole("figure", { name: "Cam4" });
+    expect(cam4).toHaveClass("is-maximised");
+    expect(cam4.parentElement).toHaveClass("is-takeover", "is-maximised", "is-hero");
+
+    // A takeover with no active heroes leaves the saved overview layout underneath.
+    rerender(<Wall {...props} layout={undefined} dynamic={{ kind: "takeover", camera: "cam4", heroes: [] }} />);
+    expect(grid.props?.layout).toEqual(toGridItems(wallPlacements(names, undefined)));
+    expect(grid.props?.compactType).toBe("vertical");
+    expect(cam4).toHaveClass("is-maximised");
+    expect(cam4.parentElement).toHaveClass("is-takeover");
+  });
+
+  it("picks Automatic streams from the saved layout during heroes and takeovers, and from window width on manual maximise", () => {
+    const names = Array.from({ length: 10 }, (_, index) => `cam${index}`);
+    const automatic = new Map<string, StreamKind>();
+    const onAutomatic = (name: string, stream: StreamKind) => automatic.set(name, stream);
+    const props = { base: "http://f", cameras: names.map(camera), live: false, editing: false, refresh: 0, onLayout: vi.fn(), onAutomatic };
+    const { rerender } = render(<Wall {...props} layout={undefined} />);
+    expect(automatic.get("cam4")).toBe("sub");
+
+    // Becoming a large hero or taking over the wall keeps the saved-layout stream.
+    rerender(<Wall {...props} layout={undefined} dynamic={{ kind: "heroes", heroes: ["cam4"] }} />);
+    expect(automatic.get("cam4")).toBe("sub");
+    rerender(<Wall {...props} layout={undefined} dynamic={{ kind: "takeover", camera: "cam4", heroes: ["cam4"] }} />);
+    expect(automatic.get("cam4")).toBe("sub");
+
+    // Manually maximising uses window width and switches Automatic to main.
+    rerender(<Wall {...props} layout={undefined} maximised="cam4" dynamic={{ kind: "takeover", camera: "cam4", heroes: ["cam4"] }} />);
+    expect(automatic.get("cam4")).toBe("main");
+
+    // A tile whose saved layout is already wide enough plays main in overview too.
+    const wide = {
+      tiles: names.map((name, index) => ({ camera: name, x: 0, y: index * 24, w: 24, h: 24 })),
+      hidden: [],
+    };
+    rerender(<Wall {...props} layout={wide} fitToWindow={false} maximised={null} />);
+    expect(automatic.get("cam4")).toBe("main");
   });
 
   it("drags and resizes only in Edit layout mode", () => {
