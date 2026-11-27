@@ -187,6 +187,7 @@ describe("supportedMseCodecs", () => {
 
 describe("Go2rtcPlayer", () => {
   let states: PlayerState[];
+  const players: Go2rtcPlayer[] = [];
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -197,6 +198,9 @@ describe("Go2rtcPlayer", () => {
     forgetLags();
     states = [];
     vi.stubGlobal("WebSocket", FakeSocket);
+    // Tests drive the shared animation tracker explicitly when they need a hitch.
+    vi.stubGlobal("requestAnimationFrame", () => 1);
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
     vi.stubGlobal(
       "MediaStream",
       class {
@@ -210,13 +214,17 @@ describe("Go2rtcPlayer", () => {
   });
 
   afterEach(() => {
+    for (const player of players.splice(0)) player.stop();
     forgetPlayback();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
-  const make = (element = video()) =>
-    new Go2rtcPlayer({ base: "https://frigate.test", stream: "garage_sub", video: element, onState: (s) => states.push(s) });
+  const make = (element = video()) => {
+    const player = new Go2rtcPlayer({ base: "https://frigate.test", stream: "garage_sub", video: element, onState: (s) => states.push(s) });
+    players.push(player);
+    return player;
+  };
 
   it("negotiates WebRTC over go2rtc's WebSocket and plays the track", async () => {
     vi.stubGlobal("RTCPeerConnection", FakePeer);
@@ -833,7 +841,7 @@ describe("Go2rtcPlayer", () => {
       update();
     };
     const firstFrame = (mediaTime: number) => frame?.(0, { mediaTime } as VideoFrameCallbackMetadata);
-    return { element, player, update, play, firstFrame };
+    return { element, player, socket, update, play, firstFrame };
   }
   const onTime = (count: number) => Array.from({ length: count }, () => 0.016);
 
@@ -875,15 +883,16 @@ describe("Go2rtcPlayer", () => {
     const interval = 0.1;
     const cap = MAX_LAG_FRAMES * interval;
     const range = { start: 0, end: 5 };
-    const { element, player, firstFrame, update } = lateFrames(() => range);
+    const { element, player, socket, firstFrame, update } = lateFrames(() => range);
     element.currentTime = 5 - TARGET_LAG_S;
     update();
 
     // The decoder's first frame is more than twelve frames behind.
+    for (let n = 0; n < 10; n++) socket.message(new ArrayBuffer(4));
     range.end = 6;
-    firstFrame(4.5);
+    update();
     element.currentTime = 5;
-    firstFrame(4.5 + interval);
+    firstFrame(4.5);
     expect(element.pause).toHaveBeenCalledTimes(1);
     element.paused = true;
     range.end = 5 + cap - 0.01;
@@ -892,6 +901,30 @@ describe("Go2rtcPlayer", () => {
     range.end = 5 + cap + 0.01;
     update();
     expect(element.play).toHaveBeenCalledTimes(1);
+    expect(element.playbackRate).toBe(1);
+    player.stop();
+  });
+
+  it("uses incoming media cadence for the cap when playback drops every second frame", () => {
+    const range = { start: 0, end: 10 };
+    const { element, player, socket, firstFrame, update } = lateFrames(() => range);
+    element.currentTime = range.end - TARGET_LAG_S;
+    update();
+    vi.advanceTimersByTime(VIEW_REST_MS);
+
+    for (let pair = 0; pair < 50; pair++) {
+      socket.message(new ArrayBuffer(4));
+      socket.message(new ArrayBuffer(4));
+      range.end += 0.08;
+      element.currentTime = range.end - TARGET_LAG_S;
+      firstFrame(element.currentTime - 0.016);
+      vi.advanceTimersByTime(80);
+      update();
+    }
+
+    // The displayed cadence suggests a 0.96 s cap; the source delivers
+    // twice as many frames, so even this sustained drop must not raise lag.
+    expect(element.pause).not.toHaveBeenCalled();
     expect(element.playbackRate).toBe(1);
     player.stop();
   });
@@ -966,6 +999,7 @@ describe("Go2rtcPlayer", () => {
     // The play position stood still while the first frames were decoded: playback is really 1 s behind.
     vi.advanceTimersByTime(VIEW_REST_MS);
     range = { start: 5, end: 10.5 };
+    update();
     play([...onTime(17), 0.2, 0.2, 0.2]);
     expect(element.pause).toHaveBeenCalledTimes(1);
     element.paused = true;

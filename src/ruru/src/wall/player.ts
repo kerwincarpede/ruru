@@ -511,13 +511,15 @@ export class Go2rtcPlayer {
     let buffer: SourceBuffer | null = null;
     const queue: ArrayBuffer[] = [];
     let queuedBytes = 0;
+    let appendedFrames = 0;
+    // The initial MP4 header supplies metadata rather than a frame.
+    const isFrame = (chunk: ArrayBuffer) =>
+      chunk.byteLength < 8 || new DataView(chunk).getUint32(4) !== 0x66747970; // ftyp
     let countFrame: number | undefined;
     const listeners = new AbortController();
     let unregisterMse = () => {};
-    let resizeObserver: ResizeObserver | undefined;
     this.disposeMse = () => {
       listeners.abort();
-      resizeObserver?.disconnect();
       unregisterMse();
       counters.close();
       queue.length = 0;
@@ -529,6 +531,7 @@ export class Go2rtcPlayer {
         const chunk = queue.shift()!;
         queuedBytes -= chunk.byteLength;
         buffer.appendBuffer(chunk);
+        if (isFrame(chunk)) appendedFrames++;
       } catch {
         // The element's error, if any, says whether it was a decode error.
         this.retry(generation);
@@ -558,7 +561,7 @@ export class Go2rtcPlayer {
     // further behind, by as much as the late frames needed.
     let extra = extraLags.get(key) ?? 0;
     let frameInterval: number | undefined;
-    let prevMediaTime: number | undefined;
+    let previousBuffer: { end: number; frames: number } | undefined;
     let cleanSince: number | undefined;
     let arrived = 0;
     let shown = 0;
@@ -598,17 +601,6 @@ export class Go2rtcPlayer {
     unregisterMse = registerMse((until) => {
       if (until > countedAt) recount(Math.max(0, until - Date.now()));
     });
-    if (typeof ResizeObserver !== "undefined") {
-      let observedSize: { w: number; h: number } | undefined;
-      resizeObserver = new ResizeObserver(([entry]) => {
-        if (!entry) return;
-        const w = Math.round(entry.contentRect.width);
-        const h = Math.round(entry.contentRect.height);
-        if (observedSize && (observedSize.w !== w || observedSize.h !== h)) noteViewChange();
-        observedSize = { w, h };
-      });
-      resizeObserver.observe(video);
-    }
     const counts = typeof video.requestVideoFrameCallback === "function";
     const count = (_now?: number, frame?: VideoFrameCallbackMetadata) => {
       if (!this.current(generation)) return;
@@ -623,16 +615,6 @@ export class Go2rtcPlayer {
       }
       counters.presented(delta);
       const mediaTime = frame && typeof frame.mediaTime === "number" && Number.isFinite(frame.mediaTime) ? frame.mediaTime : undefined;
-      if (mediaTime !== undefined) {
-        if (prevMediaTime !== undefined && delta > 0) {
-          const dt = (mediaTime - prevMediaTime) / delta;
-          if (dt >= 0.01 && dt <= 1) {
-            frameInterval = frameInterval === undefined ? dt : frameInterval * 0.8 + dt * 0.2;
-            clampExtra();
-          }
-        }
-        prevMediaTime = mediaTime;
-      }
       // Measure first-frame decoder hold-back once playback starts, then seed start lag once frameInterval is known.
       if (!holdBackSeeded && firstHoldBack === undefined && startedLag !== undefined && video.buffered && video.buffered.length > 0) {
         const end = video.buffered.end(video.buffered.length - 1);
@@ -681,6 +663,15 @@ export class Go2rtcPlayer {
     const keepUp = () => {
       if (!buffer || buffer.updating || !video.buffered || video.buffered.length === 0) return;
       const end = video.buffered.end(video.buffered.length - 1);
+      // Use the source's media timeline, so dropped frames and network
+      // bursts do not make a fast stream look like a slower one.
+      if (previousBuffer && appendedFrames > previousBuffer.frames) {
+        const interval = (end - previousBuffer.end) / (appendedFrames - previousBuffer.frames);
+        if (interval >= 0.01 && interval <= 1) {
+          frameInterval = Math.min(frameInterval ?? interval, interval);
+        }
+      }
+      previousBuffer = { end, frames: appendedFrames };
       const keepFrom = end - KEEP_S;
       const first = video.buffered.start(0);
       if (keepFrom - first >= 2) {
@@ -709,9 +700,8 @@ export class Go2rtcPlayer {
       if (Date.now() >= countedAt) closest = Math.min(closest, lag);
       if (Date.now() - countedAt >= SHOWN_CHECK_MS) {
         const elapsedS = (Date.now() - countedAt) / 1000;
-        const effectiveInterval =
-          frameInterval ?? (arrived >= SHOWN_MIN_FRAMES && elapsedS > 0 ? Math.min(1, Math.max(0.01, elapsedS / arrived)) : undefined);
-        const capExtra = clampExtra(effectiveInterval);
+        const incomingInterval = arrived >= SHOWN_MIN_FRAMES ? elapsedS / arrived : undefined;
+        const capExtra = clampExtra(frameInterval ?? incomingInterval);
         holdBackSeeded = true;
         const adaptReady = Date.now() >= lateRestUntil;
         const missingRatio = arrived > 0 ? Math.max(0, 1 - shown / arrived) : 0;
@@ -848,8 +838,7 @@ export class Go2rtcPlayer {
         this.retry(generation);
         return;
       }
-      // The initial MP4 header supplies metadata rather than a frame.
-      if (chunk.byteLength < 8 || new DataView(chunk).getUint32(4) !== 0x66747970 /* ftyp */) {
+      if (isFrame(chunk)) {
         counters.arrived();
         if (Date.now() >= countedAt) arrived++;
       }

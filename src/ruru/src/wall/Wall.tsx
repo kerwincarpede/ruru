@@ -1,7 +1,7 @@
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import "./wall.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import GridLayout from "react-grid-layout";
 import type { Camera } from "../app/frigate";
 import type { Activity, ActivityStyle, SavedLayout } from "../app/api";
@@ -10,6 +10,7 @@ import type { DynamicView } from "./heroes";
 import { COLUMNS, GAP, ROW_RATIO, fitWidth, fromGridItems, gridRows, hideCamera, rowHeight, toGridItems, wallPlacements, type GridItem } from "./layout";
 import type { StreamKind } from "./streams";
 import Tile from "./Tile";
+import { noteViewChange } from "./player";
 
 interface WallProps {
   base: string;
@@ -120,6 +121,10 @@ export default function Wall({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onMaximise]);
+
+  // Equal-sized tiles can move without any resize notification.
+  const placement = JSON.stringify(shown.map(({ i, x, y, w, h }) => [i, x, y, w, h]));
+  useLayoutEffect(noteViewChange, [placement, full, editing, fitToWindow]);
 
   const save = (next: GridItem[]) => onLayout(fromGridItems(next, hidden, layout));
   const choiceFor = (camera: Camera) => layout?.tiles.find((tile) => tile.camera === camera.name)?.stream;

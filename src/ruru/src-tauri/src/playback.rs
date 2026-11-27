@@ -1,11 +1,14 @@
 //! Local MSE playback counters for tracking stalls and late frames.
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::settings::MAX_TILES;
 
+// systemd-journald's default maximum stderr stream record size, including newline.
+const JOURNAL_LINE_BYTES: usize = 48 * 1024;
+
 /// One minute of counters for a stream. Mirrors `StreamPlayback` in src/app/api.ts.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StreamPlayback {
     connections: u32,
@@ -43,8 +46,33 @@ fn journal_line(streams: &[StreamPlayback]) -> Result<String, String> {
     }) {
         return Err("Invalid playback lag.".into());
     }
-    let data = serde_json::to_string(streams).map_err(|error| error.to_string())?;
-    Ok(format!("Ruru playback {data}"))
+    // Keep field names out of each row so a whole wall switching streams fits
+    // in one line. The schema and order are documented with the investigation.
+    let rows: Vec<_> = streams
+        .iter()
+        .map(|stream| {
+            (
+                stream.connections,
+                stream.pauses_start,
+                stream.pauses_late,
+                stream.pauses_missing,
+                stream.pauses_close,
+                stream.skips,
+                stream.arrived,
+                stream.presented,
+                stream.late,
+                stream.worst_late_ms,
+                stream.lag_s,
+                stream.lag_frames,
+            )
+        })
+        .collect();
+    let data = serde_json::to_string(&rows).map_err(|error| error.to_string())?;
+    let line = format!("Ruru playback {data}");
+    if line.len() >= JOURNAL_LINE_BYTES {
+        return Err("Playback report exceeds the journal line limit.".into());
+    }
+    Ok(line)
 }
 
 #[cfg(test)]
@@ -65,9 +93,21 @@ mod tests {
         assert_eq!(line.lines().count(), 1);
         let data: serde_json::Value = serde_json::from_str(payload).unwrap();
         assert_eq!(data.as_array().unwrap().len(), 2);
-        assert_eq!(data[0]["pausesMissing"], 4);
-        assert_eq!(data[1]["lagFrames"], 12.5);
-        assert!(data[0].as_object().unwrap().values().all(|x| x.is_number()));
+        assert_eq!(data[0][3], 4);
+        assert_eq!(data[1][11], 12.5);
+        assert!(data[0].as_array().unwrap().iter().all(|x| x.is_number()));
+    }
+
+    #[test]
+    fn a_whole_wall_switch_fits_on_one_journal_line() {
+        let mut stream = counters();
+        stream.arrived = 7_200;
+        stream.presented = 7_199;
+        let line = journal_line(&vec![stream; MAX_TILES * 2]).unwrap();
+        assert!(line.len() < JOURNAL_LINE_BYTES);
+        let rows: Vec<Vec<f64>> =
+            serde_json::from_str(line.strip_prefix("Ruru playback ").unwrap()).unwrap();
+        assert_eq!(rows.len(), MAX_TILES * 2);
     }
 
     #[test]
