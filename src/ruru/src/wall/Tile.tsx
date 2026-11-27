@@ -94,13 +94,20 @@ function usePlayer(video: RefObject<HTMLVideoElement | null>, base: string, stre
 /**
  * The tile's width in device pixels, for Automatic. When `savedWidth` is
  * given, Automatic follows the saved layout instead of the rendered cell so
- * Dynamic wall hero moves do not switch streams. Otherwise the first measured
- * size counts at once and later ones wait to settle; null until measured.
+ * Dynamic wall hero moves do not switch streams. The first width counts at
+ * once and later changes wait to settle; null until measured.
  */
 function useDeviceWidth(tile: RefObject<HTMLElement | null>, savedWidth?: number): number | null {
   const fixed = savedWidth !== undefined;
   const [measured, setMeasured] = useState<number | null>(() => (typeof ResizeObserver === "undefined" ? 0 : null));
-  const [, setRatio] = useState(() => window.devicePixelRatio || 1);
+  const [ratio, setRatio] = useState(() => window.devicePixelRatio || 1);
+  const desiredWidth = savedWidth === undefined ? null : Math.round(savedWidth * ratio);
+  const [settledWidth, setSettledWidth] = useState(desiredWidth);
+  useEffect(() => {
+    if (desiredWidth === settledWidth) return;
+    const timer = setTimeout(() => setSettledWidth(desiredWidth), AUTO_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [desiredWidth, settledWidth]);
   useEffect(() => {
     if (fixed) {
       const onResize = () => setRatio(window.devicePixelRatio || 1);
@@ -131,7 +138,7 @@ function useDeviceWidth(tile: RefObject<HTMLElement | null>, savedWidth?: number
       window.removeEventListener("resize", settle);
     };
   }, [tile, fixed]);
-  return savedWidth !== undefined ? Math.round(savedWidth * (window.devicePixelRatio || 1)) : measured;
+  return fixed ? (settledWidth ?? desiredWidth) : measured;
 }
 
 /** The time, updated every second while `active`, and a function to read it now. */
@@ -176,7 +183,7 @@ export default function Tile({ base, camera, choice, live, maximised = false, ta
   const [automatic, setAutomatic] = useState<StreamKind>(() => automaticStream(width, subWidth));
   const nextAutomatic = automaticStream(width, subWidth, automatic);
   if (nextAutomatic !== automatic) setAutomatic(nextAutomatic);
-  useEffect(() => onAutomatic?.(automatic), [automatic, onAutomatic]);
+  useEffect(() => { onAutomatic?.(automatic); }, [automatic, onAutomatic]);
 
   const wanted = choice ?? automatic;
   const other: StreamKind = wanted === "main" ? "sub" : "main";

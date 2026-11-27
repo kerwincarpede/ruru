@@ -246,10 +246,25 @@ describe("Tile", () => {
     // Manual maximise uses the window width and switches Automatic to main.
     rerender(<Tile base={base} camera={camera} live maximised savedWidth={400} onAutomatic={onAutomatic} />);
     expect(onAutomatic).toHaveBeenLastCalledWith("main");
+  });
 
-    // A tile whose saved layout is already wide chooses main without waiting for ResizeObserver.
-    rerender(<Tile base={base} camera={camera} live savedWidth={1000} onAutomatic={onAutomatic} />);
+  it("waits for the saved-layout width to settle before switching Automatic streams", () => {
+    const onAutomatic = vi.fn();
+    const props = { base, camera, live: true, onAutomatic };
+    const { rerender } = render(<Tile {...props} savedWidth={400} />);
+    expect(FakeSocket.open()).toEqual(["cam_sub"]);
+
+    rerender(<Tile {...props} savedWidth={1000} />);
+    act(() => vi.advanceTimersByTime(AUTO_SETTLE_MS - 1));
+    expect(FakeSocket.open()).toEqual(["cam_sub"]);
+    rerender(<Tile {...props} savedWidth={400} />);
+    act(() => vi.advanceTimersByTime(AUTO_SETTLE_MS));
+    expect(FakeSocket.open()).toEqual(["cam_sub"]);
+
+    rerender(<Tile {...props} savedWidth={1000} />);
+    act(() => vi.advanceTimersByTime(AUTO_SETTLE_MS));
     expect(onAutomatic).toHaveBeenLastCalledWith("main");
+    expect(FakeSocket.open()).toEqual(["cam"]);
   });
 
   it("dims a frozen picture and says how old it is", () => {

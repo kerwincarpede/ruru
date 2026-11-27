@@ -134,9 +134,9 @@ describe("Wall", () => {
   it("picks Automatic streams from the saved layout during heroes and takeovers, and from window width on manual maximise", () => {
     const names = Array.from({ length: 10 }, (_, index) => `cam${index}`);
     const automatic = new Map<string, StreamKind>();
-    const onAutomatic = (name: string, stream: StreamKind) => automatic.set(name, stream);
+    const onAutomatic = (name: string, stream: StreamKind) => { automatic.set(name, stream); };
     const props = { base: "http://f", cameras: names.map(camera), live: false, editing: false, refresh: 0, onLayout: vi.fn(), onAutomatic };
-    const { rerender } = render(<Wall {...props} layout={undefined} />);
+    const { rerender, unmount } = render(<Wall {...props} layout={undefined} />);
     expect(automatic.get("cam4")).toBe("sub");
 
     // Becoming a large hero or taking over the wall keeps the saved-layout stream.
@@ -154,7 +154,8 @@ describe("Wall", () => {
       tiles: names.map((name, index) => ({ camera: name, x: 0, y: index * 24, w: 24, h: 24 })),
       hidden: [],
     };
-    rerender(<Wall {...props} layout={wide} fitToWindow={false} maximised={null} />);
+    unmount();
+    render(<Wall {...props} layout={wide} />);
     expect(automatic.get("cam4")).toBe("main");
   });
 
